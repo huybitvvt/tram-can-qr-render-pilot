@@ -42,11 +42,13 @@ from .capture_gate import frame_fingerprint
 from .api_client import (
     fetch_remote_json,
     fetch_remote_measurement_page,
+    fetch_remote_weigh_batches,
     fetch_supabase_photo_drafts,
     fetch_supabase_rows,
     fetch_supabase_table,
     fetch_supabase_table_count,
     mutate_remote_measurement,
+    post_remote_action,
     persist_product_evidence,
     sign_storage_image,
 )
@@ -426,6 +428,17 @@ def _item_source_date(item: dict[str, object]) -> str:
         else str(item.get("weight_raw") or "")
     )
     return _item_work_date(str(item.get("captured_at") or ""), raw)
+
+
+def _item_error_status(item: dict[str, object]) -> str:
+    value = _item_source_value(item, "error_status", "ERROR_STATUS").lower()
+    return "error" if value == "error" else "ok"
+
+
+def _item_error_reason(item: dict[str, object]) -> str:
+    if _item_error_status(item) != "error":
+        return ""
+    return _item_source_value(item, "error_reason", "ERROR_REASON")[:500]
 
 
 def _project_root() -> Path:
@@ -1039,6 +1052,8 @@ def _local_measurement_items(
             "production_order": _item_source_value(
                 source_item, "production_order", "SOURCE_PRODUCTION_ORDER"
             ),
+            "error_status": _item_error_status(source_item),
+            "error_reason": _item_error_reason(source_item),
             "sync_status": item.sync_status,
             "sync_error": item.sync_error,
             "core_image_url": core_url,
@@ -1105,6 +1120,8 @@ def _photo_draft_display_items(
                 "has_core_image": False,
                 "has_product_image": False,
                 "error_only": True,
+                "error_status": "error",
+                "error_reason": "AI chưa đọc được số cân",
                 "record_note": "Ảnh đã lưu · AI chưa đọc được số cân",
             },
         )
@@ -1475,8 +1492,22 @@ def _persist_measurement_edit(
     shift: str = "",
     machine: str = "",
     production_order: str = "",
+    error_status: str = "",
+    error_reason: str = "",
     weight_raw: str = "",
 ) -> dict[str, object]:
+    selected_error_status = str(error_status or "").strip().lower()
+    if selected_error_status not in {"ok", "error"}:
+        selected_error_status = (
+            "error" if _raw_tag(weight_raw, "ERROR_STATUS").lower() == "error" else "ok"
+        )
+    selected_error_reason = (
+        str(error_reason or _raw_tag(weight_raw, "ERROR_REASON")).strip()[:500]
+        if selected_error_status == "error"
+        else ""
+    )
+    error_status = selected_error_status
+    error_reason = selected_error_reason
     remote_item: dict[str, object] | None = None
     cloud_error = ""
     ingest_url = _ingest_api_url()
@@ -1496,6 +1527,8 @@ def _persist_measurement_edit(
                     "shift": shift,
                     "machine": machine,
                     "production_order": production_order,
+                    "error_status": error_status,
+                    "error_reason": error_reason,
                 },
             )
             item = remote.get("item")
@@ -1516,6 +1549,12 @@ def _persist_measurement_edit(
                 persist_raw, "SOURCE_PRODUCTION_ORDER", production_order
             )
         persist_raw = _upsert_raw_tag(persist_raw, "PRODUCT_WEIGHT", f"{product_weight:g}")
+    persist_raw = _upsert_raw_tag(persist_raw, "ERROR_STATUS", error_status)
+    persist_raw = _upsert_raw_tag(
+        persist_raw,
+        "ERROR_REASON",
+        error_reason if error_status == "error" else "",
+    )
     local_item = None
     try:
         local_item = store.update_measurement_fields(
@@ -1546,6 +1585,8 @@ def _persist_measurement_edit(
             "shift": shift,
             "machine": machine,
             "production_order": production_order,
+            "error_status": error_status,
+            "error_reason": error_reason,
             "weight_raw": persist_raw,
         },
     }
@@ -4215,6 +4256,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "production_order",
                             "SOURCE_PRODUCTION_ORDER",
                         ),
+                        "error_status": _item_error_status(item),
+                        "error_reason": _item_error_reason(item),
                         "sync_status": "synced",
                         "sync_error": None,
                         "core_image_url": core_url,
@@ -4296,6 +4339,60 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         "count_error": count_error or None,
                         "items": items,
                     },
+                )
+                return
+            if parsed.path == "/api/weighing-batches":
+                query = urllib.parse.parse_qs(parsed.query)
+                ingest_url = _ingest_api_url()
+                ingest_token = _ingest_api_token()
+                if not ingest_url or not ingest_token:
+                    self.send_json(
+                        503,
+                        {
+                            "ok": False,
+                            "error": "supabase_not_configured",
+                            "message": "Chưa cấu hình Supabase để đọc bảng ca_can",
+                        },
+                    )
+                    return
+                try:
+                    items = fetch_remote_weigh_batches(
+                        ingest_url,
+                        ingest_token,
+                        work_date=str(query.get("work_date", [""])[0]).strip(),
+                        shift=str(query.get("shift", [""])[0]).strip(),
+                        machine=str(query.get("machine", [""])[0]).strip(),
+                        production_order=str(
+                            query.get("production_order", [""])[0]
+                        ).strip(),
+                        limit=max(
+                            1,
+                            min(int(query.get("limit", ["50"])[0]), 200),
+                        ),
+                    )
+                except (TypeError, ValueError):
+                    self.send_json(
+                        422,
+                        {
+                            "ok": False,
+                            "error": "invalid_input",
+                            "message": "Giới hạn danh sách đợt cân không hợp lệ",
+                        },
+                    )
+                    return
+                except Exception as exc:
+                    self.send_json(
+                        502,
+                        {
+                            "ok": False,
+                            "error": "weighing_batch_list_failed",
+                            "message": str(exc),
+                        },
+                    )
+                    return
+                self.send_json(
+                    200,
+                    {"ok": True, "source": "ca_can", "items": items},
                 )
                 return
             if parsed.path == "/api/inventory-checks":
@@ -4409,6 +4506,44 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             try:
                 payload = self.read_json()
+                if self.path == "/api/weighing-batches/confirm":
+                    work_date = str(payload.get("work_date") or "").strip()
+                    shift = str(payload.get("shift") or "").strip()
+                    machine = str(payload.get("machine") or "").strip()
+                    production_order = str(
+                        payload.get("production_order") or ""
+                    ).strip()
+                    try:
+                        milestone = int(payload.get("milestone"))
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("Mốc xác nhận không hợp lệ") from exc
+                    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
+                        raise ValueError("Ngày cân không hợp lệ")
+                    if not shift:
+                        raise ValueError("Thiếu ca cân")
+                    if not production_order:
+                        raise ValueError("Thiếu Lệnh sản xuất")
+                    if milestone < 10 or milestone % 10:
+                        raise ValueError("Chỉ xác nhận theo từng nhóm đủ 10 cuộn")
+                    ingest_url = _ingest_api_url()
+                    ingest_token = _ingest_api_token()
+                    if not ingest_url or not ingest_token:
+                        raise ValueError("Chưa cấu hình Supabase để ghi bảng ca_can")
+                    result = post_remote_action(
+                        ingest_url,
+                        ingest_token,
+                        body={
+                            "action": "confirm_weighing_batch",
+                            "work_date": work_date,
+                            "shift": shift[:80],
+                            "machine": machine[:80],
+                            "production_order": production_order[:80],
+                            "milestone": milestone,
+                            "confirmed_by": (web_username or "operator")[:120],
+                        },
+                    )
+                    self.send_json(200, result)
+                    return
                 if self.path == "/api/session/discard":
                     discarded = service.discard_session(
                         str(payload.get("station_id", "")),
@@ -4459,6 +4594,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     shift = str(payload.get("shift") or "").strip()
                     machine = str(payload.get("machine") or "").strip()
                     production_order = str(payload.get("production_order") or "").strip()
+                    error_status = str(payload.get("error_status") or "ok").strip().lower()
+                    error_reason = str(payload.get("error_reason") or "").strip()[:500]
                     try:
                         core_weight = float(payload.get("core_weight"))
                         product_weight = float(payload.get("product_weight"))
@@ -4474,6 +4611,12 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         raise ValueError(
                             "Cân lõi phải ≤ cân SP (ràng buộc DB: tare ≤ weight)"
                         )
+                    if error_status not in {"ok", "error"}:
+                        raise ValueError("Trạng thái lỗi không hợp lệ")
+                    if error_status == "error" and not error_reason:
+                        raise ValueError("Thiếu Lý do lỗi")
+                    if error_status == "ok":
+                        error_reason = ""
                     self.send_json(
                         200,
                         _persist_measurement_edit(
@@ -4486,6 +4629,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             shift=shift,
                             machine=machine,
                             production_order=production_order,
+                            error_status=error_status,
+                            error_reason=error_reason,
                         ),
                     )
                     return

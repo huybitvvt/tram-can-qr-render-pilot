@@ -2251,12 +2251,11 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
 
 def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert 'id="roundCount"' in TEST_UI_HTML
-    assert 'id="addRoundBtn"' in TEST_UI_HTML
     assert 'id="evidenceRounds"' in TEST_UI_HTML
     assert 'id="weight2"' in TEST_UI_HTML
     assert 'id="productWeight2"' in TEST_UI_HTML
-    assert "DEFAULT_WEIGH_ROUNDS=2" in TEST_UI_HTML
-    assert "MAX_WEIGH_ROUNDS=4" in TEST_UI_HTML
+    assert "DEFAULT_WEIGH_ROUNDS=3" in TEST_UI_HTML
+    assert "MAX_WEIGH_ROUNDS=3" in TEST_UI_HTML
     assert "function nextCaptureStep(" in TEST_UI_HTML
     assert "function extraRoundTags(" in TEST_UI_HTML
     assert "function discardSlot(" in TEST_UI_HTML
@@ -2273,7 +2272,6 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "session.eventId&&(retryingFailedCore||session.coreAnalysis&&session.analysisId)" in TEST_UI_HTML
     assert "if(targetRound===0)" in TEST_UI_HTML
     assert "capture_kind:targetRound>0?'product':kind" in TEST_UI_HTML
-    assert "$('addRoundBtn').addEventListener('click'" in TEST_UI_HTML
     assert 'id="captureQr2"' in TEST_UI_HTML
     assert "Mã QR lần 1" in TEST_UI_HTML
     assert "Mã QR lần 2" in TEST_UI_HTML
@@ -2289,6 +2287,21 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "function selectCaptureSlot(" in TEST_UI_HTML
     assert "function captureSlot(" in TEST_UI_HTML
     assert "dataset.captureKind" in TEST_UI_HTML
+
+
+def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> None:
+    assert 'id="errorStatus1"' in TEST_UI_HTML
+    assert 'id="errorReason1"' in TEST_UI_HTML
+    assert "ERROR_STATUS=" in TEST_UI_HTML
+    assert "ERROR_REASON=" in TEST_UI_HTML
+    assert "Lý do lỗi trước khi lưu" in TEST_UI_HTML
+    assert 'id="weighBatchRecordsCard"' in TEST_UI_HTML
+    assert 'id="printSheet"' in TEST_UI_HTML
+    assert "function printWeighBatch" in TEST_UI_HTML
+    assert "/api/weighing-batches/confirm" in TEST_UI_HTML
+    assert "Đang tạo đợt cân trong bảng ca_can" in TEST_UI_HTML
+    assert "writeRollBatchConfirmed(0)" in TEST_UI_HTML
+    assert "confirmed+ROLL_BATCH_SIZE" in TEST_UI_HTML
 
 
 def test_ui_buttons_start_once_and_show_immediate_press_feedback() -> None:

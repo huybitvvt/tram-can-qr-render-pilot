@@ -103,6 +103,19 @@ def mutate_remote_measurement(
     body = {"action": action, "event_id": str(event_id).strip()}
     if payload:
         body.update(payload)
+    return post_remote_action(url, token, body=body, timeout=timeout)
+
+
+def post_remote_action(
+    url: str,
+    token: str,
+    *,
+    body: dict[str, object],
+    timeout: float = 30.0,
+) -> dict[str, object]:
+    """Post a non-image command to the authenticated ingest Edge Function."""
+
+    action = str(body.get("action") or "remote_action")
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
@@ -134,6 +147,36 @@ def mutate_remote_measurement(
             message = f"{message}: {detail_text}"
         raise RuntimeError(message)
     return parsed
+
+
+def fetch_remote_weigh_batches(
+    url: str,
+    token: str,
+    *,
+    work_date: str = "",
+    shift: str = "",
+    machine: str = "",
+    production_order: str = "",
+    limit: int = 50,
+    timeout: float = 15.0,
+) -> list[dict[str, object]]:
+    params: dict[str, object] = {
+        "action": "weighing-batches",
+        "limit": max(1, min(int(limit), 200)),
+    }
+    for field, value in (
+        ("work_date", work_date),
+        ("shift", shift),
+        ("machine", machine),
+        ("production_order", production_order),
+    ):
+        selected = str(value or "").strip()
+        if selected:
+            params[field] = selected
+    parsed = fetch_remote_json(url, token, params=params, timeout=timeout)
+    if parsed.get("ok") is not True or not isinstance(parsed.get("items"), list):
+        raise RuntimeError("Supabase ca_can response is invalid")
+    return [item for item in parsed["items"] if isinstance(item, dict)]
 
 
 def fetch_supabase_rows(
@@ -184,7 +227,7 @@ def fetch_supabase_table(
         "select": (
             "id,event_id,image_url,core_image_url,product_image_url,"
             "product_image_path,qr_code,weight,tare_weight,net_weight,unit,"
-            "captured_at,metadata"
+            "captured_at,error_status,error_reason,metadata"
         ),
         "order": "captured_at.desc",
         "limit": max(1, min(limit, 200)),

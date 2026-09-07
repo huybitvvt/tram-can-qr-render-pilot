@@ -19,6 +19,13 @@ PARENT_EVENT_MIGRATION = (
     / "migrations"
     / "20260824170000_photo_draft_parent_event.sql"
 ).read_text(encoding="utf-8")
+WEIGH_BATCH_MIGRATION = (
+    ROOT
+    / "backend"
+    / "supabase"
+    / "migrations"
+    / "20260907010000_ca_can_and_measurement_errors.sql"
+).read_text(encoding="utf-8")
 
 
 def test_photo_draft_table_keeps_weight_data_truly_empty() -> None:
@@ -58,3 +65,14 @@ def test_photo_draft_is_linked_to_weigh_event_and_slot() -> None:
     assert "capture_round integer" in lowered
     assert "anh_can_cho_ai_parent_event_idx" in lowered
     assert "parent_event_id: parenteventid" in FUNCTION.lower()
+
+
+def test_every_ten_roll_batch_is_persisted_and_must_be_confirmed_in_order() -> None:
+    lowered = WEIGH_BATCH_MIGRATION.lower()
+    assert "create table if not exists public.ca_can" in lowered
+    assert "moc_so_luong = dot_can * 10" in lowered
+    assert "so_luong = 10" in lowered
+    assert "danh_sach_san_pham jsonb" in lowered
+    assert 'if (body.action === "confirm_weighing_batch")' in FUNCTION
+    assert 'error: "previous_weighing_batch_not_confirmed"' in FUNCTION
+    assert ".slice(offset, offset + 10)" in FUNCTION

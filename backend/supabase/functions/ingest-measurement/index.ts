@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const UNITS = new Set(["kg", "g", "lb"]);
 const MEASUREMENT_TABLE = "can_tu_dong";
+const WEIGH_BATCH_TABLE = "ca_can";
 const INVENTORY_TABLE = "can_kiem_kho";
 const PHOTO_DRAFT_TABLE = "anh_can_cho_ai";
 const SECRET_TABLE = "roll_scale_secrets";
@@ -18,10 +19,10 @@ const EVENT_SELECT =
   "id,event_id,image_path,image_url,image_public_id,core_image_path,core_image_url," +
   "core_image_public_id,product_image_path,product_image_url,product_image_public_id,qr_code,weight,tare_weight,net_weight,unit,captured_at," +
   "device_id,gateway_id,station_id,camera_id,analysis_id,frame_sha256,payload_hash," +
-  "weight_source,qr_source,metadata";
+  "weight_source,qr_source,error_status,error_reason,metadata";
 const EVENT_LIST_SELECT =
   "id,event_id,image_url,core_image_url,product_image_url,product_image_path," +
-  "qr_code,weight,tare_weight,net_weight,unit,captured_at,metadata";
+  "qr_code,weight,tare_weight,net_weight,unit,captured_at,error_status,error_reason,metadata";
 
 function json(status: number, body: Record<string, unknown>): Response {
   return new Response(JSON.stringify(body), {
@@ -229,6 +230,48 @@ Deno.serve(async (request: Request) => {
       ok: true,
       found: Boolean(data),
       encrypted_value: data?.encrypted_value ?? null,
+    });
+  }
+
+  if (request.method === "GET" && action === "weighing-batches") {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = getSupabaseAdminKey();
+    if (!supabaseUrl || !serviceKey) {
+      return json(500, { ok: false, error: "supabase_not_configured" });
+    }
+    const workDate = (requestUrl.searchParams.get("work_date") ?? "").trim();
+    const shift = (requestUrl.searchParams.get("shift") ?? "").trim();
+    const machine = (requestUrl.searchParams.get("machine") ?? "").trim();
+    const productionOrder = (requestUrl.searchParams.get("production_order") ?? "").trim();
+    const requestedLimit = Number(requestUrl.searchParams.get("limit") ?? "50");
+    const limit = Number.isInteger(requestedLimit)
+      ? Math.max(1, Math.min(requestedLimit, 200))
+      : 50;
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    let query = supabase
+      .from(WEIGH_BATCH_TABLE)
+      .select("*")
+      .eq("trang_thai", "confirmed")
+      .order("xac_nhan_luc", { ascending: false })
+      .limit(limit);
+    if (workDate) query = query.eq("ngay_can", workDate);
+    if (shift) query = query.eq("ca", shift);
+    if (machine) query = query.eq("may", machine);
+    if (productionOrder) query = query.eq("lenh_san_xuat", productionOrder);
+    const { data, error } = await query;
+    if (error) {
+      return json(500, {
+        ok: false,
+        error: "weighing_batch_list_failed",
+        detail: error.message,
+      });
+    }
+    return json(200, {
+      ok: true,
+      source: WEIGH_BATCH_TABLE,
+      items: data ?? [],
     });
   }
 
@@ -536,6 +579,230 @@ Deno.serve(async (request: Request) => {
     return json(400, { ok: false, error: "invalid_json" });
   }
 
+  if (body.action === "confirm_weighing_batch") {
+    const workDate = typeof body.work_date === "string" ? body.work_date.trim() : "";
+    const shift = typeof body.shift === "string" ? body.shift.trim().slice(0, 80) : "";
+    const machine = typeof body.machine === "string" ? body.machine.trim().slice(0, 80) : "";
+    const productionOrder = typeof body.production_order === "string"
+      ? body.production_order.trim().slice(0, 80)
+      : "";
+    const confirmedBy = typeof body.confirmed_by === "string"
+      ? body.confirmed_by.trim().slice(0, 120)
+      : "";
+    const milestone = Number(body.milestone);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate) || Number.isNaN(Date.parse(`${workDate}T00:00:00Z`))) {
+      return json(422, { ok: false, error: "invalid_work_date" });
+    }
+    if (!shift || !productionOrder) {
+      return json(422, { ok: false, error: "missing_weighing_source" });
+    }
+    if (!Number.isInteger(milestone) || milestone < 10 || milestone % 10 !== 0) {
+      return json(422, { ok: false, error: "invalid_weighing_milestone" });
+    }
+    const batchNumber = milestone / 10;
+    const batchKey = [workDate, shift, machine, productionOrder, batchNumber].join("|");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = getSupabaseAdminKey();
+    if (!supabaseUrl || !serviceKey) {
+      return json(500, { ok: false, error: "supabase_not_configured" });
+    }
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: existingBatch, error: existingError } = await supabase
+      .from(WEIGH_BATCH_TABLE)
+      .select("*")
+      .eq("batch_key", batchKey)
+      .maybeSingle();
+    if (existingError) {
+      return json(500, {
+        ok: false,
+        error: "weighing_batch_lookup_failed",
+        detail: existingError.message,
+      });
+    }
+    if (existingBatch) {
+      return json(200, { ok: true, duplicate: true, item: existingBatch });
+    }
+    if (batchNumber > 1) {
+      const previousBatchKey = [
+        workDate,
+        shift,
+        machine,
+        productionOrder,
+        batchNumber - 1,
+      ].join("|");
+      const { data: previousBatch, error: previousBatchError } = await supabase
+        .from(WEIGH_BATCH_TABLE)
+        .select("id")
+        .eq("batch_key", previousBatchKey)
+        .eq("trang_thai", "confirmed")
+        .maybeSingle();
+      if (previousBatchError) {
+        return json(500, {
+          ok: false,
+          error: "previous_weighing_batch_lookup_failed",
+          detail: previousBatchError.message,
+        });
+      }
+      if (!previousBatch) {
+        return json(409, {
+          ok: false,
+          error: "previous_weighing_batch_not_confirmed",
+          message: `Phải xác nhận đợt ${batchNumber - 1} trước`,
+        });
+      }
+    }
+
+    const offset = (batchNumber - 1) * 10;
+    let rowsQuery = supabase
+      .from(MEASUREMENT_TABLE)
+      .select(
+        "event_id,qr_code,weight,tare_weight,net_weight,unit,captured_at,error_status,error_reason,metadata",
+      )
+      .eq("metadata->>work_date", workDate)
+      .eq("metadata->>shift", shift)
+      .eq("metadata->>production_order", productionOrder)
+      .order("captured_at", { ascending: true })
+      .range(0, milestone - 1);
+    if (machine) rowsQuery = rowsQuery.eq("metadata->>machine", machine);
+    let photoQuery = supabase
+      .from(PHOTO_DRAFT_TABLE)
+      .select(
+        "parent_event_id,event_id,qr_code,captured_at,work_date,shift,machine,production_order,status",
+      )
+      .eq("work_date", workDate)
+      .eq("shift", shift)
+      .eq("production_order", productionOrder)
+      .order("captured_at", { ascending: true })
+      .limit(Math.min(1000, milestone * 2));
+    if (machine) photoQuery = photoQuery.eq("machine", machine);
+    const [{ data: measurementRows, error: rowsError }, { data: photoRows, error: photoError }] =
+      await Promise.all([rowsQuery, photoQuery]);
+    if (rowsError) {
+      return json(500, {
+        ok: false,
+        error: "weighing_batch_rows_failed",
+        detail: rowsError.message,
+      });
+    }
+    if (photoError) {
+      return json(500, {
+        ok: false,
+        error: "weighing_batch_photo_rows_failed",
+        detail: photoError.message,
+      });
+    }
+    const measurementIds = new Set(
+      (measurementRows ?? []).map((row) => String((row as Record<string, unknown>).event_id ?? "")),
+    );
+    const failedPhotos = new Map<string, Record<string, unknown>>();
+    for (const row of photoRows ?? []) {
+      const photo = row as Record<string, unknown>;
+      const parentId = String(photo.parent_event_id ?? photo.event_id ?? "");
+      if (!parentId || measurementIds.has(parentId)) continue;
+      const existingPhoto = failedPhotos.get(parentId);
+      if (!existingPhoto || String(photo.captured_at ?? "") > String(existingPhoto.captured_at ?? "")) {
+        failedPhotos.set(parentId, {
+          event_id: parentId,
+          qr_code: photo.qr_code ?? "",
+          weight: null,
+          tare_weight: null,
+          net_weight: null,
+          unit: "kg",
+          captured_at: photo.captured_at,
+          error_status: "error",
+          error_reason: "AI chưa đọc được số cân",
+          error_only: true,
+          metadata: {},
+        });
+      }
+    }
+    const allRows = [...(measurementRows ?? []), ...failedPhotos.values()].sort((left, right) =>
+      String((left as Record<string, unknown>).captured_at ?? "").localeCompare(
+        String((right as Record<string, unknown>).captured_at ?? ""),
+      )
+    );
+    const batchRows = allRows.slice(offset, offset + 10);
+    if (!Array.isArray(batchRows) || batchRows.length !== 10) {
+      return json(409, {
+        ok: false,
+        error: "weighing_batch_not_synced",
+        message: "Chưa đủ 10 cuộn đã đồng bộ Supabase cho đợt này",
+        expected: 10,
+        found: Array.isArray(batchRows) ? batchRows.length : 0,
+      });
+    }
+    const products = batchRows.map((row, index) => {
+      const item = row as Record<string, unknown>;
+      const metadata = item.metadata !== null && typeof item.metadata === "object"
+        ? item.metadata as Record<string, unknown>
+        : {};
+      const qrCode = String(item.qr_code ?? "").trim();
+      const productCode = qrCode.includes("_") ? qrCode.split("_", 1)[0].trim() : qrCode;
+      const errorOnly = item.error_only === true;
+      const status = String(item.error_status ?? metadata.error_status ?? "ok") === "error"
+        ? "error"
+        : "ok";
+      return {
+        stt: index + 1,
+        event_id: item.event_id,
+        qr_code: qrCode,
+        ma_san_pham: productCode,
+        can_loi: errorOnly ? null : Number(metadata.core_weight ?? item.tare_weight ?? 0),
+        can_san_pham: errorOnly ? null : Number(metadata.product_weight ?? item.weight ?? 0),
+        trong_luong_nvl: errorOnly ? null : Number(item.net_weight ?? 0),
+        don_vi: item.unit,
+        can_luc: item.captured_at,
+        trang_thai_loi: status,
+        ly_do_loi: status === "error"
+          ? String(item.error_reason ?? metadata.error_reason ?? "").trim()
+          : "",
+      };
+    });
+    const productCodes = [...new Set(products.map((item) => item.ma_san_pham).filter(Boolean))];
+    const rowToInsert = {
+      batch_key: batchKey,
+      dot_can: batchNumber,
+      moc_so_luong: milestone,
+      ma_san_pham: productCodes.join(", ") || "--",
+      so_luong: 10,
+      ngay_can: workDate,
+      gio_bat_dau: products[0].can_luc,
+      gio_ket_thuc: products[products.length - 1].can_luc,
+      ca: shift,
+      may: machine,
+      lenh_san_xuat: productionOrder,
+      danh_sach_san_pham: products,
+      trang_thai: "confirmed",
+      xac_nhan_boi: confirmedBy,
+      xac_nhan_luc: new Date().toISOString(),
+    };
+    const { data: insertedBatch, error: insertBatchError } = await supabase
+      .from(WEIGH_BATCH_TABLE)
+      .insert(rowToInsert)
+      .select("*")
+      .single();
+    if (insertBatchError || !insertedBatch) {
+      if (insertBatchError?.code === "23505") {
+        const { data: racedBatch } = await supabase
+          .from(WEIGH_BATCH_TABLE)
+          .select("*")
+          .eq("batch_key", batchKey)
+          .maybeSingle();
+        if (racedBatch) {
+          return json(200, { ok: true, duplicate: true, item: racedBatch });
+        }
+      }
+      return json(500, {
+        ok: false,
+        error: "weighing_batch_insert_failed",
+        detail: insertBatchError?.message || "empty_insert",
+      });
+    }
+    return json(201, { ok: true, duplicate: false, item: insertedBatch });
+  }
+
   if (body.action === "delete_measurement") {
     const eventId = normalizeEventId(body.event_id);
     if (!ID_PATTERN.test(eventId)) {
@@ -589,6 +856,13 @@ Deno.serve(async (request: Request) => {
     const productionOrder = typeof body.production_order === "string"
       ? body.production_order.trim()
       : "";
+    const requestedErrorStatus = typeof body.error_status === "string"
+      ? body.error_status.trim().toLowerCase()
+      : "ok";
+    const errorStatus = requestedErrorStatus === "error" ? "error" : "ok";
+    const errorReason = errorStatus === "error" && typeof body.error_reason === "string"
+      ? body.error_reason.trim().slice(0, 500)
+      : "";
     if (!qrCode || qrCode.length > 200) {
       return json(422, { ok: false, error: "invalid_qr_code" });
     }
@@ -597,6 +871,9 @@ Deno.serve(async (request: Request) => {
     }
     if (!Number.isFinite(productWeight) || productWeight < 0) {
       return json(422, { ok: false, error: "invalid_product_weight" });
+    }
+    if (requestedErrorStatus !== errorStatus || (errorStatus === "error" && !errorReason)) {
+      return json(422, { ok: false, error: "invalid_error_status" });
     }
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceKey = getSupabaseAdminKey();
@@ -640,6 +917,8 @@ Deno.serve(async (request: Request) => {
       : {};
     metadata.core_weight = coreWeight;
     metadata.product_weight = productWeight;
+    metadata.error_status = errorStatus;
+    metadata.error_reason = errorReason;
     if (workDate) metadata.work_date = workDate;
     if (shift) metadata.shift = shift;
     if (machine) metadata.machine = machine;
@@ -660,6 +939,8 @@ Deno.serve(async (request: Request) => {
         qr_code: qrCode,
         weight: productWeight,
         tare_weight: coreWeight,
+        error_status: errorStatus,
+        error_reason: errorReason,
         metadata,
       })
       .eq("id", rowId)
@@ -764,9 +1045,9 @@ Deno.serve(async (request: Request) => {
   const qrSource = typeof body.qr_source === "string" ? body.qr_source.slice(0, 100) : "unknown";
   const weightRaw = typeof body.weight_raw === "string" ? body.weight_raw.slice(0, 1000) : "";
   const weightStable = body.weight_stable === true;
-  const sourceTag = (name: string): string => {
+  const sourceTag = (name: string, maxLength = 80): string => {
     const match = weightRaw.match(new RegExp(`(?:^|; )\\s*${name}=([^;]+)`));
-    return match ? match[1].trim().slice(0, 80) : "";
+    return match ? match[1].trim().slice(0, maxLength) : "";
   };
   const workDate = typeof body.work_date === "string"
     ? body.work_date.trim().slice(0, 10)
@@ -785,6 +1066,16 @@ Deno.serve(async (request: Request) => {
   const biWeight = Number.isFinite(biWeightParsed) && biWeightParsed >= 0
     ? biWeightParsed
     : 0.16;
+  const taggedErrorStatus = sourceTag("ERROR_STATUS").toLowerCase();
+  const requestedErrorStatus = typeof body.error_status === "string"
+    ? body.error_status.trim().toLowerCase()
+    : taggedErrorStatus || "ok";
+  const errorStatus = requestedErrorStatus === "error" ? "error" : "ok";
+  const errorReason = errorStatus === "error"
+    ? (typeof body.error_reason === "string"
+      ? body.error_reason.trim().slice(0, 500)
+      : sourceTag("ERROR_REASON", 500))
+    : "";
 
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(eventId)) {
     return json(422, { ok: false, error: "invalid_event_id" });
@@ -840,6 +1131,12 @@ Deno.serve(async (request: Request) => {
   }
   if (!photoDraft && (!Number.isFinite(weight) || weight < 0 || !UNITS.has(unit))) {
     return json(422, { ok: false, error: "invalid_weight" });
+  }
+  if (
+    !photoDraft && !inventoryCheck &&
+    (requestedErrorStatus !== errorStatus || (errorStatus === "error" && !errorReason))
+  ) {
+    return json(422, { ok: false, error: "invalid_error_status" });
   }
   if (!capturedAt || Number.isNaN(Date.parse(capturedAt))) {
     return json(422, { ok: false, error: "invalid_captured_at" });
@@ -1397,6 +1694,8 @@ Deno.serve(async (request: Request) => {
       payload_hash: payloadHash,
       weight_source: weightSource,
       qr_source: qrSource,
+      error_status: errorStatus,
+      error_reason: errorReason,
       status: "confirmed",
       metadata: {
         ingested_at: now,
@@ -1404,6 +1703,8 @@ Deno.serve(async (request: Request) => {
         weight_stable: weightStable,
         core_weight: weight,
         product_weight: productWeight,
+        error_status: errorStatus,
+        error_reason: errorReason,
         work_date: workDate || null,
         shift: shift || null,
         machine: machine || null,
