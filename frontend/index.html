@@ -78,7 +78,7 @@ main{width:100%;margin:0;padding:16px 16px 28px}
 .capture-head-top{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;box-shadow:0 4px 16px #11182708}
 .capture-head h2{font-size:16px;font-weight:800;color:var(--navy)}
 .workflow-tabs{background:#f3f4f6;border-color:var(--line)}
-.capture-layout{display:grid;grid-template-columns:minmax(760px,880px) minmax(0,1fr);gap:14px;align-items:start}
+.capture-layout{display:grid;grid-template-columns:minmax(460px,500px) minmax(0,1fr);gap:20px;align-items:start}
 .capture-left{max-width:none;background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 8px 24px #1118270a}
 .station-tools{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:8px;margin:0 0 10px}
 .station-tools button{width:100%;min-height:40px;padding:8px 10px;font-size:13px;border-radius:8px}
@@ -104,7 +104,7 @@ main{width:100%;margin:0;padding:16px 16px 28px}
 #productionToolbar.toolbar{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;margin:0;box-shadow:0 4px 16px #11182708}
 #productionToolbar button{min-height:40px;border-radius:8px;font-size:13px}
 #productionRoundTools{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:0}
-.evidence-rounds{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:0;align-items:stretch}
+.evidence-rounds{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px;margin:0;align-items:stretch}
 .evidence-round{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line);border-radius:14px;padding:12px;background:#fff;box-shadow:0 8px 24px #1118270a;min-width:0}
 .evidence-round.active{border-color:#fecaca;box-shadow:0 0 0 2px #fecaca66,0 8px 24px #1118270a}
 .evidence-round.saved{border-color:#86efac;background:#f0fdf4}
@@ -149,8 +149,8 @@ button.save{border-radius:10px;margin-top:0;background:var(--primary);border-col
 button.save:hover:not(:disabled){background:var(--primary-dark);border-color:var(--primary-dark)}
 #captureStatus{margin:0;border-radius:10px}
 .records-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 8px 24px #1118270a}
-@media(max-width:1600px){.capture-layout{grid-template-columns:minmax(680px,780px) minmax(0,1fr)}}
-@media(max-width:1400px){.capture-layout{grid-template-columns:minmax(560px,640px) minmax(0,1fr)}}
+
+
 @media(max-width:1200px){.capture-layout{grid-template-columns:minmax(480px,540px) minmax(0,1fr)}.capture-left{max-width:none}.video-box,.station-card .video-box{max-width:none}}
 @media(max-width:1100px){.top{position:sticky}.top-inner{flex-direction:row;align-items:center}.capture-layout{grid-template-columns:minmax(420px,480px) minmax(0,1fr)}.capture-left{max-width:none}.source-fields{grid-template-columns:repeat(3,minmax(0,1fr))}.source-fields .apply,.source-fields .shift-count{grid-column:auto}}
 @media(max-width:900px){.capture-layout{grid-template-columns:1fr}.capture-left,.capture-right{max-width:none}.top-crumbs{display:none}.evidence-rounds{grid-template-columns:1fr}.source-fields{grid-template-columns:repeat(2,minmax(0,1fr))}.source-fields .apply,.source-fields .shift-count{grid-column:1/-1}}
@@ -270,9 +270,20 @@ button.save:hover:not(:disabled){background:var(--primary-dark);border-color:var
 /* Force evidence rounds side-by-side */
 .evidence-rounds {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 16px;
 }
+@media (max-width: 1300px) {
+    .evidence-rounds {
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+}
+@media (max-width: 900px) {
+    .evidence-rounds {
+        grid-template-columns: 1fr;
+    }
+}
+
 
 </style></head><body>
 <header class="top"><div class="top-inner"><div class="brand"><img class="brand-mark" src="/logo.jpg" alt="Việt Nhật IPT"><h1 class="brand-title">Ghi nhận lần cân</h1></div><nav class="top-crumbs" aria-label="Đường dẫn"><span>Trang chủ</span><span class="sep">›</span><span>Cân hàng</span><span class="sep">›</span><strong>Ghi nhận lần cân</strong></nav><div class="top-right"><div class="top-bell" title="Thông báo" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 17h5l-1.4-1.4A2 2 0 0 1 18 14.2V11a6 6 0 1 0-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5"/><path d="M9.5 17a2.5 2.5 0 0 0 5 0"/></svg><span class="badge">1</span></div><div class="top-user"><span class="top-avatar">VN</span><span class="top-user-name">Việt Nhật IPT</span></div><div class="badges"><span id="weightModeBadge" class="mode ai">MỘT CAMERA · QR + CÂN</span><span id="ocrBadge" class="mode ai">CÂN: ĐANG KIỂM TRA</span><span id="geminiBadge" class="mode off">AI: TẮT</span><span id="yoloBadge" class="mode off">YOLO: ĐANG KIỂM TRA</span><span id="syncBadge" class="mode off">CLOUD: ĐANG KIỂM TRA</span></div></div></div></header>
