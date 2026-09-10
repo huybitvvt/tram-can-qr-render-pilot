@@ -87,7 +87,7 @@ def test_ui_capture_accepts_event_id_alone_and_retries_idempotently(tmp_path) ->
 
     first = service.capture(
         "ROLL-PARTIAL-001",
-        12.5,
+        1.15,
         "kg",
         frame,
         event_id=event_id,
@@ -96,7 +96,7 @@ def test_ui_capture_accepts_event_id_alone_and_retries_idempotently(tmp_path) ->
     )
     retry = service.capture(
         "ROLL-PARTIAL-001",
-        12.5,
+        1.15,
         "kg",
         frame,
         event_id=event_id,
@@ -2495,7 +2495,7 @@ def test_bound_capture_is_idempotent_and_keeps_analysis_id(tmp_path, monkeypatch
             self._reader = reader or object()
 
         def capture(self, frame):
-            return WeightReading(20.15, "kg", True, "OCR: 20.15@0.96", 0.96)
+            return WeightReading(1.15, "kg", True, "OCR: 1.15@0.96", 0.96)
 
     monkeypatch.setattr(test_ui_module, "CameraOCRWeightSource", FakeOCRSource)
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
@@ -2531,7 +2531,7 @@ def test_bound_capture_is_idempotent_and_keeps_analysis_id(tmp_path, monkeypatch
         event_id=event_id,
         station_id="station-01",
         kind="core",
-        weight=20.15,
+        weight=1.15,
         unit="kg",
     )
     staged_product = service.stage_evidence_step(
@@ -2545,7 +2545,7 @@ def test_bound_capture_is_idempotent_and_keeps_analysis_id(tmp_path, monkeypatch
     )
     first = service.capture(
         "ROLL-BOUND-001",
-        20.15,
+        1.15,
         "kg",
         frame,
         True,
@@ -2554,7 +2554,7 @@ def test_bound_capture_is_idempotent_and_keeps_analysis_id(tmp_path, monkeypatch
         product_weight=21.15,
         **kwargs,
     )
-    retry = service.capture("ROLL-BOUND-001", 20.15, "kg", frame, True, "OCR", **kwargs)
+    retry = service.capture("ROLL-BOUND-001", 1.15, "kg", frame, True, "OCR", **kwargs)
     row = store.get(event_id)
     service.close()
     store.close()
@@ -2580,7 +2580,7 @@ def test_bound_capture_survives_service_restart_before_product_save(
             self._reader = reader or object()
 
         def capture(self, frame):
-            return WeightReading(20.15, "kg", True, "OCR: 20.15@0.96", 0.96)
+            return WeightReading(1.15, "kg", True, "OCR: 1.15@0.96", 0.96)
 
     monkeypatch.setattr(test_ui_module, "CameraOCRWeightSource", FakeOCRSource)
     database = tmp_path / "measurements.db"
@@ -2623,7 +2623,7 @@ def test_bound_capture_survives_service_restart_before_product_save(
     )
     result = restarted_service.capture(
         "ROLL-RESTART-001",
-        20.15,
+        1.15,
         "kg",
         frame,
         True,

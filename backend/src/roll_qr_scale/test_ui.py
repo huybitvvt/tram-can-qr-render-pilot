@@ -57,6 +57,7 @@ from .lookup_client import lookup_roll
 from .quality import FrameQuality, assess_frame_quality
 from .qr_reader import QRReader
 from .scale import WeightReading
+from .weight_limits import validate_production_weights
 from .station_session import (
     AnalysisBindingMismatch,
     AnalysisBindingNotFound,
@@ -1496,6 +1497,12 @@ def _persist_measurement_edit(
     error_reason: str = "",
     weight_raw: str = "",
 ) -> dict[str, object]:
+    existing = store.get(event_id)
+    existing_raw = str(getattr(existing, "weight_raw", "") or "")
+    validate_production_weights(
+        core_weight, product_weight, str(getattr(existing, "unit", "kg") or "kg"),
+        machine or _raw_tag(weight_raw or existing_raw, "SOURCE_MACHINE"),
+    )
     selected_error_status = str(error_status or "").strip().lower()
     if selected_error_status not in {"ok", "error"}:
         selected_error_status = (
@@ -3012,6 +3019,10 @@ class StationUIService:
             raise ValueError("Đơn vị không hợp lệ")
         if not math.isfinite(weight) or weight < 0:
             raise ValueError("Số cân phải là số không âm")
+        if product_weight is not None:
+            validate_production_weights(
+                weight, product_weight, unit, _raw_tag(weight_raw, "SOURCE_MACHINE")
+            )
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
         if not quality_pass:
