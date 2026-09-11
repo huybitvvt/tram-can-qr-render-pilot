@@ -333,6 +333,37 @@ def test_each_camera_is_locked_to_its_configured_machine(tmp_path) -> None:
     store.close()
 
 
+def test_capture_accepts_machine_from_save_endpoint_and_persists_source(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(
+        store,
+        None,
+        None,
+        None,
+        station_count=2,
+        station_ids=["station-01", "station-02"],
+        camera_ids=["camera-01", "camera-02"],
+        machine_ids=["Máy tái chế", "Máy cách nhiệt"],
+    )
+
+    result = service.capture(
+        "MT-MN008_TEST",
+        1.02,
+        "kg",
+        make_qr_frame("MT-MN008_TEST"),
+        station_id="station-01",
+        camera_id="camera-01",
+        machine="Máy tái chế",
+    )
+    saved = store.get(str(result["event_id"]))
+
+    assert result["ok"] is True
+    assert saved is not None
+    assert "SOURCE_MACHINE=Máy tái chế" in saved.weight_raw
+    service.close()
+    store.close()
+
+
 def test_shift_codes_route_to_separate_gemini_key_slots() -> None:
     assert StationUIService._gemini_slot_for_shift("12C1") == "day"
     assert StationUIService._gemini_slot_for_shift("12C2") == "night"

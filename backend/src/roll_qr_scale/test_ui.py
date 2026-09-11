@@ -3109,6 +3109,7 @@ class StationUIService:
         analysis_id: str | None = None,
         station_id: str | None = None,
         camera_id: str | None = None,
+        machine: str = "",
         frame_sha256: str | None = None,
     ) -> dict[str, object]:
         qr_code = qr_code.strip()
@@ -3126,10 +3127,15 @@ class StationUIService:
             raise ValueError("Đơn vị không hợp lệ")
         if not math.isfinite(weight) or weight < 0:
             raise ValueError("Số cân phải là số không âm")
+        machine = machine.strip()
+        tagged_machine = _raw_tag(weight_raw, "SOURCE_MACHINE")
+        if machine and tagged_machine and machine != tagged_machine:
+            raise ValueError("Máy trong phiếu cân không khớp nguồn đã chọn")
+        source_machine = machine or tagged_machine
+        if source_machine and not tagged_machine:
+            weight_raw = _upsert_raw_tag(weight_raw, "SOURCE_MACHINE", source_machine)
         if product_weight is not None:
-            validate_production_weights(
-                weight, product_weight, unit, _raw_tag(weight_raw, "SOURCE_MACHINE")
-            )
+            validate_production_weights(weight, product_weight, unit, source_machine)
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
         if not quality_pass:
@@ -3152,7 +3158,7 @@ class StationUIService:
             self.validate_station_source(
                 station_id,
                 camera_id,
-                _raw_tag(weight_raw, "SOURCE_MACHINE"),
+                source_machine,
                 require_machine=True,
             )
         computed_frame_sha = jpeg_sha256(encode_staged_jpeg(frame))
