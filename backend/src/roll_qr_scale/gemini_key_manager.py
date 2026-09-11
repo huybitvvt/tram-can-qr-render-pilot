@@ -98,6 +98,37 @@ class GeminiKeyManager:
             self._last_error = "; ".join(errors)[:300]
         return value
 
+    def load_shift_keys(self) -> dict[str, str]:
+        """Load the two fixed shift keys without a process-wide active slot.
+
+        The legacy primary/backup selector is retained for older clients, but
+        production capture routes 12C1 to ``day`` and 12C2 to ``night`` on
+        every request. This prevents one operator changing the key used by the
+        other shift.
+        """
+
+        errors: list[str] = []
+        try:
+            day_key, day_source, _ = self._primary_key()
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {str(exc).strip()}")
+            day_key = self.initial_key
+            day_source = "environment" if day_key else "none"
+        try:
+            night_key = self._backup_key()
+        except Exception as exc:
+            errors.append(f"{type(exc).__name__}: {str(exc).strip()}")
+            night_key = ""
+        with self._lock:
+            self._source = day_source
+            self._key_id = self.key_id(day_key)
+            self._primary_key_id = self._key_id
+            self._backup_key_id = self.key_id(night_key)
+            self._backup_configured = bool(night_key)
+            self._active_slot = "automatic-by-shift"
+            self._last_error = "; ".join(errors)[:300]
+        return {"day": day_key, "night": night_key}
+
     def create_readers(
         self,
         api_key: str,
@@ -236,6 +267,46 @@ class GeminiKeyManager:
             self._last_error = ""
         return key_id
 
+    def replace_shift_key(
+        self,
+        slot: str,
+        api_key: str,
+    ) -> tuple[
+        GeminiWeightReader,
+        GeminiWeightReader,
+        GeminiWeightReader,
+        GeminiWeightReader,
+    ]:
+        """Validate, persist and build readers for one fixed shift slot."""
+
+        if slot == "day":
+            readers = self.replace(api_key)
+            with self._lock:
+                self._active_slot = "automatic-by-shift"
+            return readers
+        if slot != "night":
+            raise ValueError("Khe Gemini key phải là day hoặc night")
+        value = self._validate_format(api_key)
+        self.validate(value)
+        primary, _, _ = self._primary_key()
+        if value == primary:
+            raise ValueError("Key ca đêm phải khác Key ca ngày")
+        if self.backup_store is None or not self.backup_store.configured:
+            raise ValueError("Kho Key ca đêm chưa được cấu hình")
+        readers = self.create_readers(value)
+        try:
+            self.backup_store.write({"api_key": value, "provider": "gemini-night"})
+        except Exception:
+            for reader in readers:
+                reader.close()
+            raise
+        with self._lock:
+            self._backup_configured = True
+            self._backup_key_id = self.key_id(value)
+            self._active_slot = "automatic-by-shift"
+            self._last_error = ""
+        return readers
+
     def activate(
         self,
         slot: str,
@@ -297,6 +368,11 @@ class GeminiKeyManager:
                 "backup_key_id": self._backup_key_id or None,
                 "backup_configured": self._backup_configured,
                 "active_slot": self._active_slot,
+                "routing": "12C1=day,12C2=night",
+                "day_key_id": self._primary_key_id or None,
+                "night_key_id": self._backup_key_id or None,
+                "day_configured": bool(self._primary_key_id),
+                "night_configured": self._backup_configured,
                 "stored_encrypted": self._source.startswith("supabase-encrypted"),
                 "last_error": self._last_error or None,
                 "message": self.store.config_error if not self.store.configured else "Sẵn sàng đổi Gemini API key",

@@ -110,7 +110,7 @@ npx.cmd supabase@latest functions deploy lookup-roll --no-verify-jwt --use-api
 Set-Location ..
 ```
 
-`db push` áp dụng tuần tự toàn bộ [backend/supabase/migrations](backend/supabase/migrations), gồm schema ingest ban đầu, Cloudinary, bảng `can_tu_dong`, danh tính/hash, ảnh QR, kho OAuth Codex mã hóa, bảng một ảnh `can_kiem_kho` và bảng ảnh chờ `anh_can_cho_ai` (`20260824150000_anh_can_cho_ai.sql`). Phải chạy migration trước rồi mới deploy lại hai Function; Edge Function mới chọn/ghi các cột hoặc bảng mới nên đảo thứ tự sẽ làm request lỗi. Nếu không dùng CLI, [backend/supabase_schema.sql](backend/supabase_schema.sql) là bản schema gộp để chạy có kiểm soát trong SQL Editor.
+`db push` áp dụng tuần tự toàn bộ [backend/supabase/migrations](backend/supabase/migrations), gồm schema ingest ban đầu, Cloudinary, bảng `can_tu_dong`, danh tính/hash, ảnh QR, kho OAuth Codex mã hóa, bảng một ảnh `can_kiem_kho` và bảng ảnh chờ `anh_can_cho_ai`. Build hiện tại không ghi bytes ảnh mới vào Supabase Storage để tránh vượt quota/egress Free plan. Nếu không dùng CLI, [backend/supabase_schema.sql](backend/supabase_schema.sql) là bản schema gộp để chạy có kiểm soát trong SQL Editor.
 
 SQLite local tự thêm cột còn thiếu khi gateway mở database cũ và không xóa ảnh/bản ghi lịch sử. Hàng cũ giữ danh tính rỗng; hash được dựng lại từ hàng/ảnh hiện có khi có thể, còn ảnh legacy đã mất thì hash để rỗng thay vì bịa bằng chứng. `device_id` cloud cũ vẫn được đọc như fallback cho `gateway_id`, còn mọi capture mới phải mang bộ danh tính mới.
 
@@ -119,16 +119,16 @@ Schema tạo:
 - `devices`: các gateway được phép ghi/được cập nhật thời điểm nhìn thấy.
 - `rolls`: QR cuộn hàng và thời điểm nhìn thấy.
 - `can_tu_dong`: lịch sử cân tự động append-only, unique theo `event_id`; ảnh cân lõi nằm trong `core_image_*`, ảnh QR thứ hai nằm trong `qr_image_*`. Các cột `image_*` vẫn trỏ ảnh cân lõi để tương thích bản cũ.
-- `anh_can_cho_ai`: ảnh chụp độc lập đã lên Cloudinary, QR có thể trống và không có cột số cân; trạng thái ban đầu là `awaiting_ai` để xử lý nối tiếp sau.
+- `anh_can_cho_ai`: ảnh được tự lưu khi AI không đọc được/lỗi; QR có thể trống và không có cột số cân; trạng thái ban đầu là `awaiting_ai` để xử lý nối tiếp sau.
 - `can_kiem_kho`: luồng song song chỉ chụp một ảnh/một khối lượng; lưu mã sản phẩm, khối lượng, khối lượng lõi nhập kèm, khối lượng bì và ảnh. Không tạo hoặc giả lập bước chụp cân lõi thứ hai.
 - `measurements`: bảng cũ được giữ để tương thích; migration sao chép lịch sử sang `can_tu_dong` trước khi Edge Function chuyển bảng.
 - `roll_scale_secrets`: chỉ service role được đọc/ghi; giữ payload OAuth Codex đã mã hóa để Render không mất đăng nhập khi redeploy.
-- Bucket private `roll-captures` được giữ để tra cứu tương thích ảnh cũ; lần cân mới dùng Cloudinary.
+- Bucket private `roll-captures` được giữ để tra cứu tương thích ảnh cũ; ingest mới không upload/download ảnh lên Supabase Storage. Ảnh được commit vào Render Persistent Disk trước khi gửi Cloudinary, nên lỗi Cloudinary/Supabase chỉ làm outbox retry, không làm mất ảnh hay row local.
 - RLS bật; chỉ cấp `anon` quyền đọc hai bảng hiển thị trên giao diện. Mọi thao tác ghi vẫn phải đi qua Edge Function bằng device token.
 
 Edge Function dùng secret key mặc định của môi trường Supabase (`SUPABASE_SECRET_KEYS`, có fallback cho project cũ dùng `SUPABASE_SERVICE_ROLE_KEY`) và ba secret Cloudinary. Gateway chỉ có `DEVICE_INGEST_TOKEN`; API secret Cloudinary và khóa bypass RLS không bao giờ đưa xuống trình duyệt/máy trạm.
 
-URL gốc Cloudinary vẫn được giữ nguyên trong Supabase để làm bằng chứng và đọc lại bằng AI. Giao diện chỉ tạo biến thể khi hiển thị: thumbnail giới hạn 240 px với `q_auto:eco/f_auto`, ảnh xem lớn giới hạn 1280 px với `q_auto:good/f_auto`; danh sách DB dựng tối đa 50 dòng ảnh mỗi trang để hạn chế bandwidth.
+Worker Render gọi `backup_maintenance` khi khởi động và mỗi 24 giờ. Worker đọc file local cũ ít nhất 7 ngày, chỉ gửi checksum + byte count (không gửi ảnh); Edge Function đối chiếu event/hash rồi mới xóa Cloudinary. Sau khi Edge xác nhận, worker xóa file local tương ứng, còn row cân vẫn giữ nguyên (URL ảnh được đặt null). Không tải bytes từ Supabase trong health check, không phát sinh egress định kỳ. Blueprint đã gắn Persistent Disk `/var/data`; nếu chạy ngoài Render phải trỏ `ROLL_SCALE_DATA_ROOT` vào ổ đĩa bền vững.
 
 ## 3. Cấu hình gateway
 
@@ -168,7 +168,8 @@ Hai trạm:
   --gateway-id gateway-01 `
   --station-count 2 `
   --station-id station-01 --station-id station-02 `
-  --camera-id camera-01 --camera-id camera-02
+  --camera-id camera-01 --camera-id camera-02 `
+  --machine-id "Máy tái chế" --machine-id "Máy cách nhiệt"
 ```
 
 Ba trạm:
@@ -183,7 +184,7 @@ Ba trạm:
   --inference-queue-size 8 --auto-advance
 ```
 
-Nếu bỏ các `--station-id` và `--camera-id`, chương trình tạo lần lượt `station-01..03` và `camera-01..03`. Nếu có truyền, mỗi cờ phải lặp đúng bằng `--station-count`. `--auto-advance` là mặc định; dùng `--no-auto-advance` nếu muốn giữ nguyên trạm sau khi lưu.
+Nếu bỏ các `--station-id` và `--camera-id`, chương trình tạo lần lượt `station-01..03` và `camera-01..03`. Nếu truyền `--machine-id`, mỗi máy được khóa vào đúng một trạm/camera và mỗi cờ phải lặp đúng bằng `--station-count`. `--auto-advance` là mặc định; dùng `--no-auto-advance` nếu muốn giữ nguyên trạm sau khi lưu.
 
 Mở `http://127.0.0.1:8080` rồi vận hành như sau:
 
@@ -359,11 +360,11 @@ giữ nguyên khóa đó qua mọi lần deploy. Đây là tích hợp endpoint 
 không phải OpenAI API ổn định dành cho production; OpenAI có thể thay đổi luồng
 hoặc giới hạn tài khoản. Khi Codex lỗi, chọn lại Gemini API để tiếp tục vận hành.
 
-Nút `Đổi key Gemini` cho phép quản trị thay key mà không sửa biến môi trường và
-không redeploy. Ô `API Gemini dự phòng` lưu riêng một key mã hóa mà không thay
-key đang chạy.
-Khi cần có thể chuyển qua lại giữa key chính và key dự phòng; lựa chọn đang dùng
-được giữ trong kho bí mật Supabase qua các lần deploy. Backend kiểm tra key mới
+Hai mục `Key ca ngày · 12C1` và `Key ca đêm · 12C2` cho phép quản trị thay key
+mà không sửa biến môi trường và không redeploy. Backend tự chọn key từ ca của
+từng request; không có nút chuyển key thủ công nên hai ca không thể dùng nhầm
+key do trạng thái chung. Hai key được giữ riêng trong kho bí mật Supabase qua
+các lần deploy. Backend kiểm tra key mới
 trực tiếp với Google; chỉ khi hợp lệ mới
 mã hóa Fernet và lưu qua Edge Function vào `roll_scale_secrets`, sau đó thay cả
 reader Nhanh và Chính xác trong tiến trình đang chạy. Key hiện tại không bao giờ
@@ -531,7 +532,7 @@ Hoặc mở giao diện tra cứu nội bộ, sau đó vào `http://127.0.0.1:80
 .\.venv\Scripts\roll-lookup.exe --serve
 ```
 
-Ứng dụng trả về lần cân `confirmed` mới nhất theo `captured_at`, gồm gross, tare, net, thời điểm, tổng số lần cân và URL ảnh Cloudinary. Ảnh cũ trong Supabase Storage tiếp tục dùng URL ký có hạn 5 phút. Toàn bộ lịch sử production nằm trong `can_tu_dong`; index tra cứu bảo đảm dữ liệu offline gửi lên muộn không thay thế nhầm lần cân mới hơn.
+Ứng dụng trả về lần cân `confirmed` mới nhất theo `captured_at`, gồm gross, tare, net, thời điểm, tổng số lần cân và URL ảnh Cloudinary trong thời gian giữ 7 ngày. Sau retention, row vẫn tra cứu được nhưng ảnh có thể không còn URL. Toàn bộ lịch sử production nằm trong `can_tu_dong`; index tra cứu bảo đảm dữ liệu offline gửi lên muộn không thay thế nhầm lần cân mới hơn.
 
 Token tra cứu tách khỏi token ghi dữ liệu. Giao diện local proxy request qua Python nên không đưa token vào JavaScript. Mặc định chỉ bind `127.0.0.1`; không dùng `--host 0.0.0.0` ra mạng xưởng khi chưa có HTTPS, đăng nhập và kiểm soát firewall.
 
@@ -559,9 +560,7 @@ Test bao phủ QR HID, capture gate, chống trùng/danh tính, session nhiều 
 1. Công nhân chọn đúng trạm, đặt cuộn hàng lên cân và đưa QR + màn hình cân vào đúng camera đã ánh xạ.
 2. Nhấn `Space`: ảnh của riêng trạm đó được đóng băng, gắn danh tính và đưa vào FIFO nhận dạng offline.
 3. Công nhân đối chiếu rồi nhấn `Enter`; ảnh + QR + số cân + danh tính được commit vào SQLite. Auto-advance có thể chuyển sang trạm kế tiếp sau commit thành công.
-4. Outbox tự gửi sự kiện lên Edge Function; Supabase lưu lịch sử và Cloudinary lưu ảnh.
-   Cấu hình hiện tại tạo URL Cloudinary công khai; chỉ dùng ảnh không nhạy cảm cho đến
-   khi triển khai authenticated assets hoặc một lớp cấp URL có chữ ký.
+4. Outbox tự gửi sự kiện lên Edge Function; Supabase lưu row/metadata, Cloudinary lưu ảnh delivery và Render Persistent Disk giữ evidence độc lập trong 7 ngày. Cloudinary lỗi thì sự kiện ở outbox để retry.
 5. Ở trạm tra cứu, người dùng quét cùng QR bằng đầu đọc USB.
 6. `lookup-roll` trả lần cân hợp lệ mới nhất và ảnh bằng chứng.
 

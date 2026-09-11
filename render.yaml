@@ -7,6 +7,10 @@ services:
     buildCommand: pip install -r backend/requirements-render.txt
     startCommand: PYTHONPATH=backend/src ROLL_SCALE_FRONTEND_DIR=frontend python -m roll_qr_scale.render_app
     healthCheckPath: /api/health
+    disk:
+      name: tram-can-qr-data
+      mountPath: /var/data
+      sizeGB: 10
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.11
@@ -27,13 +31,19 @@ services:
       - key: ROLL_SCALE_CODEX_MODE
         value: oauth
       - key: ROLL_SCALE_STATION_COUNT
-        value: "1"
+        value: "2"
       - key: ROLL_SCALE_STATION_IDS
-        value: station-01
+        value: station-01,station-02
       - key: ROLL_SCALE_CAMERA_IDS
-        value: camera-01
+        value: camera-01,camera-02
+      - key: ROLL_SCALE_MACHINE_IDS
+        value: Máy tái chế,Máy cách nhiệt
       - key: ROLL_SCALE_GATEWAY_ID
         value: render-pilot-01
+      - key: ROLL_SCALE_DATA_ROOT
+        value: /var/data
+      - key: ROLL_SCALE_LOCAL_RETENTION_DAYS
+        value: "7"
       - key: ROLL_SCALE_GEMINI_API_KEY
         sync: false
       - key: ROLL_SCALE_API_URL

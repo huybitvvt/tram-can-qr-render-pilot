@@ -7,7 +7,9 @@ from roll_qr_scale.api_client import (
     fetch_supabase_photo_draft_parent_ids,
     fetch_supabase_table,
     fetch_supabase_table_count,
+    IngestResponseError,
     post_remote_action,
+    validate_ingest_response,
 )
 
 
@@ -304,3 +306,29 @@ def test_delete_supabase_photo_drafts_removes_the_whole_displayed_row(monkeypatc
     assert captured["request"].get_header("Prefer") == "return=representation"
     assert query["or"] == ["(parent_event_id.eq.parent-1,event_id.eq.parent-1)"]
     assert query["select"] == ["event_id,parent_event_id"]
+
+
+def test_ingest_ack_accepts_explicit_local_persistent_evidence_without_cloudinary() -> None:
+    response = validate_ingest_response(
+        {
+            "ok": True,
+            "event_id": "event-local-only",
+            "id": 7,
+            "local_backup_committed": True,
+        },
+        "event-local-only",
+    )
+    assert response["local_backup_committed"] is True
+
+
+def test_ingest_ack_rejects_image_less_response_without_local_evidence() -> None:
+    try:
+        validate_ingest_response(
+            {"ok": True, "event_id": "event-no-image", "id": 8},
+            "event-no-image",
+            require_remote_image=False,
+        )
+    except IngestResponseError as exc:
+        assert "remote or local persistent evidence" in str(exc)
+    else:  # pragma: no cover - assertion branch is the test failure.
+        raise AssertionError("image-less ack must carry local_backup_committed=true")

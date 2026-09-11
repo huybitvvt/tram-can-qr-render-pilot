@@ -22,6 +22,7 @@ def test_render_argv_uses_public_host_port_and_configured_data_root(
     monkeypatch.setenv("ROLL_SCALE_STATION_COUNT", "2")
     monkeypatch.setenv("ROLL_SCALE_STATION_IDS", "scale-a,scale-b")
     monkeypatch.setenv("ROLL_SCALE_CAMERA_IDS", "cam-a,cam-b")
+    monkeypatch.setenv("ROLL_SCALE_MACHINE_IDS", "machine-a,machine-b")
 
     argv = build_render_argv()
 
@@ -36,6 +37,10 @@ def test_render_argv_uses_public_host_port_and_configured_data_root(
     assert [argv[index + 1] for index, value in enumerate(argv) if value == "--camera-id"] == [
         "cam-a",
         "cam-b",
+    ]
+    assert [argv[index + 1] for index, value in enumerate(argv) if value == "--machine-id"] == [
+        "machine-a",
+        "machine-b",
     ]
 
 

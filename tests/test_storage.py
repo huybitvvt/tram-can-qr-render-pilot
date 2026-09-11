@@ -1,5 +1,6 @@
 import hashlib
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +94,26 @@ def test_photo_draft_saves_image_without_weight_or_required_qr(tmp_path) -> None
     assert "weight" not in columns
     assert "unit" not in columns
     assert Path(draft.image_path).is_file()
+    store.close()
+
+
+def test_inventory_ai_miss_is_a_valid_photo_draft(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    draft, duplicate = store.save_photo_draft_idempotent(
+        np.zeros((80, 120, 3), dtype=np.uint8),
+        event_id="1808f118-5402-4e2c-ab94-df7d15b5f96f",
+        parent_event_id="c9a48e84-0a05-4e70-b779-5e66f92a6093",
+        capture_kind="inventory",
+        needs_sync=True,
+        gateway_id="gateway-test",
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+
+    assert duplicate is False
+    assert draft.capture_kind == "inventory"
+    assert Path(draft.image_path).is_file()
+    assert draft.api_payload()["workflow"] == "photo_draft"
     store.close()
 
 
@@ -304,4 +325,242 @@ def test_inventory_check_is_idempotent_and_keeps_one_image(tmp_path) -> None:
     assert payload["qr_code"] == "SP-KIEM-KHO-001"
     assert payload["product_code"] == "SP-KIEM-KHO-001"
     assert "image_path" not in payload
+    store.close()
+
+
+def test_local_backup_report_is_metadata_only_and_prune_keeps_rows(tmp_path) -> None:
+    now = datetime(2026, 9, 11, tzinfo=timezone.utc)
+    old_at = (now - timedelta(days=8)).isoformat()
+    recent_at = (now - timedelta(days=1)).isoformat()
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    old = store.save(
+        "ROLL-RETENTION-OLD",
+        12.5,
+        "kg",
+        np.zeros((32, 48, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="11111111-1111-4111-8111-111111111111",
+        captured_at=old_at,
+    )
+    store.mark_synced(old.event_id, 11, "https://res.cloudinary.com/demo/old.jpg", "old")
+    recent = store.save(
+        "ROLL-RETENTION-RECENT",
+        8.5,
+        "kg",
+        np.full((32, 48, 3), 12, dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="22222222-2222-4222-8222-222222222222",
+        captured_at=recent_at,
+    )
+    store.mark_sync_failed(recent.event_id, "cloudinary_unavailable")
+
+    report = store.local_backup_report(now=now)
+    assert report["provider"] == "render_persistent_disk"
+    assert report["item_count"] == 1
+    item = report["items"][0]
+    assert item["event_id"] == old.event_id
+    role = item["roles"]["core"]
+    assert set(role) == {"sha256", "bytes"}
+    assert len(role["sha256"]) == 64
+    assert "image" not in item
+
+    released = [
+        {
+            "table": item["table"],
+            "event_id": item["event_id"],
+            "role": "core",
+            "sha256": role["sha256"],
+        }
+    ]
+    result = store.prune_local_captures(released, now=now)
+    assert result == {"released": 1, "deleted": 1, "skipped": 0}
+    assert not Path(old.image_path).exists()
+    assert Path(recent.image_path).exists()
+    released_row = store.get(old.event_id)
+    assert released_row is not None
+    assert released_row.image_path == ""
+    assert released_row.remote_image_url is None
+    assert released_row.remote_image_public_id is None
+    assert store.get(recent.event_id) is not None
+    store.close()
+
+
+def test_local_backup_report_skips_cleared_rows_without_starving_next_capture(tmp_path) -> None:
+    now = datetime(2026, 9, 11, tzinfo=timezone.utc)
+    old_at = (now - timedelta(days=8)).isoformat()
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    with store._lock:
+        store.connection.executemany(
+            """
+            INSERT INTO measurements (
+                event_id, qr_code, weight, unit, captured_at, image_path,
+                weight_source, sync_status
+            ) VALUES (?, ?, ?, ?, ?, '', ?, 'synced')
+            """,
+            [
+                (f"cleared-{index}", "CLEARED", 1, "kg", old_at, "manual")
+                for index in range(401)
+            ],
+        )
+        store.connection.commit()
+    live = store.save(
+        "ROLL-AFTER-CLEARED",
+        2,
+        "kg",
+        np.zeros((24, 24, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="44444444-4444-4444-8444-444444444444",
+        captured_at=old_at,
+    )
+    store.mark_synced(live.event_id, 12, "https://res.cloudinary.com/demo/live.jpg", "live")
+
+    report = store.local_backup_report(now=now, limit=1)
+    assert report["item_count"] == 1
+    assert report["items"][0]["event_id"] == live.event_id
+    store.close()
+
+
+def test_prune_two_image_pending_row_clears_retry_after_both_files(tmp_path) -> None:
+    now = datetime(2026, 9, 11, tzinfo=timezone.utc)
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    measurement = store.save(
+        "ROLL-TWO-IMAGE-RETENTION",
+        4.5,
+        "kg",
+        np.zeros((24, 24, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="55555555-5555-4555-8555-555555555555",
+        captured_at=(now - timedelta(days=8)).isoformat(),
+    )
+    product_path = store.attach_product_image(
+        measurement.event_id,
+        np.full((24, 24, 3), 25, dtype=np.uint8),
+    )
+    store.mark_cloudinary_pending(measurement.event_id, 55)
+    report = store.local_backup_report(now=now)
+    item = report["items"][0]
+    released = [
+        {
+            "table": item["table"],
+            "event_id": item["event_id"],
+            "role": role,
+            "sha256": evidence["sha256"],
+        }
+        for role, evidence in item["roles"].items()
+    ]
+
+    result = store.prune_local_captures(released, now=now)
+    saved = store.get(measurement.event_id)
+
+    assert result == {"released": 2, "deleted": 2, "skipped": 0}
+    assert not Path(measurement.image_path).exists()
+    assert not Path(product_path).exists()
+    assert saved is not None
+    assert saved.image_path == ""
+    assert saved.product_image_path == ""
+    assert saved.sync_error is None
+    assert store.pending_count() == 0
+    retry_state = store.connection.execute(
+        "SELECT next_retry_at FROM measurements WHERE event_id = ?",
+        (measurement.event_id,),
+    ).fetchone()
+    assert retry_state["next_retry_at"] is None
+    store.close()
+
+
+def test_local_backup_report_pages_past_missing_files_without_starvation(tmp_path) -> None:
+    now = datetime(2026, 9, 11, tzinfo=timezone.utc)
+    old_at = (now - timedelta(days=8)).isoformat()
+    capture_dir = tmp_path / "captures"
+    store = MeasurementStore(tmp_path / "measurements.db", capture_dir)
+    with store._lock:
+        store.connection.executemany(
+            """
+            INSERT INTO measurements (
+                event_id, qr_code, weight, unit, captured_at, image_path,
+                weight_source, sync_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced')
+            """,
+            [
+                (
+                    f"missing-{index:04d}",
+                    "MISSING",
+                    1,
+                    "kg",
+                    old_at,
+                    str((capture_dir / f"missing-{index:04d}.jpg").resolve()),
+                    "manual",
+                )
+                for index in range(401)
+            ],
+        )
+        store.connection.commit()
+    live = store.save(
+        "ROLL-AFTER-MISSING",
+        2,
+        "kg",
+        np.zeros((24, 24, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="ffffffff-ffff-4fff-8fff-ffffffffffff",
+        captured_at=old_at,
+    )
+    store.mark_synced(live.event_id, 12, "https://res.cloudinary.com/demo/live.jpg", "live")
+
+    report = store.local_backup_report(now=now, limit=1)
+    assert report["item_count"] == 1
+    assert report["items"][0]["event_id"] == live.event_id
+    store.close()
+
+
+def test_prune_clears_cloudinary_pending_when_last_local_path_is_removed(tmp_path) -> None:
+    now = datetime(2026, 9, 11, tzinfo=timezone.utc)
+    old_at = (now - timedelta(days=8)).isoformat()
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    saved = store.save(
+        "ROLL-RETENTION-PENDING",
+        12.5,
+        "kg",
+        np.zeros((32, 48, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="55555555-5555-4555-8555-555555555555",
+        captured_at=old_at,
+    )
+    store.mark_cloudinary_pending(
+        saved.event_id,
+        17,
+        "https://res.cloudinary.com/demo/pending.jpg",
+        "pending",
+    )
+    digest = hashlib.sha256(Path(saved.image_path).read_bytes()).hexdigest()
+    assert store.pending_count() == 1
+
+    result = store.prune_local_captures(
+        [
+            {
+                "table": "can_tu_dong",
+                "event_id": saved.event_id,
+                "role": "core",
+                "sha256": digest,
+            }
+        ],
+        now=now,
+    )
+    assert result == {"released": 1, "deleted": 1, "skipped": 0}
+    row = store.get(saved.event_id)
+    assert row is not None
+    assert row.image_path == ""
+    assert row.sync_error is None
+    with store._lock:
+        retry_at = store.connection.execute(
+            "SELECT next_retry_at FROM measurements WHERE event_id = ?",
+            (saved.event_id,),
+        ).fetchone()[0]
+    assert retry_at is None
+    assert store.pending_count() == 0
     store.close()

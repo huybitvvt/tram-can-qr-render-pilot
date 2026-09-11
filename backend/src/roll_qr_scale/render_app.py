@@ -44,6 +44,8 @@ def build_render_argv() -> list[str]:
         argv.extend(("--station-id", station_id))
     for camera_id in _csv_env("ROLL_SCALE_CAMERA_IDS"):
         argv.extend(("--camera-id", camera_id))
+    for machine_id in _csv_env("ROLL_SCALE_MACHINE_IDS"):
+        argv.extend(("--machine-id", machine_id))
     return argv
 
 

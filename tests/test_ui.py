@@ -42,16 +42,19 @@ def test_decode_image_accepts_browser_data_url() -> None:
     assert decoded.shape == frame.shape
 
 
-def test_ai_failures_stay_temporary_and_cannot_be_saved_by_operator() -> None:
+def test_ai_failures_are_saved_as_independent_photo_drafts() -> None:
     assert "#photoOnlyBtn,#factoryBtn,#inventoryPhoneBtn{display:none!important}" in TEST_UI_HTML
     assert "'/api/photo-capture'" in TEST_UI_HTML
     assert "function saveMeasurementRound(" in TEST_UI_HTML
     assert "saveCapture=saveValidatedCapture" in TEST_UI_HTML
     assert "round.eventId=newEventId()" in TEST_UI_HTML
     assert "round&&!round.saved&&roundReadyToSave(session,index)" in TEST_UI_HTML
-    assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
+    assert "async function persistAiMissPhoto(" in TEST_UI_HTML
+    assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
     assert "Nhấn Enter để lưu ảnh với số trống" not in TEST_UI_HTML
     assert "row.classList.add('photo-draft-row')" in TEST_UI_HTML
+    assert "async function persistInventoryAiMissPhoto(" in TEST_UI_HTML
+    assert "capture_kind:'inventory'" in TEST_UI_HTML
 
 
 def test_ui_capture_decodes_qr_and_saves_stable_manual_weight(tmp_path) -> None:
@@ -274,6 +277,66 @@ def test_ui_photo_capture_decodes_qr_without_calling_weight_ai(tmp_path) -> None
     assert sent[0]["parent_event_id"] == parent_event_id
     service.close()
     store.close()
+
+
+def test_ui_inventory_ai_miss_photo_is_saved_without_weight(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    capture_id = "64bd5e7b-8718-494e-b4be-94f9ca23739f"
+    parent_id = "493a44f5-7330-4507-9773-4837d49be7e4"
+
+    result = service.capture_photo_draft(
+        make_qr_frame("INVENTORY-MISS"),
+        event_id=capture_id,
+        parent_event_id=parent_id,
+        capture_kind="inventory",
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+
+    saved = store.get_photo_draft(capture_id)
+    assert result["capture_kind"] == "inventory"
+    assert saved is not None and Path(saved.image_path).is_file()
+    assert store.inventory_pending_count() == 0
+    service.close()
+    store.close()
+
+
+def test_each_camera_is_locked_to_its_configured_machine(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(
+        store,
+        None,
+        None,
+        None,
+        station_count=2,
+        station_ids=["station-01", "station-02"],
+        camera_ids=["camera-01", "camera-02"],
+        machine_ids=["Máy tái chế", "Máy cách nhiệt"],
+    )
+
+    assert service.validate_station_source(
+        "station-01", "camera-01", "Máy tái chế"
+    )["machine_id"] == "Máy tái chế"
+    with pytest.raises(ValueError, match="chỉ được gắn với máy Máy tái chế"):
+        service.validate_station_source(
+            "station-01", "camera-01", "Máy cách nhiệt"
+        )
+    with pytest.raises(ValueError, match="Trạm hoặc camera không hợp lệ"):
+        service.validate_station_source("station-01", "camera-02", "Máy tái chế")
+    assert "select.disabled=Boolean(locked)" in TEST_UI_HTML
+    assert "Camera vật lý này đã gắn với máy khác" in TEST_UI_HTML
+    assert "Hệ thống không tự đổi sang camera khác" in TEST_UI_HTML
+    assert "const machineChanged=lockSourceMachine(session)" in TEST_UI_HTML
+
+    service.close()
+    store.close()
+
+
+def test_shift_codes_route_to_separate_gemini_key_slots() -> None:
+    assert StationUIService._gemini_slot_for_shift("12C1") == "day"
+    assert StationUIService._gemini_slot_for_shift("12C2") == "night"
+    assert StationUIService._gemini_slot_for_shift("HC3") == "night"
 
 
 def test_discard_session_clears_failed_binding_even_if_browser_event_is_stale(tmp_path) -> None:
@@ -1667,7 +1730,7 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "ảnh AI lỗi không tính" in TEST_UI_HTML
     assert "maybePromptRollBatchConfirm(batchReadyTotal)" in TEST_UI_HTML
     assert "rollBatchPendingMilestone>available" in TEST_UI_HTML
-    assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
+    assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
     assert 'id="shiftCountDetail"' in TEST_UI_HTML
     assert "Theo Ngày · Ca · Máy · Lệnh sản xuất" in TEST_UI_HTML
     assert "session.captureCount+=savedNow;await loadRecords()" in TEST_UI_HTML
@@ -2089,7 +2152,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "await api('/api/session/discard'" in TEST_UI_HTML
     assert "retryingFailedCore=!isProduct&&targetRound===0&&Boolean(session.eventId)&&!roundCoreReady(session,targetRound)" in TEST_UI_HTML
     assert "if(retryingFailedCore&&round.eventId===discardedEventId)round.eventId=null" in TEST_UI_HTML
-    assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
+    assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
     assert 'id="analyzeCoreBtn"' in TEST_UI_HTML
     assert 'id="analyzeProductBtn"' in TEST_UI_HTML
     assert 'id="productWeight"' in TEST_UI_HTML
@@ -2493,7 +2556,10 @@ def test_ui_does_not_offer_fake_gemini_profile_when_backend_is_local() -> None:
     assert "Đăng nhập để mở cài đặt" in TEST_UI_HTML
     assert 'id="geminiApiKeyInput" type="password"' in TEST_UI_HTML
     assert 'id="geminiKeyStatus"' in TEST_UI_HTML
-    assert "ĐỔI GEMINI KEY THÀNH CÔNG" in TEST_UI_HTML
+    assert "ĐỔI KEY CA NGÀY THÀNH CÔNG" in TEST_UI_HTML
+    assert "Key ca ngày · 12C1" in TEST_UI_HTML
+    assert "Key ca đêm · 12C2" in TEST_UI_HTML
+    assert "shift:sourceContext.shift" in TEST_UI_HTML
 
 
 def test_ui_redirects_expired_session_without_showing_save_zero_retry() -> None:

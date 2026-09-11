@@ -22,6 +22,11 @@ function getSupabaseAdminKey(): string | undefined {
   return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 }
 
+function isLegacyStoragePath(value: unknown): value is string {
+  return typeof value === "string" && Boolean(value.trim()) &&
+    !value.trim().startsWith("roll-captures/");
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method !== "GET") {
     return json(405, { ok: false, error: "method_not_allowed" });
@@ -57,7 +62,7 @@ Deno.serve(async (request: Request) => {
       "device_id,gateway_id,station_id,camera_id,analysis_id,frame_sha256,payload_hash," +
       "weight_source,qr_source,image_path,image_url,image_public_id," +
       "core_image_path,core_image_url,core_image_public_id," +
-      "qr_image_path,qr_image_url,qr_image_public_id,qr_frame_sha256,status",
+      "qr_image_path,qr_image_url,qr_image_public_id,qr_frame_sha256,status,metadata",
     )
     .eq("qr_code", qrCode)
     .eq("status", "confirmed")
@@ -83,7 +88,12 @@ Deno.serve(async (request: Request) => {
     ? measurementRow.image_url
     : null;
   let imageUrlExpiresIn: number | null = null;
-  if (!imageUrl && typeof measurementRow.image_path === "string") {
+  // New rows use deterministic Cloudinary public IDs in image_path. Only
+  // legacy rows that still point at the private compatibility bucket may
+  // request a short signed URL; never probe Supabase Storage for new/pending
+  // local-disk evidence because that creates needless egress and returns a
+  // broken URL after the seven-day Cloudinary retention window.
+  if (!imageUrl && isLegacyStoragePath(measurementRow.image_path)) {
     const { data: signed } = await supabase.storage
       .from("roll-captures")
       .createSignedUrl(measurementRow.image_path, 300);

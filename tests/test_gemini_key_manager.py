@@ -178,6 +178,39 @@ def test_load_restores_selected_backup_after_restart() -> None:
     assert current.status()["source"] == "supabase-encrypted-backup"
 
 
+def test_shift_keys_are_loaded_independently_and_report_safe_ids() -> None:
+    current = manager(
+        MemoryStore({"api_key": "day-key-value-123456789"}),
+        backup_store=MemoryStore({"api_key": "night-key-value-1234567"}),
+    )
+
+    assert current.load_shift_keys() == {
+        "day": "day-key-value-123456789",
+        "night": "night-key-value-1234567",
+    }
+    status = current.status()
+    assert status["active_slot"] == "automatic-by-shift"
+    assert status["routing"] == "12C1=day,12C2=night"
+    assert status["day_key_id"] == current.key_id("day-key-value-123456789")
+    assert status["night_key_id"] == current.key_id("night-key-value-1234567")
+
+
+def test_replace_night_shift_key_does_not_replace_day_key(monkeypatch) -> None:
+    day_store = MemoryStore({"api_key": "day-key-value-123456789"})
+    night_store = MemoryStore()
+    current = manager(day_store, backup_store=night_store)
+    monkeypatch.setattr(current, "validate", lambda key: None)
+
+    readers = current.replace_shift_key("night", "night-key-value-1234567")
+
+    assert all(reader.api_key == "night-key-value-1234567" for reader in readers)
+    assert day_store.value == {"api_key": "day-key-value-123456789"}
+    assert night_store.value == {
+        "api_key": "night-key-value-1234567",
+        "provider": "gemini-night",
+    }
+
+
 def test_gemini_store_uses_legacy_compatible_encrypted_secret_action() -> None:
     store = EncryptedCodexTokenStore(
         "https://example.invalid/ingest",

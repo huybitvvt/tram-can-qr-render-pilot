@@ -50,7 +50,6 @@ from .api_client import (
     fetch_supabase_table_count,
     mutate_remote_measurement,
     post_remote_action,
-    persist_product_evidence,
     sign_storage_image,
 )
 from .inference_queue import InferenceCoordinator, InferenceQueueFull
@@ -182,6 +181,13 @@ def safe_login_next(value: str) -> str:
 def allowed_embed_origins() -> list[str]:
     raw = os.environ.get("ROLL_SCALE_EMBED_ORIGINS", "*").strip() or "*"
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _is_legacy_storage_path(value: object) -> bool:
+    """Return true only for pre-Cloudinary private-bucket object paths."""
+
+    path = str(value or "").strip()
+    return bool(path) and not path.startswith("roll-captures/")
 
 
 MAX_BURST_FRAMES = 9
@@ -1097,6 +1103,8 @@ def _photo_draft_display_items(
     sync_states: dict[str, set[str]] = {}
     sync_errors: dict[str, set[str]] = {}
     for item in rows:
+        if str(item.get("capture_kind") or "core").strip().lower() == "inventory":
+            continue
         parent_id = str(
             item.get("parent_event_id") or item.get("event_id") or ""
         ).strip()
@@ -1622,6 +1630,7 @@ class StationUIService:
         station_count: int = 1,
         station_ids: list[str] | tuple[str, ...] | None = None,
         camera_ids: list[str] | tuple[str, ...] | None = None,
+        machine_ids: list[str] | tuple[str, ...] | None = None,
         staging_dir: str | Path | None = None,
         diagnostic_image: str | Path | None = None,
         inference_queue_size: int = 8,
@@ -1633,6 +1642,13 @@ class StationUIService:
         gemini_flash31_reader: GeminiWeightReader | None = None,
         gemini_flash37_reader: GeminiWeightReader | None = None,
         gemini_accurate_reader: GeminiWeightReader | None = None,
+        gemini_night_readers: tuple[
+            GeminiWeightReader,
+            GeminiWeightReader,
+            GeminiWeightReader,
+            GeminiWeightReader,
+        ]
+        | None = None,
         gemini_key_manager: GeminiKeyManager | None = None,
         codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None,
         weight_engine: str = "local",
@@ -1651,6 +1667,15 @@ class StationUIService:
             configured_camera_ids = [f"camera-{index:02d}" for index in range(1, station_count + 1)]
         if len(set(configured_camera_ids)) != len(configured_camera_ids):
             raise ValueError("camera_id values must be unique")
+        configured_machine_ids = list(machine_ids or ())
+        if configured_machine_ids and len(configured_machine_ids) != int(station_count):
+            raise ValueError("Số machine_id phải bằng station_count")
+        if configured_machine_ids and len(set(configured_machine_ids)) != len(
+            configured_machine_ids
+        ):
+            raise ValueError("Mỗi trạm/camera phải gắn với một máy riêng")
+        if not configured_machine_ids:
+            configured_machine_ids = ["" for _ in range(int(station_count))]
         configured_weight_rois = list(weight_rois or ())
         if configured_weight_rois and len(configured_weight_rois) != int(station_count):
             raise ValueError("Số weight ROI phải bằng station_count")
@@ -1677,6 +1702,23 @@ class StationUIService:
         self.gemini_flash31_reader = gemini_flash31_reader
         self.gemini_flash37_reader = gemini_flash37_reader
         self.gemini_accurate_reader = gemini_accurate_reader
+        day_readers = (
+            gemini_reader,
+            gemini_flash31_reader,
+            gemini_flash37_reader,
+            gemini_accurate_reader,
+        )
+        self.gemini_shift_readers: dict[
+            str,
+            tuple[
+                GeminiWeightReader | None,
+                GeminiWeightReader | None,
+                GeminiWeightReader | None,
+                GeminiWeightReader | None,
+            ],
+        ] = {"day": day_readers}
+        if gemini_night_readers is not None:
+            self.gemini_shift_readers["night"] = gemini_night_readers
         self.gemini_key_manager = gemini_key_manager
         self._retired_gemini_readers: list[GeminiWeightReader] = []
         self.codex_reader = codex_reader
@@ -1691,6 +1733,7 @@ class StationUIService:
                 "index": index,
                 "station_id": station_id,
                 "camera_id": configured_camera_ids[index - 1],
+                "machine_id": configured_machine_ids[index - 1],
                 "weight_roi": self._roi_text(self.weight_rois.get(station_id)),
             }
             for index, station_id in enumerate(configured_station_ids, start=1)
@@ -1748,10 +1791,11 @@ class StationUIService:
             self.inference.close()
         closed: set[int] = set()
         for reader in (
-            self.gemini_reader,
-            self.gemini_flash31_reader,
-            self.gemini_flash37_reader,
-            self.gemini_accurate_reader,
+            *(
+                item
+                for readers in self.gemini_shift_readers.values()
+                for item in readers
+            ),
             *self._retired_gemini_readers,
         ):
             if reader is not None and id(reader) not in closed:
@@ -1771,26 +1815,42 @@ class StationUIService:
         value = status.get("model") if isinstance(status, dict) else None
         return str(value) if value else None
 
-    def _gemini_reader_for(self, profile: str) -> GeminiWeightReader:
+    @staticmethod
+    def _gemini_slot_for_shift(shift: str) -> str:
+        normalized = str(shift or "").strip().upper()
+        if normalized in {"12C2", "HC3"}:
+            return "night"
+        return "day"
+
+    def _gemini_reader_for(
+        self,
+        profile: str,
+        key_slot: str = "day",
+    ) -> GeminiWeightReader:
         if profile not in GEMINI_RECOGNITION_PROFILES:
             raise ValueError(
                 "Chế độ nhận diện phải là flash31, fast, flash37 hoặc accurate"
             )
+        readers = self.gemini_shift_readers.get(key_slot)
+        if readers is None:
+            label = "ca đêm (12C2)" if key_slot == "night" else "ca ngày (12C1)"
+            raise ValueError(f"Chưa cấu hình Gemini Key {label}")
+        fast, flash31, flash37, accurate = readers
         if profile == "flash31":
-            if self.gemini_flash31_reader is None:
+            if flash31 is None:
                 raise ValueError("Gemini 3.1 Flash-Lite chưa được cấu hình")
-            return self.gemini_flash31_reader
+            return flash31
         if profile == "flash37":
-            if self.gemini_flash37_reader is None:
+            if flash37 is None:
                 raise ValueError("Gemini 3.7 Flash chưa được cấu hình")
-            return self.gemini_flash37_reader
+            return flash37
         if profile == "accurate":
-            if self.gemini_accurate_reader is None:
+            if accurate is None:
                 raise ValueError("Chế độ Chuẩn chưa được cấu hình")
-            return self.gemini_accurate_reader
-        if self.gemini_reader is None:
+            return accurate
+        if fast is None:
             raise RuntimeError("Gemini primary chưa được cấu hình")
-        return self.gemini_reader
+        return fast
 
     def _install_gemini_readers(
         self,
@@ -1800,19 +1860,20 @@ class StationUIService:
             GeminiWeightReader,
             GeminiWeightReader,
         ],
+        *,
+        slot: str = "day",
     ) -> None:
         fast, flash31, flash37, accurate = readers
         with self._lock:
-            old_fast = self.gemini_reader
-            old_flash31 = self.gemini_flash31_reader
-            old_flash37 = self.gemini_flash37_reader
-            old_accurate = self.gemini_accurate_reader
-            self.gemini_reader = fast
-            self.gemini_flash31_reader = flash31
-            self.gemini_flash37_reader = flash37
-            self.gemini_accurate_reader = accurate
+            previous = self.gemini_shift_readers.get(slot, (None, None, None, None))
+            self.gemini_shift_readers[slot] = readers
+            if slot == "day":
+                self.gemini_reader = fast
+                self.gemini_flash31_reader = flash31
+                self.gemini_flash37_reader = flash37
+                self.gemini_accurate_reader = accurate
         retired_ids = {id(reader) for reader in self._retired_gemini_readers}
-        for reader in (old_fast, old_flash31, old_flash37, old_accurate):
+        for reader in previous:
             if reader is not None and id(reader) not in retired_ids:
                 self._retired_gemini_readers.append(reader)
                 retired_ids.add(id(reader))
@@ -1820,41 +1881,39 @@ class StationUIService:
     def replace_gemini_key(self, api_key: str) -> dict[str, object]:
         if self.gemini_key_manager is None:
             raise ValueError("Chức năng đổi Gemini key chưa được cấu hình")
-        self._install_gemini_readers(self.gemini_key_manager.replace(api_key))
+        self._install_gemini_readers(
+            self.gemini_key_manager.replace_shift_key("day", api_key), slot="day"
+        )
         return {
             "ok": True,
             "changed": True,
             "stored_encrypted": True,
             "key_id": self.gemini_key_manager.key_id(api_key),
-            "message": "Đã kiểm tra, mã hóa và áp dụng Gemini API key mới",
+            "slot": "day",
+            "message": "Đã kiểm tra và lưu Key ca ngày cho 12C1",
         }
 
     def save_gemini_backup_key(self, api_key: str) -> dict[str, object]:
         if self.gemini_key_manager is None:
             raise ValueError("Chức năng Gemini key dự phòng chưa được cấu hình")
-        key_id = self.gemini_key_manager.save_backup(api_key)
+        readers = self.gemini_key_manager.replace_shift_key("night", api_key)
+        self._install_gemini_readers(readers, slot="night")
+        key_id = self.gemini_key_manager.key_id(api_key)
         return {
             "ok": True,
             "saved": True,
-            "activated": False,
+            "activated": True,
+            "slot": "night",
             "stored_encrypted": True,
             "key_id": key_id,
-            "message": "Đã kiểm tra và lưu Gemini key dự phòng; key đang dùng không đổi",
+            "message": "Đã kiểm tra và lưu Key ca đêm cho 12C2",
         }
 
     def switch_gemini_key(self, slot: str) -> dict[str, object]:
-        if self.gemini_key_manager is None:
-            raise ValueError("Chức năng chuyển Gemini key chưa được cấu hình")
-        self._install_gemini_readers(self.gemini_key_manager.activate(slot))
-        key_status = self.gemini_key_manager.status()
-        label = "dự phòng" if slot == "backup" else "chính"
-        return {
-            "ok": True,
-            "changed": True,
-            "active_slot": slot,
-            "key_id": key_status.get("key_id"),
-            "message": f"Đã chuyển sang Gemini key {label}",
-        }
+        raise ValueError(
+            "Không cho chuyển key thủ công: 12C1 luôn dùng Key ca ngày, "
+            "12C2 luôn dùng Key ca đêm"
+        )
 
     @staticmethod
     def _roi_text(roi: NormalizedROI | None) -> str:
@@ -2114,8 +2173,43 @@ class StationUIService:
                 },
             },
             "stations": stations,
+            "backup_maintenance": (
+                self.sync_worker.maintenance_status()
+                if self.sync_worker is not None
+                else {"enabled": False}
+            ),
             "inference": self.inference.status().as_dict(),
         }
+
+    def validate_station_source(
+        self,
+        station_id: str,
+        camera_id: str,
+        machine: str = "",
+        *,
+        require_machine: bool = False,
+    ) -> dict[str, object]:
+        """Bind a logical camera to exactly one configured production machine."""
+
+        station = next(
+            (
+                item
+                for item in self.station_configs
+                if str(item["station_id"]) == str(station_id)
+            ),
+            None,
+        )
+        if station is None or str(station["camera_id"]) != str(camera_id):
+            raise ValueError("Trạm hoặc camera không hợp lệ")
+        configured_machine = str(station.get("machine_id") or "").strip()
+        supplied_machine = str(machine or "").strip()
+        if configured_machine and require_machine and not supplied_machine:
+            raise ValueError(f"Thiếu máy đã gắn với camera {camera_id}")
+        if configured_machine and supplied_machine and supplied_machine != configured_machine:
+            raise ValueError(
+                f"Camera {camera_id} chỉ được gắn với máy {configured_machine}"
+            )
+        return station
 
     def stage_evidence_step(
         self,
@@ -2433,16 +2527,13 @@ class StationUIService:
         if parsed_parent_event_id.version != 4:
             raise ValueError("event_id phiếu cân phải là UUID v4")
         capture_kind = capture_kind.strip().lower()
-        if capture_kind not in {"core", "product"}:
-            raise ValueError("Ô ảnh phải là cân lõi hoặc cân sản phẩm")
+        if capture_kind not in {"core", "product", "inventory"}:
+            raise ValueError("Ô ảnh phải là cân lõi, cân sản phẩm hoặc kiểm kho")
         if not 0 <= capture_round <= 3:
             raise ValueError("Lần cân phải từ 1 đến 4")
-        configured = {
-            (str(item["station_id"]), str(item["camera_id"]))
-            for item in self.station_configs
-        }
-        if (station_id, camera_id) not in configured:
-            raise ValueError("Trạm hoặc camera không hợp lệ")
+        self.validate_station_source(
+            station_id, camera_id, machine, require_machine=True
+        )
 
         client_qr = client_qr_code.strip()
         if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
@@ -2528,6 +2619,7 @@ class StationUIService:
         recognition_provider: str = "gemini",
         capture_kind: str = "",
         client_qr_code: str = "",
+        gemini_key_slot: str = "day",
     ) -> dict[str, object]:
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
@@ -2668,7 +2760,9 @@ class StationUIService:
                 gemini_used = False
                 codex_used = True
             else:
-                selected_ai_reader = self._gemini_reader_for(recognition_profile)
+                selected_ai_reader = self._gemini_reader_for(
+                    recognition_profile, gemini_key_slot
+                )
             provider_label = "CODEX" if codex_used else "GEMINI"
             provider_source = "codex-primary" if codex_used else "gemini-primary"
             single_image_request = len(frames) == 1
@@ -2794,7 +2888,9 @@ class StationUIService:
             and len(frames) >= 3
         ):
             gemini_used = True
-            selected_gemini_reader = self._gemini_reader_for(recognition_profile)
+            selected_gemini_reader = self._gemini_reader_for(
+                recognition_profile, gemini_key_slot
+            )
             suggestion = selected_gemini_reader.read(
                 frames,
                 unit=unit,
@@ -2848,6 +2944,7 @@ class StationUIService:
             "recognition_source": recognition_source,
             "recognition_profile": recognition_profile,
             "recognition_provider": recognition_provider,
+            "gemini_key_slot": gemini_key_slot if recognition_provider == "gemini" else None,
             "local_candidate": (
                 local_candidate.value
                 if local_candidate is not None
@@ -2892,6 +2989,8 @@ class StationUIService:
         capture_kind: str = "",
         client_qr_code: str = "",
         context_station_id: str | None = None,
+        context_camera_id: str | None = None,
+        context_shift: str = "",
     ) -> dict[str, object]:
         additional_frames = list(weight_frames or [])
         if len(additional_frames) >= MAX_BURST_FRAMES:
@@ -2911,6 +3010,11 @@ class StationUIService:
         ):
             raise ValueError("Camera không lấy đủ tối thiểu 3 frame LED; hãy chụp lại")
         identities = (event_id, station_id, camera_id)
+        if context_station_id or context_camera_id:
+            if not context_station_id or not context_camera_id:
+                raise ValueError("Cần đủ station_id và camera_id để chọn nguồn camera")
+            self.validate_station_source(context_station_id, context_camera_id)
+        gemini_key_slot = self._gemini_slot_for_shift(context_shift)
         configured_roi = self.weight_rois.get(context_station_id or station_id or "")
         if configured_roi is None and not any(identities) and self.station_count == 1:
             configured_roi = self.weight_rois.get(str(self.station_configs[0]["station_id"]))
@@ -2954,6 +3058,7 @@ class StationUIService:
                 recognition_provider,
                 capture_kind,
                 client_qr_code,
+                gemini_key_slot,
             )
             return {**result, **evidence_metadata}
         if not all(identities):
@@ -2978,6 +3083,7 @@ class StationUIService:
                 recognition_provider,
                 capture_kind,
                 client_qr_code,
+                gemini_key_slot,
             )
             binding = self.sessions.mark_ready(binding.analysis_id)
         except Exception as exc:
@@ -3037,9 +3143,18 @@ class StationUIService:
         # create a second measurement.  Analysis binding is only requested
         # when one of the analysis identity fields is supplied.
         identity_values = (analysis_id, station_id, camera_id)
-        bound_capture = any(identity_values) or bool(frame_sha256)
+        bound_capture = bool(analysis_id) or bool(frame_sha256)
         if bound_capture and not all((event_id, *identity_values)):
             raise ValueError("Cần đủ event_id, analysis_id, station_id và camera_id")
+        if bool(station_id) != bool(camera_id):
+            raise ValueError("Cần đủ station_id và camera_id")
+        if station_id and camera_id:
+            self.validate_station_source(
+                station_id,
+                camera_id,
+                _raw_tag(weight_raw, "SOURCE_MACHINE"),
+                require_machine=True,
+            )
         computed_frame_sha = jpeg_sha256(encode_staged_jpeg(frame))
         if frame_sha256 and frame_sha256.lower() != computed_frame_sha:
             raise AnalysisBindingMismatch("frame_sha256 không khớp ảnh gửi để lưu")
@@ -3124,35 +3239,7 @@ class StationUIService:
         # one operator click sends the product code, core weight and evidence
         # image together. A failed cloud attempt remains durable in the outbox.
         if self.sync_worker is not None:
-            cloud_confirmed = self.sync_worker.sync_event(measurement.event_id)
-            if (
-                not cloud_confirmed
-                and product_weight is not None
-                and measurement.product_image_path
-            ):
-                supabase_url = os.environ.get("ROLL_SCALE_SUPABASE_URL", "").strip()
-                service_key = os.environ.get("ROLL_SCALE_SUPABASE_SERVICE_KEY", "").strip()
-                if supabase_url and service_key:
-                    try:
-                        remote = persist_product_evidence(
-                            supabase_url,
-                            service_key,
-                            event_id=measurement.event_id,
-                            gateway_id=self.gateway_id,
-                            image_path=measurement.product_image_path,
-                            product_weight=product_weight,
-                        )
-                        core_url = remote.get("core_image_url") or remote.get("image_url")
-                        core_public_id = remote.get("core_image_public_id") or remote.get("image_public_id")
-                        self.store.mark_synced(
-                            measurement.event_id,
-                            int(remote["id"]) if remote.get("id") is not None else None,
-                            str(core_url) if core_url else None,
-                            str(core_public_id) if core_public_id else None,
-                        )
-                        cloud_confirmed = True
-                    except Exception:
-                        cloud_confirmed = False
+            self.sync_worker.sync_event(measurement.event_id)
         saved = self.store.get(measurement.event_id)
         current = saved or measurement
         return {
@@ -3191,6 +3278,7 @@ class StationUIService:
         analysis_id: str | None = None,
         station_id: str | None = None,
         camera_id: str | None = None,
+        machine: str = "",
         frame_sha256: str | None = None,
     ) -> dict[str, object]:
         """Commit one photographed inventory weight without a core capture step."""
@@ -3208,6 +3296,17 @@ class StationUIService:
             raise ValueError("Mã sản phẩm dài quá 512 ký tự")
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
+        if bool(station_id) != bool(camera_id):
+            raise ValueError("Cần đủ station_id và camera_id")
+        if machine and not station_id:
+            raise ValueError("Không được chọn máy khi thiếu trạm và camera")
+        if station_id and camera_id:
+            self.validate_station_source(
+                station_id,
+                camera_id,
+                machine,
+                require_machine=True,
+            )
         for label, value in (
             ("Khối lượng", weight),
             ("Khối lượng lõi", core_weight),
@@ -3552,6 +3651,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--factory-samples", default="dataset/factory_raw")
     parser.add_argument("--staging-dir", help="Thư mục JPEG tạm đã khóa theo analysis_id")
+    parser.add_argument(
+        "--local-retention-days",
+        type=int,
+        default=int(os.environ.get("ROLL_SCALE_LOCAL_RETENTION_DAYS", "7")),
+        help="Số ngày giữ evidence ảnh trên Render Persistent Disk",
+    )
     parser.add_argument("--inference-queue-size", type=int, default=8)
     parser.add_argument("--station-count", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument(
@@ -3565,6 +3670,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         dest="camera_ids",
         help="ID camera cấu hình theo trạm; lặp lại 1-3 lần (mặc định camera-01...)",
+    )
+    parser.add_argument(
+        "--machine-id",
+        action="append",
+        dest="machine_ids",
+        help="Tên máy khóa theo từng trạm/camera; lặp lại đúng station-count lần",
     )
     parser.add_argument(
         "--weight-roi",
@@ -3619,6 +3730,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         raise ValueError("Cần đủ ROLL_SCALE_WEB_USERNAME và ROLL_SCALE_WEB_PASSWORD")
     station_ids = getattr(args, "station_ids", None)
     camera_ids = getattr(args, "camera_ids", None)
+    machine_ids = getattr(args, "machine_ids", None)
     weight_rois = getattr(args, "weight_rois", None)
     if station_ids and len(station_ids) != args.station_count:
         raise ValueError("Số --station-id phải bằng --station-count")
@@ -3626,6 +3738,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         raise ValueError("Số --camera-id phải bằng --station-count")
     if camera_ids and len(set(camera_ids)) != len(camera_ids):
         raise ValueError("camera_id values must be unique")
+    if machine_ids and len(machine_ids) != args.station_count:
+        raise ValueError("Số --machine-id phải bằng --station-count")
+    if machine_ids and len(set(machine_ids)) != len(machine_ids):
+        raise ValueError("Mỗi --machine-id chỉ được gắn với một camera")
     if weight_rois and len(weight_rois) != args.station_count:
         raise ValueError("Số --weight-roi phải bằng --station-count")
     weight_engine = args.weight_engine
@@ -3635,6 +3751,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
     gemini_flash31_reader = None
     gemini_flash37_reader = None
     gemini_accurate_reader = None
+    gemini_night_readers = None
     gemini_key_manager = None
     if weight_engine in {"hybrid", "gemini"}:
         gemini_encryption_key = os.environ.get(
@@ -3670,7 +3787,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             accurate_timeout=args.gemini_accurate_timeout,
             initial_key=os.environ.get("ROLL_SCALE_GEMINI_API_KEY", ""),
         )
-        gemini_api_key = gemini_key_manager.load_key()
+        gemini_shift_keys = gemini_key_manager.load_shift_keys()
+        gemini_api_key = gemini_shift_keys["day"]
         if not gemini_api_key:
             raise ValueError(
                 f"weight_engine={weight_engine} cần Gemini API key trong biến môi trường "
@@ -3684,6 +3802,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         ) = gemini_key_manager.create_readers(
             gemini_api_key,
         )
+        if gemini_shift_keys["night"]:
+            gemini_night_readers = gemini_key_manager.create_readers(
+                gemini_shift_keys["night"]
+            )
     codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None
     if args.codex_enabled:
         codex_mode = args.codex_mode
@@ -3711,7 +3833,14 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
     store = MeasurementStore(args.db, args.captures)
     worker = None
     if args.api_url:
-        worker = OutboxSyncWorker(store, args.api_url, args.api_token, args.gateway_id)
+        worker = OutboxSyncWorker(
+            store,
+            args.api_url,
+            args.api_token,
+            args.gateway_id,
+            maintenance_enabled=True,
+            local_retention_days=args.local_retention_days,
+        )
         worker.start()
     service = StationUIService(
         store,
@@ -3732,6 +3861,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         station_count=args.station_count,
         station_ids=station_ids,
         camera_ids=camera_ids,
+        machine_ids=machine_ids,
         staging_dir=args.staging_dir,
         diagnostic_image=args.diagnostic_image,
         inference_queue_size=args.inference_queue_size,
@@ -3742,6 +3872,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         gemini_flash31_reader=gemini_flash31_reader,
         gemini_flash37_reader=gemini_flash37_reader,
         gemini_accurate_reader=gemini_accurate_reader,
+        gemini_night_readers=gemini_night_readers,
         gemini_key_manager=gemini_key_manager,
         codex_reader=codex_reader,
         weight_engine=weight_engine,
@@ -4216,8 +4347,16 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     core_url = item.get("core_image_url") or item.get("image_url")
                     product_url = item.get("product_image_url")
                     product_path = item.get("product_image_path")
+                    # Keep read compatibility for rows written before the
+                    # Render-disk/Cloudinary migration. New deterministic
+                    # Cloudinary IDs also live below roll-captures/ and must
+                    # never trigger a Supabase Storage request.
                     if not product_url and isinstance(product_path, str) and product_path:
-                        if supabase_url and publishable_key:
+                        if (
+                            _is_legacy_storage_path(product_path)
+                            and supabase_url
+                            and publishable_key
+                        ):
                             try:
                                 product_url = sign_storage_image(
                                     supabase_url,
@@ -4793,6 +4932,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             recognition_provider=recognition_provider,
                             capture_kind=kind,
                             client_qr_code=("" if kind == "product" else previous_qr),
+                            context_shift=shift,
                         )
                     except Exception as exc:
                         weight_error = str(exc)
@@ -5043,6 +5183,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         capture_kind=capture_kind,
                         client_qr_code=str(payload.get("client_qr_code", "")),
                         context_station_id=str(payload.get("station_id", "")) or None,
+                        context_camera_id=str(payload.get("camera_id", "")) or None,
+                        context_shift=str(payload.get("shift", "")),
                     )
                     if (
                         capture_kind
@@ -5121,6 +5263,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         camera_id=str(payload["camera_id"])
                         if payload.get("camera_id")
                         else None,
+                        machine=str(payload.get("machine", "")),
                         frame_sha256=str(payload["frame_sha256"])
                         if payload.get("frame_sha256")
                         else None,

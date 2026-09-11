@@ -453,82 +453,33 @@ def delete_supabase_photo_drafts(
     return len(parsed)
 
 
-def persist_product_evidence(
-    supabase_url: str,
-    service_key: str,
-    *,
-    event_id: str,
-    gateway_id: str,
-    image_path: str | Path,
-    product_weight: float,
-    timeout: float = 20.0,
-) -> dict[str, object]:
-    object_path = f"{gateway_id}/product-weight/{event_id}.jpg"
-    encoded_path = urllib.parse.quote(object_path, safe="/")
-    auth_headers = {
-        "apikey": service_key,
-        "Authorization": f"Bearer {service_key}",
-    }
-    upload = urllib.request.Request(
-        f"{supabase_url.rstrip('/')}/storage/v1/object/roll-captures/{encoded_path}",
-        data=Path(image_path).read_bytes(),
-        headers={**auth_headers, "Content-Type": "image/jpeg", "x-upsert": "true"},
-        method="POST",
-    )
-    with urllib.request.urlopen(upload, timeout=timeout):
-        pass
-    stable_url = (
-        f"{supabase_url.rstrip('/')}/storage/v1/object/authenticated/"
-        f"roll-captures/{encoded_path}"
-    )
-    product_fields = {
-        "product_weight": float(product_weight),
-        "product_image_path": object_path,
-        "product_image_url": stable_url,
-        "product_image_public_id": object_path,
-    }
-    patch_url = (
-        f"{supabase_url.rstrip('/')}/rest/v1/can_tu_dong?"
-        f"event_id=eq.{urllib.parse.quote(event_id)}&select=*"
-    )
-    def patch_row(fields: dict[str, object]) -> list[object]:
-        patch = urllib.request.Request(
-            patch_url,
-            data=json.dumps(fields).encode("utf-8"),
-            headers={
-                **auth_headers,
-                "Content-Type": "application/json",
-                "Prefer": "return=representation",
-            },
-            method="PATCH",
-        )
-        with urllib.request.urlopen(patch, timeout=timeout) as response:
-            value = json.loads(response.read().decode("utf-8"))
-        return value if isinstance(value, list) else []
-    try:
-        rows = patch_row(product_fields)
-    except urllib.error.HTTPError as exc:
-        if exc.code != 400:
-            raise
-        product_fields.pop("product_weight", None)
-        rows = patch_row(product_fields)
-    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
-        raise RuntimeError("Supabase product evidence update matched no event")
-    return rows[0]
-
-
 def sign_storage_image(
     supabase_url: str,
     service_key: str,
     object_path: str,
     *,
-    expires_in: int = 3600,
+    expires_in: int = 300,
     timeout: float = 10.0,
 ) -> str:
+    """Resolve a legacy private-bucket image without uploading new evidence.
+
+    New captures use the Render persistent disk plus Cloudinary and therefore
+    never call this compatibility path.  Older Supabase rows may still carry
+    a ``product_image_path`` in the private ``roll-captures`` bucket; keep the
+    short-lived signed URL fallback so those rows remain viewable.
+    """
+
+    object_path = str(object_path or "").strip()
+    if not object_path or object_path.startswith("roll-captures/"):
+        # The old bucket stores paths below the gateway prefix, while new
+        # Cloudinary IDs also use the roll-captures namespace.  The caller
+        # filters the latter out; reject an unqualified path defensively.
+        raise ValueError("Not a legacy Supabase Storage object path")
+    safe_expiry = max(60, min(int(expires_in), 3600))
     encoded_path = urllib.parse.quote(object_path, safe="/")
     request = urllib.request.Request(
         f"{supabase_url.rstrip('/')}/storage/v1/object/sign/roll-captures/{encoded_path}",
-        data=json.dumps({"expiresIn": expires_in}).encode("utf-8"),
+        data=json.dumps({"expiresIn": safe_expiry}).encode("utf-8"),
         headers={
             "apikey": service_key,
             "Authorization": f"Bearer {service_key}",
@@ -567,24 +518,34 @@ def validate_ingest_response(
         valid_remote_id = False
     if not valid_remote_id:
         raise IngestResponseError("ingest response id must be a positive integer")
-    if require_remote_image:
-        core_pair = (response.get("core_image_url"), response.get("core_image_public_id"))
-        legacy_pair = (response.get("image_url"), response.get("image_public_id"))
-        if not any(
-            all(isinstance(value, str) and value.strip() for value in pair)
-            for pair in (core_pair, legacy_pair)
-        ):
-            raise IngestResponseError(
-                "ingest response must confirm persisted core-weight evidence"
-            )
+    core_pair = (response.get("core_image_url"), response.get("core_image_public_id"))
+    legacy_pair = (response.get("image_url"), response.get("image_public_id"))
+    has_remote_core = any(
+        all(isinstance(value, str) and value.strip() for value in pair)
+        for pair in (core_pair, legacy_pair)
+    )
+    local_backup_committed = response.get("local_backup_committed") is True
+    # The Edge Function may acknowledge a durable Render-disk commit before
+    # Cloudinary is available. Never accept an image-less response unless that
+    # explicit local evidence flag is present, even for legacy opt-out callers.
+    if not has_remote_core and not local_backup_committed:
+        message = (
+            "ingest response must confirm persisted core-weight evidence"
+            if require_remote_image
+            else "ingest response must confirm remote or local persistent evidence"
+        )
+        raise IngestResponseError(message)
     if require_product_image:
         product_pair = (
             response.get("product_image_url"),
             response.get("product_image_public_id"),
         )
-        if not all(isinstance(value, str) and value.strip() for value in product_pair):
+        has_remote_product = all(
+            isinstance(value, str) and value.strip() for value in product_pair
+        )
+        if not has_remote_product and not local_backup_committed:
             raise IngestResponseError(
-                "ingest response must confirm persisted product-weight evidence"
+                "ingest response must confirm remote or local persistent product evidence"
             )
     return response
 

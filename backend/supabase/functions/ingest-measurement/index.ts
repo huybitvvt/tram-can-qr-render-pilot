@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const UNITS = new Set(["kg", "g", "lb"]);
@@ -7,6 +7,10 @@ const WEIGH_BATCH_TABLE = "ca_can";
 const INVENTORY_TABLE = "can_kiem_kho";
 const PHOTO_DRAFT_TABLE = "anh_can_cho_ai";
 const SECRET_TABLE = "roll_scale_secrets";
+const DEFAULT_CLOUDINARY_RETENTION_DAYS = 7;
+const LOCAL_BACKUP_PROVIDER = "render_persistent_disk";
+const MAX_LOCAL_EVIDENCE_ITEMS = 500;
+const MAX_LOCAL_EVIDENCE_ROLES = 3;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 function normalizeEventId(value: unknown): string {
@@ -143,6 +147,411 @@ type CloudinaryUpload = {
   secureUrl: string;
 };
 
+async function destroyCloudinary(publicId: string): Promise<void> {
+  const cloudName = Deno.env.get("CLOUDINARY_CLOUD_NAME");
+  const apiKey = Deno.env.get("CLOUDINARY_API_KEY");
+  const apiSecret = Deno.env.get("CLOUDINARY_API_SECRET");
+  if (!cloudName || !apiKey || !apiSecret) {
+    throw new Error("cloudinary_not_configured");
+  }
+  const params = new URLSearchParams({ invalidate: "true" });
+  params.append("public_ids[]", publicId);
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/resources/image/upload?${params}`,
+    {
+      method: "DELETE",
+      headers: { authorization: `Basic ${btoa(`${apiKey}:${apiSecret}`)}` },
+    },
+  );
+  let result: Record<string, unknown> = {};
+  try {
+    result = await response.json() as Record<string, unknown>;
+  } catch {
+    // HTTP status is authoritative below.
+  }
+  const deleted = result.deleted && typeof result.deleted === "object"
+    ? (result.deleted as Record<string, unknown>)[publicId]
+    : undefined;
+  if (!response.ok || !["deleted", "not_found"].includes(String(deleted ?? ""))) {
+    throw new Error(`cloudinary_destroy_failed:${response.status}`);
+  }
+}
+
+function backupMetadata(
+  metadata: Record<string, unknown>,
+  capturedAt: string,
+): Record<string, unknown> {
+  return {
+    ...metadata,
+    image_backup: {
+      provider: LOCAL_BACKUP_PROVIDER,
+      committed_before_cloud: true,
+      retention_days: DEFAULT_CLOUDINARY_RETENTION_DAYS,
+      evidence_window_ends_at: new Date(
+        Date.parse(capturedAt) + DEFAULT_CLOUDINARY_RETENTION_DAYS * 86400000,
+      ).toISOString(),
+    },
+    local_backup_committed_at: new Date().toISOString(),
+    cloudinary_delete_after: new Date(
+      Date.parse(capturedAt) + DEFAULT_CLOUDINARY_RETENTION_DAYS * 86400000,
+    ).toISOString(),
+  };
+}
+
+function hasLocalBackupCommit(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const metadata = value as Record<string, unknown>;
+  const imageBackup = metadata.image_backup;
+  if (!imageBackup || typeof imageBackup !== "object" || Array.isArray(imageBackup)) {
+    return false;
+  }
+  const backup = imageBackup as Record<string, unknown>;
+  return backup.provider === LOCAL_BACKUP_PROVIDER && backup.committed_before_cloud === true;
+}
+
+function rowHasLocalBackupCommit(row: Record<string, unknown>): boolean {
+  return hasLocalBackupCommit(row.metadata);
+}
+
+function metadataCloudinaryPending(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const metadata = value as Record<string, unknown>;
+  return metadata.cloudinary_pending === true || metadata.local_backup_only === true;
+}
+
+function cloudinaryUrl(value: unknown): string {
+  const url = typeof value === "string" ? value.trim() : "";
+  return url.startsWith("https://res.cloudinary.com/") ? url : "";
+}
+
+type LocalEvidenceRole = {
+  sha256: string;
+  bytes: number;
+};
+
+type LocalEvidenceItem = {
+  table: string;
+  event_id: string;
+  captured_at: string;
+  roles: Record<string, LocalEvidenceRole>;
+};
+
+type LocalEvidenceReport = {
+  provider: string;
+  retention_days: number;
+  generated_at: string;
+  items: LocalEvidenceItem[];
+};
+
+function parseLocalEvidence(value: unknown): LocalEvidenceReport {
+  const empty: LocalEvidenceReport = {
+    provider: "",
+    retention_days: DEFAULT_CLOUDINARY_RETENTION_DAYS,
+    generated_at: "",
+    items: [],
+  };
+  if (!value || typeof value !== "object") return empty;
+  const input = value as Record<string, unknown>;
+  const provider = typeof input.provider === "string" ? input.provider.trim() : "";
+  if (provider !== LOCAL_BACKUP_PROVIDER) return empty;
+  const requestedRetention = Number(input.retention_days);
+  const retentionDays = Number.isInteger(requestedRetention)
+    ? Math.max(1, Math.min(requestedRetention, 30))
+    : DEFAULT_CLOUDINARY_RETENTION_DAYS;
+  const rawItems = Array.isArray(input.items) ? input.items : [];
+  const items: LocalEvidenceItem[] = [];
+  for (const rawItem of rawItems.slice(0, MAX_LOCAL_EVIDENCE_ITEMS)) {
+    if (!rawItem || typeof rawItem !== "object") continue;
+    const item = rawItem as Record<string, unknown>;
+    const table = typeof item.table === "string" ? item.table.trim() : "";
+    const eventId = typeof item.event_id === "string" ? item.event_id.trim() : "";
+    const capturedAt = typeof item.captured_at === "string" ? item.captured_at.trim() : "";
+    if (
+      ![MEASUREMENT_TABLE, INVENTORY_TABLE, PHOTO_DRAFT_TABLE].includes(table) ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(eventId) ||
+      !capturedAt || Number.isNaN(Date.parse(capturedAt))
+    ) continue;
+    const rawRoles = item.roles && typeof item.roles === "object"
+      ? item.roles as Record<string, unknown>
+      : {};
+    const roles: Record<string, LocalEvidenceRole> = {};
+    for (const [role, rawRole] of Object.entries(rawRoles).slice(0, MAX_LOCAL_EVIDENCE_ROLES)) {
+      if (!rawRole || typeof rawRole !== "object") continue;
+      const roleValue = rawRole as Record<string, unknown>;
+      const sha256 = typeof roleValue.sha256 === "string"
+        ? roleValue.sha256.trim().toLowerCase()
+        : "";
+      const bytes = Number(roleValue.bytes);
+      if (
+        !["core", "product", "image"].includes(role) ||
+        !SHA256_PATTERN.test(sha256) ||
+        !Number.isSafeInteger(bytes) || bytes < 4 || bytes > MAX_IMAGE_BYTES
+      ) continue;
+      roles[role] = { sha256, bytes };
+    }
+    if (Object.keys(roles).length) {
+      items.push({ table, event_id: eventId, captured_at: capturedAt, roles });
+    }
+  }
+  return {
+    provider,
+    retention_days: retentionDays,
+    generated_at: typeof input.generated_at === "string" ? input.generated_at : "",
+    items,
+  };
+}
+
+function evidenceRoleMatches(
+  table: string,
+  row: Record<string, unknown>,
+  role: string,
+  evidence: LocalEvidenceRole,
+): boolean {
+  const expectedHash = role === "core" || role === "image" ? row.frame_sha256 : null;
+  if (expectedHash && SHA256_PATTERN.test(String(expectedHash))) {
+    return String(expectedHash).toLowerCase() === evidence.sha256 &&
+      Number(evidence.bytes) > 0;
+  }
+  // Product images did not have a dedicated hash column in older schemas. The
+  // gateway still reports a checksum after reading the committed local file;
+  // the event identity and bounded byte count are the independent proof here.
+  return table === MEASUREMENT_TABLE && role === "product" && evidence.bytes > 0;
+}
+
+async function runBackupMaintenance(
+  supabase: SupabaseClient,
+  retentionDays: number,
+  localEvidence: LocalEvidenceReport,
+): Promise<Record<string, unknown>> {
+  const cutoff = new Date(Date.now() - retentionDays * 86400000).toISOString();
+  let checked = 0;
+  let verified = 0;
+  let deleted = 0;
+  const errors: string[] = [];
+  const released: Array<Record<string, string>> = [];
+  if (!localEvidence.items.length) {
+    return {
+      checked,
+      verified,
+      cloudinary_deleted: deleted,
+      released,
+      errors,
+      retention_days: retentionDays,
+      cutoff,
+      backup_provider: LOCAL_BACKUP_PROVIDER,
+      metadata_only: true,
+    };
+  }
+  const tableConfigs = [
+    {
+      table: MEASUREMENT_TABLE,
+      select:
+        "id,event_id,gateway_id,captured_at,image_url,image_public_id,core_image_url,core_image_public_id," +
+        "product_image_url,product_image_public_id,frame_sha256,metadata",
+      roles: ["core", "product"],
+    },
+    {
+      table: INVENTORY_TABLE,
+      select: "id,event_id,gateway_id,captured_at,image_url,image_public_id,frame_sha256,metadata",
+      roles: ["image"],
+    },
+    {
+      table: PHOTO_DRAFT_TABLE,
+      select: "id,event_id,gateway_id,captured_at,image_url,image_public_id,frame_sha256,metadata",
+      roles: ["image"],
+    },
+  ];
+  const reportByKey = new Map(
+    localEvidence.items.map((item) => [`${item.table}:${item.event_id}`, item]),
+  );
+  for (const config of tableConfigs) {
+    const pending = [...reportByKey.values()].filter((item) => item.table === config.table);
+    for (let start = 0; start < pending.length; start += 8) {
+      await Promise.all(pending.slice(start, start + 8).map(async (reportItem) => {
+      const { data: rawRow, error } = await supabase.from(config.table)
+        .select(config.select)
+        .eq("event_id", reportItem.event_id)
+        .lte("captured_at", cutoff)
+        .maybeSingle();
+      if (error) {
+        errors.push(`${config.table}:${reportItem.event_id}:select:${error.message}`);
+        return;
+      }
+      if (!rawRow) return;
+      const row = rawRow as unknown as Record<string, unknown>;
+      if (Date.parse(String(row.captured_at ?? "")) !== Date.parse(reportItem.captured_at)) {
+        errors.push("captured_at_mismatch:" + config.table + ":" + reportItem.event_id);
+        return;
+      }
+      const metadata = row.metadata && typeof row.metadata === "object"
+        ? { ...(row.metadata as Record<string, unknown>) }
+        : {};
+      const storedReleasedRoles = metadata.image_retention_released_roles &&
+          typeof metadata.image_retention_released_roles === "object" &&
+          !Array.isArray(metadata.image_retention_released_roles)
+        ? { ...(metadata.image_retention_released_roles as Record<string, unknown>) }
+        : {};
+      const updates: Record<string, unknown> = {};
+      let rowChanged = false;
+      const releasedForRow: Array<Record<string, string>> = [];
+      for (const role of config.roles) {
+        const prefix = role === "core" ? "core_image" : role === "product"
+          ? "product_image"
+          : "image";
+        const imageUrl = String(
+          row[`${prefix}_url`] ?? (role === "core" ? row.image_url : "") ?? "",
+        );
+        const publicId = String(
+          row[`${prefix}_public_id`] ?? (role === "core" ? row.image_public_id : "") ?? "",
+        );
+        const evidence = reportItem.roles[role];
+        if (!evidence) continue;
+        const priorRelease = storedReleasedRoles[role];
+        if (priorRelease && typeof priorRelease === "object") {
+          const priorHash = String((priorRelease as Record<string, unknown>).sha256 ?? "")
+            .trim().toLowerCase();
+          if (priorHash === evidence.sha256) {
+            // The DB update may have committed after Cloudinary was destroyed,
+            // but before the worker could prune its local file. Re-emit the
+            // release without downloading or destroying the remote object a
+            // second time. This makes maintenance idempotent across crashes.
+            if (imageUrl || publicId) {
+              updates[`${prefix}_url`] = null;
+              updates[`${prefix}_public_id`] = null;
+              if (config.table === MEASUREMENT_TABLE && role === "core") {
+                updates.image_url = null;
+                updates.image_public_id = null;
+              }
+              rowChanged = true;
+            }
+            releasedForRow.push({
+              table: config.table,
+              event_id: reportItem.event_id,
+              role,
+              sha256: evidence.sha256,
+            });
+            continue;
+          }
+          errors.push(`${config.table}:${row.id}:${role}:released_evidence_mismatch`);
+          continue;
+        }
+        const hasCloudinaryPair = Boolean(cloudinaryUrl(imageUrl) && publicId);
+        if (!hasCloudinaryPair) {
+          const localOnly = rowHasLocalBackupCommit(row) && (
+            metadata.cloudinary_pending === true ||
+            metadata.local_backup_only === true ||
+            (!imageUrl && !publicId)
+          );
+          if (!localOnly || imageUrl) {
+            if (localOnly && imageUrl && !publicId) {
+              errors.push(`${config.table}:${row.id}:${role}:missing_cloudinary_public_id`);
+            }
+            continue;
+          }
+          checked += 1;
+          if (!evidenceRoleMatches(config.table, row, role, evidence)) {
+            errors.push(`${config.table}:${row.id}:${role}:local_evidence_mismatch`);
+            continue;
+          }
+          verified += 1;
+          if (publicId) {
+            try {
+              await destroyCloudinary(publicId);
+              deleted += 1;
+            } catch (deleteError) {
+              errors.push(
+                `${config.table}:${row.id}:${role}:` +
+                  (deleteError instanceof Error ? deleteError.message : "delete_failed"),
+              );
+              continue;
+            }
+          }
+          updates[`${prefix}_url`] = null;
+          updates[`${prefix}_public_id`] = null;
+          if (config.table === MEASUREMENT_TABLE && role === "core") {
+            updates.image_url = null;
+            updates.image_public_id = null;
+          }
+          storedReleasedRoles[role] = {
+            sha256: evidence.sha256,
+            released_at: new Date().toISOString(),
+            cloudinary: "not_uploaded",
+          };
+          releasedForRow.push({
+            table: config.table,
+            event_id: reportItem.event_id,
+            role,
+            sha256: evidence.sha256,
+          });
+          rowChanged = true;
+          continue;
+        }
+        checked += 1;
+        if (!evidenceRoleMatches(config.table, row, role, evidence)) {
+          errors.push(`${config.table}:${row.id}:${role}:local_evidence_mismatch`);
+          continue;
+        }
+        verified += 1;
+        try {
+          await destroyCloudinary(publicId);
+          updates[`${prefix}_url`] = null;
+          updates[`${prefix}_public_id`] = null;
+          if (config.table === MEASUREMENT_TABLE && role === "core") {
+            updates.image_url = null;
+            updates.image_public_id = null;
+          }
+          storedReleasedRoles[role] = {
+            sha256: evidence.sha256,
+            released_at: new Date().toISOString(),
+          };
+          releasedForRow.push({
+            table: config.table,
+            event_id: reportItem.event_id,
+            role,
+            sha256: evidence.sha256,
+          });
+          deleted += 1;
+          rowChanged = true;
+        } catch (deleteError) {
+          errors.push(
+            `${config.table}:${row.id}:${role}:` +
+              (deleteError instanceof Error ? deleteError.message : "delete_failed"),
+          );
+        }
+      }
+      metadata.backup_last_checked_at = new Date().toISOString();
+      if (rowChanged) {
+        metadata.cloudinary_deleted_at = new Date().toISOString();
+        metadata.image_retention_released = true;
+        metadata.image_retention_released_roles = storedReleasedRoles;
+      }
+      const { error: updateError } = await supabase.from(config.table)
+        .update({ ...updates, metadata })
+        .eq("event_id", reportItem.event_id);
+      if (updateError) {
+        errors.push(`${config.table}:${row.id}:update:${updateError.message}`);
+      } else if (releasedForRow.length) {
+        // Only authorize local deletion after the row records the remote
+        // release. If this update fails, the next run can retry the
+        // idempotent Cloudinary destroy while retaining the local evidence.
+        released.push(...releasedForRow);
+      }
+      }));
+    }
+  }
+  return {
+    checked,
+    verified,
+    cloudinary_deleted: deleted,
+    errors: errors.slice(0, 100),
+    retention_days: retentionDays,
+    cutoff,
+    backup_provider: LOCAL_BACKUP_PROVIDER,
+    metadata_only: true,
+    released,
+  };
+}
+
 async function uploadToCloudinary(
   image: Uint8Array,
   publicId: string,
@@ -161,7 +570,10 @@ async function uploadToCloudinary(
     `${publicId.split("/").at(-1)}.jpg`,
   );
   form.append("public_id", publicId);
-  form.append("overwrite", "false");
+  // Public IDs are deterministic event keys. Overwrite makes a retry after a
+  // successful upload/failed DB insert idempotent instead of treating the
+  // existing Cloudinary object as a permanent failure.
+  form.append("overwrite", "true");
 
   const response = await fetch(
     `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
@@ -579,6 +991,24 @@ Deno.serve(async (request: Request) => {
     return json(400, { ok: false, error: "invalid_json" });
   }
 
+  if (body.action === "backup_maintenance") {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = getSupabaseAdminKey();
+    if (!supabaseUrl || !serviceKey) {
+      return json(500, { ok: false, error: "supabase_not_configured" });
+    }
+    const requestedDays = Number(body.retention_days ?? 7);
+    const retentionDays = Number.isInteger(requestedDays)
+      ? Math.max(DEFAULT_CLOUDINARY_RETENTION_DAYS, Math.min(requestedDays, 30))
+      : DEFAULT_CLOUDINARY_RETENTION_DAYS;
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const localEvidence = parseLocalEvidence(body.local_evidence);
+    const result = await runBackupMaintenance(supabase, retentionDays, localEvidence);
+    return json(200, { ok: true, action: "backup_maintenance", ...result });
+  }
+
   if (body.action === "confirm_weighing_batch") {
     const workDate = typeof body.work_date === "string" ? body.work_date.trim() : "";
     const shift = typeof body.shift === "string" ? body.shift.trim().slice(0, 80) : "";
@@ -856,7 +1286,7 @@ Deno.serve(async (request: Request) => {
       .eq("event_id", eventId)
       .maybeSingle();
     let existing = (!byEventId.error && byEventId.data)
-      ? byEventId.data as Record<string, unknown>
+      ? byEventId.data as unknown as Record<string, unknown>
       : null;
     if (!existing) {
       const numericId = /^\d+$/.test(eventId) ? Number(eventId) : NaN;
@@ -866,7 +1296,7 @@ Deno.serve(async (request: Request) => {
         .eq("id", Number.isFinite(numericId) ? numericId : eventId)
         .maybeSingle();
       if (!byId.error && byId.data) {
-        existing = byId.data as Record<string, unknown>;
+        existing = byId.data as unknown as Record<string, unknown>;
       }
     }
     if (!existing) {
@@ -1050,7 +1480,7 @@ Deno.serve(async (request: Request) => {
   if (
     photoDraft &&
     (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(parentEventId) ||
-      !["core", "product"].includes(captureKind) ||
+      !["core", "product", "inventory"].includes(captureKind) ||
       !Number.isInteger(captureRound) || captureRound < 0 || captureRound > 3)
   ) {
     return json(422, { ok: false, error: "invalid_photo_event_slot" });
@@ -1177,7 +1607,7 @@ Deno.serve(async (request: Request) => {
       "id,event_id,qr_code,captured_at,image_path,image_url,image_public_id," +
       "gateway_id,station_id,camera_id,frame_sha256,payload_hash,qr_source," +
       "work_date,shift,machine,production_order,status,parent_event_id," +
-      "capture_kind,capture_round";
+      "capture_kind,capture_round,metadata";
     const { data: existingPhoto, error: photoLookupError } = await supabase
       .from(PHOTO_DRAFT_TABLE)
       .select(photoSelect)
@@ -1197,6 +1627,68 @@ Deno.serve(async (request: Request) => {
       ) {
         return json(409, { ok: false, error: "event_id_conflict" });
       }
+      const existingPhotoUrl = cloudinaryUrl(existingRow.image_url);
+      const existingPhotoPublicId = typeof existingRow.image_public_id === "string"
+        ? existingRow.image_public_id.trim()
+        : "";
+      const existingPhotoLocal = rowHasLocalBackupCommit(existingRow);
+      if (!existingPhotoUrl || !existingPhotoPublicId) {
+        const photoMetadata = existingRow.metadata && typeof existingRow.metadata === "object"
+          ? { ...(existingRow.metadata as Record<string, unknown>) }
+          : {};
+        const pendingPhotoPublicId = typeof existingRow.image_path === "string" &&
+            existingRow.image_path.trim()
+          ? existingRow.image_path.trim()
+          : "";
+        if (existingPhotoLocal && pendingPhotoPublicId) {
+          let retryUploaded: CloudinaryUpload | null = null;
+          try {
+            retryUploaded = await uploadToCloudinary(image, pendingPhotoPublicId);
+          } catch {
+            // Keep the row acknowledged as a local durable commit; the worker
+            // retains its cloudinary_pending marker and retries later.
+          }
+          if (retryUploaded) {
+            const updatedMetadata = backupMetadata({
+              ...photoMetadata,
+              cloudinary_uploaded: true,
+              cloudinary_pending: false,
+              local_backup_only: false,
+            }, capturedAt);
+            const { data: updatedPhoto, error: photoUpdateError } = await supabase
+              .from(PHOTO_DRAFT_TABLE)
+              .update({
+                image_path: retryUploaded.publicId,
+                image_url: retryUploaded.secureUrl,
+                image_public_id: retryUploaded.publicId,
+                metadata: updatedMetadata,
+              })
+              .eq("event_id", eventId)
+              .select(photoSelect)
+              .single();
+            if (!photoUpdateError && updatedPhoto) {
+              const updatedPhotoRow = updatedPhoto as unknown as Record<string, unknown>;
+              return json(200, {
+                ok: true,
+                id: updatedPhotoRow.id,
+                event_id: eventId,
+                parent_event_id: parentEventId,
+                capture_kind: captureKind,
+                capture_round: captureRound,
+                image_url: updatedPhotoRow.image_url,
+                image_public_id: updatedPhotoRow.image_public_id,
+                local_backup_committed: true,
+                cloudinary_uploaded: true,
+                cloudinary_pending: false,
+                qr_code: updatedPhotoRow.qr_code,
+                status: updatedPhotoRow.status,
+                workflow: "photo_draft",
+                duplicate: true,
+              });
+            }
+          }
+        }
+      }
       return json(200, {
         ok: true,
         id: existingRow.id,
@@ -1206,6 +1698,9 @@ Deno.serve(async (request: Request) => {
         capture_round: captureRound,
         image_url: existingRow.image_url,
         image_public_id: existingRow.image_public_id,
+        local_backup_committed: existingPhotoLocal,
+        cloudinary_uploaded: Boolean(existingPhotoUrl && existingPhotoPublicId),
+        cloudinary_pending: metadataCloudinaryPending(existingRow.metadata),
         qr_code: existingRow.qr_code,
         status: existingRow.status,
         workflow: "photo_draft",
@@ -1225,16 +1720,17 @@ Deno.serve(async (request: Request) => {
     const year = captureDate.getUTCFullYear();
     const month = String(captureDate.getUTCMonth() + 1).padStart(2, "0");
     const day = String(captureDate.getUTCDate()).padStart(2, "0");
-    let uploaded: CloudinaryUpload;
+    const photoPublicId = `roll-captures/${gatewayId}/${year}/${month}/${day}/photo-draft/${parentEventId}/${captureKind}-${captureRound + 1}/${eventId}`;
+    let uploaded: CloudinaryUpload | null = null;
+    let cloudinaryError = "";
     try {
-      uploaded = await uploadToCloudinary(
-        image,
-        `roll-captures/${gatewayId}/${year}/${month}/${day}/photo-draft/${parentEventId}/${captureKind}-${captureRound + 1}/${eventId}`,
-      );
+      uploaded = await uploadToCloudinary(image, photoPublicId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "cloudinary_upload_failed";
-      return json(500, { ok: false, error: message.split(":", 1)[0] });
+      cloudinaryError = error instanceof Error
+        ? error.message.split(":", 1)[0]
+        : "upload_failed";
     }
+    const cloudinaryPending = !uploaded;
     const { data: insertedPhoto, error: photoInsertError } = await supabase
       .from(PHOTO_DRAFT_TABLE)
       .insert({
@@ -1244,9 +1740,9 @@ Deno.serve(async (request: Request) => {
         capture_round: captureRound,
         qr_code: qrCode || null,
         captured_at: capturedAt,
-        image_path: uploaded.publicId,
-        image_url: uploaded.secureUrl,
-        image_public_id: uploaded.publicId,
+        image_path: photoPublicId,
+        image_url: uploaded?.secureUrl ?? null,
+        image_public_id: uploaded?.publicId ?? null,
         gateway_id: gatewayId,
         station_id: stationId,
         camera_id: cameraId,
@@ -1258,14 +1754,18 @@ Deno.serve(async (request: Request) => {
         machine: machine || null,
         production_order: productionOrder || null,
         status: "awaiting_ai",
-        metadata: {
+        metadata: backupMetadata({
           ai_requested: false,
           ingested_at: photoNow,
           workflow: "photo_draft",
           parent_event_id: parentEventId,
           capture_kind: captureKind,
           capture_round: captureRound,
-        },
+          cloudinary_uploaded: Boolean(uploaded),
+          cloudinary_pending: cloudinaryPending,
+          local_backup_only: cloudinaryPending,
+          cloudinary_error: cloudinaryError || null,
+        }, capturedAt),
       })
       .select(photoSelect)
       .single();
@@ -1296,6 +1796,9 @@ Deno.serve(async (request: Request) => {
             capture_round: captureRound,
             image_url: racedRow.image_url,
             image_public_id: racedRow.image_public_id,
+            local_backup_committed: rowHasLocalBackupCommit(racedRow),
+            cloudinary_uploaded: Boolean(cloudinaryUrl(racedRow.image_url) && racedRow.image_public_id),
+            cloudinary_pending: metadataCloudinaryPending(racedRow.metadata),
             qr_code: racedRow.qr_code,
             status: racedRow.status,
             workflow: "photo_draft",
@@ -1305,17 +1808,22 @@ Deno.serve(async (request: Request) => {
       }
       return json(500, { ok: false, error: "photo_draft_insert_failed" });
     }
+    const insertedPhotoRow = insertedPhoto as unknown as Record<string, unknown>;
     return json(201, {
       ok: true,
-      id: insertedPhoto.id,
+      id: insertedPhotoRow.id,
       event_id: eventId,
       parent_event_id: parentEventId,
       capture_kind: captureKind,
       capture_round: captureRound,
-      image_url: uploaded.secureUrl,
-      image_public_id: uploaded.publicId,
-      qr_code: insertedPhoto.qr_code,
-      status: insertedPhoto.status,
+      image_url: uploaded?.secureUrl ?? null,
+      image_public_id: uploaded?.publicId ?? null,
+      local_backup_committed: true,
+      cloudinary_uploaded: Boolean(uploaded),
+      cloudinary_pending: cloudinaryPending,
+      cloudinary_error: cloudinaryError || null,
+      qr_code: insertedPhotoRow.qr_code,
+      status: insertedPhotoRow.status,
       workflow: "photo_draft",
       duplicate: false,
     });
@@ -1325,7 +1833,7 @@ Deno.serve(async (request: Request) => {
     const inventorySelect =
       "id,event_id,ma_san_pham,khoi_luong,khoi_luong_loi,khoi_luong_bi,don_vi," +
       "captured_at,image_path,image_url,image_public_id,gateway_id,station_id," +
-      "camera_id,analysis_id,frame_sha256,payload_hash";
+      "camera_id,analysis_id,frame_sha256,payload_hash,metadata";
     const { data: existingInventory, error: inventoryLookupError } = await supabase
       .from(INVENTORY_TABLE)
       .select(inventorySelect)
@@ -1355,12 +1863,73 @@ Deno.serve(async (request: Request) => {
       ) {
         return json(409, { ok: false, error: "event_id_conflict" });
       }
+      const existingInventoryUrl = cloudinaryUrl(existingRow.image_url);
+      const existingInventoryPublicId = typeof existingRow.image_public_id === "string"
+        ? existingRow.image_public_id.trim()
+        : "";
+      const existingInventoryLocal = rowHasLocalBackupCommit(existingRow);
+      const pendingInventoryPublicId = typeof existingRow.image_path === "string" &&
+          existingRow.image_path.trim()
+        ? existingRow.image_path.trim()
+        : "";
+      if (
+        existingInventoryLocal &&
+        (!existingInventoryUrl || !existingInventoryPublicId) &&
+        pendingInventoryPublicId
+      ) {
+        let retryUploaded: CloudinaryUpload | null = null;
+        try {
+          retryUploaded = await uploadToCloudinary(image, pendingInventoryPublicId);
+        } catch {
+          // The local commit remains authoritative; retry on the next outbox
+          // pass instead of dropping the inventory row.
+        }
+        if (retryUploaded) {
+          const existingMetadata = existingRow.metadata && typeof existingRow.metadata === "object"
+            ? { ...(existingRow.metadata as Record<string, unknown>) }
+            : {};
+          const { data: updatedInventory, error: inventoryUpdateError } = await supabase
+            .from(INVENTORY_TABLE)
+            .update({
+              image_path: retryUploaded.publicId,
+              image_url: retryUploaded.secureUrl,
+              image_public_id: retryUploaded.publicId,
+              metadata: backupMetadata({
+                ...existingMetadata,
+                cloudinary_uploaded: true,
+                cloudinary_pending: false,
+                local_backup_only: false,
+              }, capturedAt),
+            })
+            .eq("event_id", eventId)
+            .select(inventorySelect)
+            .single();
+          if (!inventoryUpdateError && updatedInventory) {
+            const updatedInventoryRow = updatedInventory as unknown as Record<string, unknown>;
+            return json(200, {
+              ok: true,
+              id: updatedInventoryRow.id,
+              event_id: eventId,
+              image_url: updatedInventoryRow.image_url,
+              image_public_id: updatedInventoryRow.image_public_id,
+              local_backup_committed: true,
+              cloudinary_uploaded: true,
+              cloudinary_pending: false,
+              workflow: "inventory_check",
+              duplicate: true,
+            });
+          }
+        }
+      }
       return json(200, {
         ok: true,
         id: existingRow.id,
         event_id: eventId,
         image_url: existingRow.image_url,
         image_public_id: existingRow.image_public_id,
+        local_backup_committed: existingInventoryLocal,
+        cloudinary_uploaded: Boolean(existingInventoryUrl && existingInventoryPublicId),
+        cloudinary_pending: metadataCloudinaryPending(existingRow.metadata),
         gateway_id: existingRow.gateway_id,
         station_id: existingRow.station_id,
         camera_id: existingRow.camera_id,
@@ -1391,16 +1960,19 @@ Deno.serve(async (request: Request) => {
     const inventoryYear = inventoryDate.getUTCFullYear();
     const inventoryMonth = String(inventoryDate.getUTCMonth() + 1).padStart(2, "0");
     const inventoryDay = String(inventoryDate.getUTCDate()).padStart(2, "0");
-    let inventoryUploaded: CloudinaryUpload;
+    const inventoryPublicId =
+      `roll-captures/${gatewayId}/${inventoryYear}/${inventoryMonth}/${inventoryDay}/` +
+      `inventory-check/${eventId}`;
+    let inventoryUploaded: CloudinaryUpload | null = null;
+    let inventoryCloudinaryError = "";
     try {
-      inventoryUploaded = await uploadToCloudinary(
-        image,
-        `roll-captures/${gatewayId}/${inventoryYear}/${inventoryMonth}/${inventoryDay}/inventory-check/${eventId}`,
-      );
+      inventoryUploaded = await uploadToCloudinary(image, inventoryPublicId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "cloudinary_upload_failed";
-      return json(500, { ok: false, error: message.split(":", 1)[0] });
+      inventoryCloudinaryError = error instanceof Error
+        ? error.message.split(":", 1)[0]
+        : "upload_failed";
     }
+    const inventoryCloudinaryPending = !inventoryUploaded;
     const { data: insertedInventory, error: inventoryInsertError } = await supabase
       .from(INVENTORY_TABLE)
       .insert({
@@ -1411,9 +1983,9 @@ Deno.serve(async (request: Request) => {
         khoi_luong_bi: inventoryTareWeight,
         don_vi: unit,
         captured_at: capturedAt,
-        image_path: inventoryUploaded.publicId,
-        image_url: inventoryUploaded.secureUrl,
-        image_public_id: inventoryUploaded.publicId,
+        image_path: inventoryPublicId,
+        image_url: inventoryUploaded?.secureUrl ?? null,
+        image_public_id: inventoryUploaded?.publicId ?? null,
         gateway_id: gatewayId,
         station_id: stationId,
         camera_id: cameraId,
@@ -1423,12 +1995,20 @@ Deno.serve(async (request: Request) => {
         weight_source: weightSource,
         qr_source: qrSource,
         status: "confirmed",
-        metadata: {
+        metadata: backupMetadata({
           ingested_at: inventoryNow,
           weight_raw: weightRaw,
           weight_stable: weightStable,
           workflow: "inventory_check",
-        },
+          work_date: workDate || null,
+          shift: shift || null,
+          machine: machine || null,
+          production_order: productionOrder || null,
+          cloudinary_uploaded: Boolean(inventoryUploaded),
+          cloudinary_pending: inventoryCloudinaryPending,
+          local_backup_only: inventoryCloudinaryPending,
+          cloudinary_error: inventoryCloudinaryError || null,
+        }, capturedAt),
       })
       .select(inventorySelect)
       .single();
@@ -1466,6 +2046,9 @@ Deno.serve(async (request: Request) => {
             event_id: eventId,
             image_url: racedRow.image_url,
             image_public_id: racedRow.image_public_id,
+            local_backup_committed: rowHasLocalBackupCommit(racedRow),
+            cloudinary_uploaded: Boolean(cloudinaryUrl(racedRow.image_url) && racedRow.image_public_id),
+            cloudinary_pending: metadataCloudinaryPending(racedRow.metadata),
             workflow: "inventory_check",
             duplicate: true,
           });
@@ -1473,12 +2056,17 @@ Deno.serve(async (request: Request) => {
       }
       return json(500, { ok: false, error: "inventory_insert_failed" });
     }
+    const insertedInventoryRow = insertedInventory as unknown as Record<string, unknown>;
     return json(201, {
       ok: true,
-      id: insertedInventory.id,
+      id: insertedInventoryRow.id,
       event_id: eventId,
-      image_url: inventoryUploaded.secureUrl,
-      image_public_id: inventoryUploaded.publicId,
+      image_url: inventoryUploaded?.secureUrl ?? null,
+      image_public_id: inventoryUploaded?.publicId ?? null,
+      local_backup_committed: true,
+      cloudinary_uploaded: Boolean(inventoryUploaded),
+      cloudinary_pending: inventoryCloudinaryPending,
+      cloudinary_error: inventoryCloudinaryError || null,
       gateway_id: gatewayId,
       station_id: stationId,
       camera_id: cameraId,
@@ -1521,58 +2109,108 @@ Deno.serve(async (request: Request) => {
     ) {
       return json(409, { ok: false, error: "event_id_conflict" });
     }
-    const existingProductUrl = typeof existingRow.product_image_url === "string"
-      ? existingRow.product_image_url
-      : "";
-    const productIsOnCloudinary = existingProductUrl.startsWith(
-      "https://res.cloudinary.com/",
+    const existingCoreUrl = cloudinaryUrl(
+      existingRow.core_image_url ?? existingRow.image_url,
     );
-    if (productImage && !productIsOnCloudinary) {
-      const captureDate = new Date(capturedAt);
-      const year = captureDate.getUTCFullYear();
-      const month = String(captureDate.getUTCMonth() + 1).padStart(2, "0");
-      const day = String(captureDate.getUTCDate()).padStart(2, "0");
-      let productUploaded: CloudinaryUpload;
+    const existingCorePublicId = typeof (
+      existingRow.core_image_public_id ?? existingRow.image_public_id
+    ) === "string"
+      ? String(existingRow.core_image_public_id ?? existingRow.image_public_id).trim()
+      : "";
+    const existingProductUrl = cloudinaryUrl(existingRow.product_image_url);
+    const existingProductPublicId = typeof existingRow.product_image_public_id === "string"
+      ? existingRow.product_image_public_id.trim()
+      : "";
+    const existingLocalBackup = rowHasLocalBackupCommit(existingRow);
+    const captureDate = new Date(capturedAt);
+    const year = captureDate.getUTCFullYear();
+    const month = String(captureDate.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(captureDate.getUTCDate()).padStart(2, "0");
+    const deterministicCorePublicId =
+      `roll-captures/${gatewayId}/${year}/${month}/${day}/core-weight/${eventId}`;
+    const deterministicProductPublicId =
+      `roll-captures/${gatewayId}/${year}/${month}/${day}/product-weight/${eventId}`;
+    const coreNeedsUpload = !existingCoreUrl || !existingCorePublicId;
+    const productNeedsUpload = Boolean(productImage) &&
+      (!existingProductUrl || !existingProductPublicId);
+    let retryCoreUploaded: CloudinaryUpload | null = null;
+    let retryProductUploaded: CloudinaryUpload | null = null;
+    if (existingLocalBackup && coreNeedsUpload) {
       try {
-        productUploaded = await uploadToCloudinary(
-          productImage,
-          `roll-captures/${gatewayId}/${year}/${month}/${day}/product-weight/${eventId}`,
-        );
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "cloudinary_upload_failed";
-        return json(500, { ok: false, error: message.split(":", 1)[0] });
+        retryCoreUploaded = await uploadToCloudinary(image, deterministicCorePublicId);
+      } catch {
+        // Keep the local commit acknowledged and retry while its Render-disk
+        // evidence remains available.
       }
+    }
+    if (productNeedsUpload) {
+      try {
+        retryProductUploaded = await uploadToCloudinary(
+          productImage as Uint8Array,
+          deterministicProductPublicId,
+        );
+      } catch {
+        // A partial retry must not erase the successful core or product row.
+      }
+    }
+    if (retryCoreUploaded || retryProductUploaded) {
       const existingMetadata = existingRow.metadata !== null &&
           typeof existingRow.metadata === "object"
-        ? existingRow.metadata as Record<string, unknown>
+        ? { ...(existingRow.metadata as Record<string, unknown>) }
         : {};
+      const coreAvailable = Boolean(existingCoreUrl && existingCorePublicId) ||
+        Boolean(retryCoreUploaded);
+      const productAvailable = Boolean(existingProductUrl && existingProductPublicId) ||
+        Boolean(retryProductUploaded);
+      const pending = !coreAvailable || (Boolean(productImage) && !productAvailable);
+      const updates: Record<string, unknown> = {
+        metadata: backupMetadata({
+          ...existingMetadata,
+          cloudinary_core_uploaded: coreAvailable,
+          cloudinary_product_uploaded: productAvailable,
+          cloudinary_pending: pending,
+          local_backup_only: pending && !coreAvailable && !productAvailable,
+          cloudinary_error: pending ? "retry_pending" : null,
+        }, capturedAt),
+      };
+      if (retryCoreUploaded) {
+        updates.image_path = retryCoreUploaded.publicId;
+        updates.image_url = retryCoreUploaded.secureUrl;
+        updates.image_public_id = retryCoreUploaded.publicId;
+        updates.core_image_path = retryCoreUploaded.publicId;
+        updates.core_image_url = retryCoreUploaded.secureUrl;
+        updates.core_image_public_id = retryCoreUploaded.publicId;
+      }
+      if (retryProductUploaded) {
+        updates.product_image_path = retryProductUploaded.publicId;
+        updates.product_image_url = retryProductUploaded.secureUrl;
+        updates.product_image_public_id = retryProductUploaded.publicId;
+      }
       const { data: updated, error: updateError } = await supabase
         .from(MEASUREMENT_TABLE)
-        .update({
-          product_image_path: productUploaded.publicId,
-          product_image_url: productUploaded.secureUrl,
-          product_image_public_id: productUploaded.publicId,
-          metadata: { ...existingMetadata, product_weight: productWeight },
-        })
+        .update(updates)
         .eq("event_id", eventId)
         .select(EVENT_SELECT)
         .single();
-      if (updateError || !updated) {
-        return json(500, { ok: false, error: "product_image_update_failed" });
+      if (!updateError && updated) {
+        const updatedRow = updated as unknown as Record<string, unknown>;
+        return json(200, {
+          ok: true,
+          id: updatedRow.id,
+          event_id: eventId,
+          image_url: updatedRow.image_url,
+          image_public_id: updatedRow.image_public_id,
+          core_image_url: updatedRow.core_image_url ?? updatedRow.image_url,
+          core_image_public_id: updatedRow.core_image_public_id ?? updatedRow.image_public_id,
+          product_image_url: updatedRow.product_image_url,
+          product_image_public_id: updatedRow.product_image_public_id,
+          local_backup_committed: true,
+          cloudinary_core_uploaded: coreAvailable,
+          cloudinary_product_uploaded: productAvailable,
+          cloudinary_pending: pending,
+          duplicate: true,
+        });
       }
-      const updatedRow = updated as unknown as Record<string, unknown>;
-      return json(200, {
-        ok: true,
-        id: updatedRow.id,
-        event_id: eventId,
-        image_url: updatedRow.image_url,
-        image_public_id: updatedRow.image_public_id,
-        core_image_url: updatedRow.core_image_url ?? updatedRow.image_url,
-        core_image_public_id: updatedRow.core_image_public_id ?? updatedRow.image_public_id,
-        product_image_url: updatedRow.product_image_url,
-        product_image_public_id: updatedRow.product_image_public_id,
-        duplicate: true,
-      });
     }
     return json(200, {
       ok: true,
@@ -1584,6 +2222,10 @@ Deno.serve(async (request: Request) => {
       core_image_public_id: existingRow.core_image_public_id ?? existingRow.image_public_id,
       product_image_url: existingRow.product_image_url,
       product_image_public_id: existingRow.product_image_public_id,
+      local_backup_committed: existingLocalBackup,
+      cloudinary_core_uploaded: Boolean(existingCoreUrl && existingCorePublicId),
+      cloudinary_product_uploaded: Boolean(existingProductUrl && existingProductPublicId),
+      cloudinary_pending: metadataCloudinaryPending(existingRow.metadata),
       gateway_id: existingRow.gateway_id ?? existingRow.device_id,
       station_id: existingRow.station_id,
       camera_id: existingRow.camera_id,
@@ -1615,22 +2257,31 @@ Deno.serve(async (request: Request) => {
   const month = String(captureDate.getUTCMonth() + 1).padStart(2, "0");
   const day = String(captureDate.getUTCDate()).padStart(2, "0");
   const imagePublicId = `roll-captures/${gatewayId}/${year}/${month}/${day}/core-weight/${eventId}`;
-  let uploaded: CloudinaryUpload;
-  let productUploaded: CloudinaryUpload | null = null;
-  try {
-    [uploaded, productUploaded] = await Promise.all([
-      uploadToCloudinary(image, imagePublicId),
-      productImage
-        ? uploadToCloudinary(
-          productImage,
-          `roll-captures/${gatewayId}/${year}/${month}/${day}/product-weight/${eventId}`,
-        )
-        : Promise.resolve(null),
-    ]);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "cloudinary_upload_failed";
-    return json(500, { ok: false, error: message.split(":", 1)[0] });
-  }
+  const productImagePublicId = `roll-captures/${gatewayId}/${year}/${month}/${day}/product-weight/${eventId}`;
+  let cloudinaryCoreError = "";
+  let cloudinaryProductError = "";
+  const [uploaded, productUploaded] = await Promise.all([
+    uploadToCloudinary(image, imagePublicId).catch((error) => {
+      cloudinaryCoreError = error instanceof Error
+        ? error.message.split(":", 1)[0]
+        : "upload_failed";
+      return null;
+    }),
+    productImage
+      ? uploadToCloudinary(
+        productImage,
+        productImagePublicId,
+      ).catch((error) => {
+        cloudinaryProductError = error instanceof Error
+          ? error.message.split(":", 1)[0]
+          : "upload_failed";
+        return null;
+      })
+      : Promise.resolve(null),
+  ]);
+  const cloudinaryCorePending = !uploaded;
+  const cloudinaryProductPending = productImage !== null && !productUploaded;
+  const cloudinaryPending = cloudinaryCorePending || cloudinaryProductPending;
 
   const { data: inserted, error: insertError } = await supabase
     .from(MEASUREMENT_TABLE)
@@ -1643,13 +2294,13 @@ Deno.serve(async (request: Request) => {
       tare_weight: weight,
       unit,
       captured_at: capturedAt,
-      image_path: uploaded.publicId,
-      image_url: uploaded.secureUrl,
-      image_public_id: uploaded.publicId,
-      core_image_path: uploaded.publicId,
-      core_image_url: uploaded.secureUrl,
-      core_image_public_id: uploaded.publicId,
-      product_image_path: productUploaded?.publicId ?? null,
+      image_path: uploaded?.publicId ?? imagePublicId,
+      image_url: uploaded?.secureUrl ?? null,
+      image_public_id: uploaded?.publicId ?? null,
+      core_image_path: uploaded?.publicId ?? imagePublicId,
+      core_image_url: uploaded?.secureUrl ?? null,
+      core_image_public_id: uploaded?.publicId ?? null,
+      product_image_path: productImage ? productUploaded?.publicId ?? productImagePublicId : null,
       product_image_url: productUploaded?.secureUrl ?? null,
       product_image_public_id: productUploaded?.publicId ?? null,
       device_id: gatewayId,
@@ -1664,7 +2315,7 @@ Deno.serve(async (request: Request) => {
       error_status: errorStatus,
       error_reason: errorReason,
       status: "confirmed",
-      metadata: {
+      metadata: backupMetadata({
         ingested_at: now,
         weight_raw: weightRaw,
         weight_stable: weightStable,
@@ -1677,7 +2328,15 @@ Deno.serve(async (request: Request) => {
         machine: machine || null,
         production_order: productionOrder || null,
         bi_weight: biWeight,
-      },
+        cloudinary_core_uploaded: Boolean(uploaded),
+        cloudinary_product_uploaded: Boolean(productUploaded),
+        cloudinary_pending: cloudinaryPending,
+        local_backup_only: cloudinaryPending && !uploaded && !productUploaded,
+        cloudinary_error: cloudinaryPending
+          ? [cloudinaryCoreError, cloudinaryProductError].filter(Boolean).join(",") ||
+            "upload_pending"
+          : null,
+      }, capturedAt),
     })
     .select("id,image_path")
     .single();
@@ -1722,6 +2381,15 @@ Deno.serve(async (request: Request) => {
           core_image_public_id: racedRow.core_image_public_id ?? racedRow.image_public_id,
           product_image_url: racedRow.product_image_url,
           product_image_public_id: racedRow.product_image_public_id,
+          local_backup_committed: rowHasLocalBackupCommit(racedRow),
+          cloudinary_core_uploaded: Boolean(
+            cloudinaryUrl(racedRow.core_image_url ?? racedRow.image_url) &&
+              (racedRow.core_image_public_id ?? racedRow.image_public_id)
+          ),
+          cloudinary_product_uploaded: Boolean(
+            cloudinaryUrl(racedRow.product_image_url) && racedRow.product_image_public_id
+          ),
+          cloudinary_pending: metadataCloudinaryPending(racedRow.metadata),
           gateway_id: racedRow.gateway_id ?? racedRow.device_id,
           station_id: racedRow.station_id,
           camera_id: racedRow.camera_id,
@@ -1739,12 +2407,20 @@ Deno.serve(async (request: Request) => {
     ok: true,
     id: inserted.id,
     event_id: eventId,
-    image_url: uploaded.secureUrl,
-    image_public_id: uploaded.publicId,
-    core_image_url: uploaded.secureUrl,
-    core_image_public_id: uploaded.publicId,
+    image_url: uploaded?.secureUrl ?? null,
+    image_public_id: uploaded?.publicId ?? null,
+    core_image_url: uploaded?.secureUrl ?? null,
+    core_image_public_id: uploaded?.publicId ?? null,
     product_image_url: productUploaded?.secureUrl ?? null,
     product_image_public_id: productUploaded?.publicId ?? null,
+    local_backup_committed: true,
+    cloudinary_core_uploaded: Boolean(uploaded),
+    cloudinary_product_uploaded: Boolean(productUploaded),
+    cloudinary_pending: cloudinaryPending,
+    cloudinary_error: cloudinaryPending
+      ? [cloudinaryCoreError, cloudinaryProductError].filter(Boolean).join(",") ||
+        "upload_pending"
+      : null,
     gateway_id: gatewayId,
     station_id: stationId,
     camera_id: cameraId,

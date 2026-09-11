@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -12,6 +13,16 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+
+
+LOCAL_BACKUP_PROVIDER = "render_persistent_disk"
+DEFAULT_LOCAL_RETENTION_DAYS = 7
+MAX_LOCAL_EVIDENCE_ITEMS = 200
+MAX_LOCAL_EVIDENCE_BYTES = 64 * 1024 * 1024
+MAX_LOCAL_EVIDENCE_IMAGE_BYTES = 6 * 1024 * 1024
+LOCAL_EVIDENCE_SCAN_PAGE = 500
+MAX_LOCAL_EVIDENCE_SCAN_ROWS = 20_000
+LOCAL_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -712,7 +723,7 @@ class MeasurementStore:
         event_token = hashlib.sha256(event_id.encode("utf-8")).hexdigest()[:8]
         image_path = self.capture_dir / f"{timestamp}_{event_token}_{uuid.uuid4().hex[:8]}.jpg"
         try:
-            image_path.write_bytes(jpeg_bytes)
+            self._write_durable_capture(image_path, jpeg_bytes)
         except OSError as exc:
             image_path.unlink(missing_ok=True)
             raise OSError(f"Cannot write capture image: {image_path}") from exc
@@ -935,7 +946,11 @@ class MeasurementStore:
         if not encoded_ok:
             raise OSError("Cannot encode product capture image as JPEG")
         path = self.capture_dir / f"{event_id}_product.jpg"
-        path.write_bytes(encoded_frame.tobytes())
+        try:
+            self._write_durable_capture(path, encoded_frame.tobytes())
+        except OSError:
+            path.unlink(missing_ok=True)
+            raise
         with self._lock:
             cursor = self.connection.execute(
                 "UPDATE measurements SET product_image_path = ? WHERE event_id = ?",
@@ -974,7 +989,11 @@ class MeasurementStore:
             rows = self.connection.execute(
                 f"""
                 SELECT * FROM measurements
-                WHERE sync_status IN {statuses}
+                WHERE (
+                    sync_status IN {statuses}
+                    OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')
+                )
+                  AND (image_path <> '' OR product_image_path <> '')
                   {retry_clause}
                 ORDER BY id
                 LIMIT ?
@@ -1010,6 +1029,57 @@ class MeasurementStore:
                 ),
             )
             self.connection.commit()
+
+    def _mark_cloudinary_pending(
+        self,
+        table: str,
+        event_id: str,
+        remote_id: int | None,
+        remote_image_url: str | None,
+        remote_image_public_id: str | None,
+    ) -> None:
+        if table not in {"measurements", "inventory_checks", "photo_drafts"}:
+            raise ValueError("Unsupported outbox table")
+        now = datetime.now(timezone.utc)
+        retry_at = now + timedelta(seconds=30)
+        with self._lock:
+            self.connection.execute(
+                f"""
+                UPDATE {table}
+                SET sync_status = 'synced', sync_error = 'cloudinary_pending',
+                    next_retry_at = ?, last_attempt_at = ?,
+                    synced_at = COALESCE(synced_at, ?), remote_id = ?,
+                    remote_image_url = ?, remote_image_public_id = ?
+                WHERE event_id = ?
+                """,
+                (
+                    retry_at.isoformat(timespec="milliseconds"),
+                    now.isoformat(timespec="milliseconds"),
+                    now.isoformat(timespec="milliseconds"),
+                    remote_id,
+                    remote_image_url,
+                    remote_image_public_id,
+                    event_id,
+                ),
+            )
+            self.connection.commit()
+
+    def mark_cloudinary_pending(
+        self,
+        event_id: str,
+        remote_id: int | None = None,
+        remote_image_url: str | None = None,
+        remote_image_public_id: str | None = None,
+    ) -> None:
+        """Record a cloud row while keeping its missing Cloudinary image retryable."""
+
+        self._mark_cloudinary_pending(
+            "measurements",
+            event_id,
+            remote_id,
+            remote_image_url,
+            remote_image_public_id,
+        )
 
     def mark_sync_failed(self, event_id: str, error: str) -> None:
         now_dt = datetime.now(timezone.utc)
@@ -1108,7 +1178,7 @@ class MeasurementStore:
             / f"{timestamp}_{event_token}_{uuid.uuid4().hex[:8]}_inventory.jpg"
         )
         try:
-            image_path.write_bytes(jpeg_bytes)
+            self._write_durable_capture(image_path, jpeg_bytes)
         except OSError as exc:
             image_path.unlink(missing_ok=True)
             raise OSError(f"Cannot write inventory check image: {image_path}") from exc
@@ -1242,7 +1312,11 @@ class MeasurementStore:
             rows = self.connection.execute(
                 f"""
                 SELECT * FROM inventory_checks
-                WHERE sync_status IN {statuses}
+                WHERE (
+                    sync_status IN {statuses}
+                    OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')
+                )
+                  AND image_path <> ''
                   {retry_clause}
                 ORDER BY id
                 LIMIT ?
@@ -1271,6 +1345,23 @@ class MeasurementStore:
                 (now, now, remote_id, remote_image_url, remote_image_public_id, event_id),
             )
             self.connection.commit()
+
+    def mark_inventory_check_cloudinary_pending(
+        self,
+        event_id: str,
+        remote_id: int | None = None,
+        remote_image_url: str | None = None,
+        remote_image_public_id: str | None = None,
+    ) -> None:
+        """Keep a locally committed inventory row retryable after cloud failure."""
+
+        self._mark_cloudinary_pending(
+            "inventory_checks",
+            event_id,
+            remote_id,
+            remote_image_url,
+            remote_image_public_id,
+        )
 
     def mark_inventory_check_failed(self, event_id: str, error: str) -> None:
         now_dt = datetime.now(timezone.utc)
@@ -1325,8 +1416,8 @@ class MeasurementStore:
             raise ValueError("QR must be empty or contain at most 512 printable characters")
         event_id = event_id or str(uuid.uuid4())
         parent_event_id = parent_event_id.strip() or event_id
-        if capture_kind not in {"core", "product"}:
-            raise ValueError("Photo capture kind must be core or product")
+        if capture_kind not in {"core", "product", "inventory"}:
+            raise ValueError("Photo capture kind must be core, product or inventory")
         if not 0 <= capture_round <= 3:
             raise ValueError("Photo capture round must be between 0 and 3")
         if captured_at is None:
@@ -1364,7 +1455,7 @@ class MeasurementStore:
             / f"{timestamp}_{event_token}_{uuid.uuid4().hex[:8]}_photo_draft.jpg"
         )
         try:
-            image_path.write_bytes(jpeg_bytes)
+            self._write_durable_capture(image_path, jpeg_bytes)
         except OSError as exc:
             image_path.unlink(missing_ok=True)
             raise OSError(f"Cannot write photo draft: {image_path}") from exc
@@ -1491,7 +1582,11 @@ class MeasurementStore:
             rows = self.connection.execute(
                 f"""
                 SELECT * FROM photo_drafts
-                WHERE sync_status IN {statuses}
+                WHERE (
+                    sync_status IN {statuses}
+                    OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')
+                )
+                  AND image_path <> ''
                   {retry_clause}
                 ORDER BY id
                 LIMIT ?
@@ -1520,6 +1615,23 @@ class MeasurementStore:
                 (now, now, remote_id, remote_image_url, remote_image_public_id, event_id),
             )
             self.connection.commit()
+
+    def mark_photo_draft_cloudinary_pending(
+        self,
+        event_id: str,
+        remote_id: int | None = None,
+        remote_image_url: str | None = None,
+        remote_image_public_id: str | None = None,
+    ) -> None:
+        """Keep a locally committed AI-photo row retryable after cloud failure."""
+
+        self._mark_cloudinary_pending(
+            "photo_drafts",
+            event_id,
+            remote_id,
+            remote_image_url,
+            remote_image_public_id,
+        )
 
     def mark_photo_draft_failed(self, event_id: str, error: str) -> None:
         now_dt = datetime.now(timezone.utc)
@@ -1553,7 +1665,9 @@ class MeasurementStore:
         with self._lock:
             row = self.connection.execute(
                 "SELECT COUNT(*) AS total FROM photo_drafts "
-                "WHERE sync_status IN ('pending', 'failed')"
+                "WHERE (sync_status IN ('pending', 'failed') "
+                "OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')) "
+                "AND image_path <> ''"
             ).fetchone()
         return int(row["total"])
 
@@ -1561,7 +1675,9 @@ class MeasurementStore:
         with self._lock:
             row = self.connection.execute(
                 "SELECT COUNT(*) AS total FROM inventory_checks "
-                "WHERE sync_status IN ('pending', 'failed')"
+                "WHERE (sync_status IN ('pending', 'failed') "
+                "OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')) "
+                "AND image_path <> ''"
             ).fetchone()
         return int(row["total"])
 
@@ -1569,13 +1685,332 @@ class MeasurementStore:
         with self._lock:
             row = self.connection.execute(
                 "SELECT COUNT(*) AS total FROM measurements "
-                "WHERE sync_status IN ('pending', 'failed')"
+                "WHERE (sync_status IN ('pending', 'failed') "
+                "OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')) "
+                "AND (image_path <> '' OR product_image_path <> '')"
             ).fetchone()
         return (
             int(row["total"])
             + self.inventory_pending_count()
             + self.photo_draft_pending_count()
         )
+
+    def local_backup_report(
+        self,
+        retention_days: int = DEFAULT_LOCAL_RETENTION_DAYS,
+        *,
+        now: datetime | None = None,
+        limit: int = MAX_LOCAL_EVIDENCE_ITEMS,
+    ) -> dict[str, object]:
+        """Return bounded, metadata-only proof for old local evidence files.
+
+        Render's persistent disk is the independent evidence copy.  The report
+        contains checksums and byte counts only; image bytes never leave the
+        gateway during daily maintenance. Rows acknowledged by the Edge
+        Function are eligible, including rows whose Cloudinary delivery is
+        still pending. A failed Supabase request remains a normal local outbox
+        row and is not offered for deletion.
+        """
+
+        safe_days = max(1, min(int(retention_days), 30))
+        safe_limit = max(1, min(int(limit), MAX_LOCAL_EVIDENCE_ITEMS))
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        current = current.astimezone(timezone.utc)
+        cutoff = current - timedelta(days=safe_days)
+        table_specs = (
+            (
+                "can_tu_dong",
+                "measurements",
+                (("core", "image_path", "frame_sha256"), ("product", "product_image_path", "")),
+            ),
+            (
+                "can_kiem_kho",
+                "inventory_checks",
+                (("image", "image_path", "frame_sha256"),),
+            ),
+            (
+                "anh_can_cho_ai",
+                "photo_drafts",
+                (("image", "image_path", "frame_sha256"),),
+            ),
+        )
+        items: list[dict[str, object]] = []
+        skipped = 0
+        total_bytes = 0
+        cutoff_text = cutoff.isoformat(timespec="milliseconds")
+        with self._lock:
+            snapshots: list[tuple[str, sqlite3.Row, tuple[tuple[str, str, str], ...]]] = []
+            for remote_table, local_table, roles in table_specs:
+                path_clause = "image_path <> ''"
+                if local_table == "measurements":
+                    path_clause = "(image_path <> '' OR product_image_path <> '')"
+                # Missing files can leave a stale non-empty path in SQLite.
+                # Page through old rows instead of letting a small LIMIT be
+                # consumed by those tombstones. The SQL cutoff also prevents
+                # a large recent outbox from filling the scan before retention
+                # candidates are considered.
+                offset = 0
+                scanned = 0
+                while scanned < MAX_LOCAL_EVIDENCE_SCAN_ROWS:
+                    page_limit = min(
+                        LOCAL_EVIDENCE_SCAN_PAGE,
+                        MAX_LOCAL_EVIDENCE_SCAN_ROWS - scanned,
+                    )
+                    rows = self.connection.execute(
+                        f"SELECT * FROM {local_table} "
+                        f"WHERE sync_status = 'synced' AND {path_clause} "
+                        "AND captured_at <= ? "
+                        "ORDER BY captured_at ASC, event_id ASC LIMIT ? OFFSET ?",
+                        (cutoff_text, page_limit, offset),
+                    ).fetchall()
+                    if not rows:
+                        break
+                    snapshots.extend((remote_table, row, roles) for row in rows)
+                    scanned += len(rows)
+                    offset += len(rows)
+                    if len(rows) < page_limit:
+                        break
+
+        snapshots.sort(key=lambda item: str(item[1]["captured_at"]))
+        for remote_table, row, roles in snapshots:
+            if len(items) >= safe_limit:
+                break
+            captured_at = str(row["captured_at"] or "")
+            try:
+                captured = datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+            except ValueError:
+                skipped += 1
+                continue
+            if captured.tzinfo is None:
+                captured = captured.replace(tzinfo=timezone.utc)
+            if captured.astimezone(timezone.utc) > cutoff:
+                continue
+            roles_report: dict[str, dict[str, object]] = {}
+            for role, path_column, expected_hash_column in roles:
+                path = self._safe_capture_path(row[path_column])
+                if path is None or not path.is_file():
+                    continue
+                try:
+                    image_bytes = path.read_bytes()
+                except OSError:
+                    skipped += 1
+                    continue
+                if not (4 <= len(image_bytes) <= MAX_LOCAL_EVIDENCE_IMAGE_BYTES):
+                    skipped += 1
+                    continue
+                digest = hashlib.sha256(image_bytes).hexdigest()
+                expected_hash = str(row[expected_hash_column] or "").strip().lower() if expected_hash_column else ""
+                if expected_hash and LOCAL_SHA256_PATTERN.match(expected_hash) and digest != expected_hash:
+                    skipped += 1
+                    continue
+                if total_bytes + len(image_bytes) > MAX_LOCAL_EVIDENCE_BYTES:
+                    break
+                roles_report[role] = {"sha256": digest, "bytes": len(image_bytes)}
+                total_bytes += len(image_bytes)
+            if roles_report:
+                items.append(
+                    {
+                        "table": remote_table,
+                        "event_id": str(row["event_id"]),
+                        "captured_at": captured_at,
+                        "roles": roles_report,
+                    }
+                )
+        return {
+            "provider": LOCAL_BACKUP_PROVIDER,
+            "retention_days": safe_days,
+            "generated_at": current.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "items": items,
+            "item_count": len(items),
+            "total_bytes": total_bytes,
+            "skipped": skipped,
+            "cutoff": cutoff.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+        }
+
+    def prune_local_captures(
+        self,
+        released: object,
+        retention_days: int = DEFAULT_LOCAL_RETENTION_DAYS,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, int]:
+        """Delete only files explicitly released by remote maintenance.
+
+        The remote function returns one release per successfully deleted
+        Cloudinary object.  We re-check age, sync status, path containment and
+        the reported checksum before unlinking.  Rows remain in SQLite, and a
+        path shared by an unreleased row is never removed.
+        """
+
+        if not isinstance(released, list):
+            return {"released": 0, "deleted": 0, "skipped": 0}
+        safe_days = max(1, min(int(retention_days), 30))
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        cutoff = current.astimezone(timezone.utc) - timedelta(days=safe_days)
+        release_map: dict[tuple[str, str, str], str] = {}
+        for raw in released:
+            if not isinstance(raw, dict):
+                continue
+            table = str(raw.get("table") or "").strip()
+            event_id = str(raw.get("event_id") or "").strip()
+            role = str(raw.get("role") or "").strip()
+            digest = str(raw.get("sha256") or "").strip().lower()
+            if table and event_id and role:
+                release_map[(table, event_id, role)] = digest
+        if not release_map:
+            return {"released": 0, "deleted": 0, "skipped": 0}
+
+        table_specs = (
+            (
+                "can_tu_dong",
+                "measurements",
+                (("core", "image_path"), ("product", "product_image_path")),
+            ),
+            ("can_kiem_kho", "inventory_checks", (("image", "image_path"),)),
+            ("anh_can_cho_ai", "photo_drafts", (("image", "image_path"),)),
+        )
+        local_table_by_remote = {remote: local for remote, local, _ in table_specs}
+        snapshots: list[tuple[str, sqlite3.Row, tuple[tuple[str, str], ...]]] = []
+        with self._lock:
+            for remote_table, local_table, roles in table_specs:
+                rows = self.connection.execute(f"SELECT * FROM {local_table}").fetchall()
+                snapshots.extend((remote_table, row, roles) for row in rows)
+
+        def row_is_old_and_synced(row: sqlite3.Row) -> bool:
+            if str(row["sync_status"] or "") != "synced":
+                return False
+            try:
+                captured = datetime.fromisoformat(str(row["captured_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                return False
+            if captured.tzinfo is None:
+                captured = captured.replace(tzinfo=timezone.utc)
+            return captured.astimezone(timezone.utc) <= cutoff
+
+        candidate_keys = {
+            (table, str(row["event_id"]), role)
+            for table, row, roles in snapshots
+            if row_is_old_and_synced(row)
+            for role, _ in roles
+            if (table, str(row["event_id"]), role) in release_map
+        }
+        referenced_by: dict[Path, set[tuple[str, str, str]]] = {}
+        for table, row, roles in snapshots:
+            key_event = str(row["event_id"])
+            for role, path_column in roles:
+                path = self._safe_capture_path(row[path_column])
+                if path is not None:
+                    referenced_by.setdefault(path, set()).add((table, key_event, role))
+
+        deleted = 0
+        skipped = 0
+        for table, row, roles in snapshots:
+            event_id = str(row["event_id"])
+            if not row_is_old_and_synced(row):
+                continue
+            for role, path_column in roles:
+                release_key = (table, event_id, role)
+                if release_key not in candidate_keys:
+                    continue
+                path = self._safe_capture_path(row[path_column])
+                digest = release_map.get(release_key, "")
+                if path is None or not path.is_file():
+                    skipped += 1
+                    continue
+                if any(key not in candidate_keys for key in referenced_by.get(path, set())):
+                    skipped += 1
+                    continue
+                image_bytes: bytes | None = None
+                unlinked = False
+                try:
+                    image_bytes = path.read_bytes()
+                    if digest and hashlib.sha256(image_bytes).hexdigest() != digest:
+                        skipped += 1
+                        continue
+                    path.unlink()
+                    unlinked = True
+                    assignments = [f"{path_column} = ''"]
+                    # SQLite's remote fields represent the core image for all
+                    # event types. Product evidence has no separate legacy
+                    # local remote columns, so never clear the core pointer
+                    # when only the product file was released.
+                    if role == "core" or table != "can_tu_dong":
+                        assignments.extend(
+                            ["remote_image_url = NULL", "remote_image_public_id = NULL"]
+                        )
+                    with self._lock:
+                        self.connection.execute("BEGIN")
+                        current_row = self.connection.execute(
+                            f"SELECT {', '.join(column for _, column in roles)}, "
+                            f"sync_error FROM {local_table_by_remote[table]} "
+                            "WHERE event_id = ?",
+                            (event_id,),
+                        ).fetchone()
+                        if current_row is None:
+                            raise RuntimeError("released local row disappeared")
+                        has_remaining_local_path = any(
+                            other_column != path_column
+                            and bool(str(current_row[other_column] or "").strip())
+                            for _, other_column in roles
+                        )
+                        if (
+                            not has_remaining_local_path
+                            and str(current_row["sync_error"] or "")
+                            == "cloudinary_pending"
+                        ):
+                            # Query the current row inside the transaction. A
+                            # two-image event may have had its first path
+                            # cleared earlier in this same maintenance call.
+                            assignments.extend(
+                                ["sync_error = NULL", "next_retry_at = NULL"]
+                            )
+                        cursor = self.connection.execute(
+                            f"UPDATE {local_table_by_remote[table]} SET "
+                            + ", ".join(assignments)
+                            + " WHERE event_id = ?",
+                            (event_id,),
+                        )
+                        if cursor.rowcount != 1:
+                            raise RuntimeError("released local row disappeared")
+                        self.connection.commit()
+                    deleted += 1
+                except (OSError, RuntimeError, sqlite3.Error):
+                    with self._lock:
+                        if self.connection.in_transaction:
+                            self.connection.rollback()
+                    if unlinked and image_bytes is not None:
+                        try:
+                            self._write_durable_capture(path, image_bytes)
+                        except OSError:
+                            # The original bytes are still gone, but retaining
+                            # the DB path avoids silently claiming a deletion.
+                            pass
+                    skipped += 1
+        return {"released": len(candidate_keys), "deleted": deleted, "skipped": skipped}
+
+    @staticmethod
+    def _write_durable_capture(path: Path, image_bytes: bytes) -> None:
+        """Commit image bytes to the persistent-disk file before cloud sync."""
+
+        with path.open("wb") as stream:
+            stream.write(image_bytes)
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def _safe_capture_path(self, value: object) -> Path | None:
+        if not value:
+            return None
+        try:
+            root = self.capture_dir.resolve()
+            candidate = Path(str(value)).resolve()
+            candidate.relative_to(root)
+        except (OSError, ValueError):
+            return None
+        return candidate if candidate != root else None
 
     def count(self) -> int:
         with self._lock:

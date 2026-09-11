@@ -1,6 +1,7 @@
 import base64
 import json
 import threading
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -261,6 +262,108 @@ def test_background_worker_includes_failed_events_for_scheduled_retry(tmp_path) 
     assert retry_flags and retry_flags[0] is True
 
 
+def test_backup_maintenance_is_opt_in_and_records_daily_result(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    calls: list[tuple[str, str]] = []
+
+    def maintain(url, token):
+        calls.append((url, token))
+        return {"ok": True, "verified": 3, "cloudinary_deleted": 2}
+
+    worker = OutboxSyncWorker(
+        store,
+        "https://example.test",
+        "token",
+        maintenance_enabled=True,
+        maintenance_interval=86400,
+        maintenance=maintain,
+    )
+
+    assert worker.run_maintenance() is True
+    status = worker.maintenance_status()
+    assert calls == [("https://example.test", "token")]
+    assert status["enabled"] is True
+    assert status["last_success"] is not None
+    assert status["last_error"] is None
+    assert status["result"]["cloudinary_deleted"] == 2
+    store.close()
+
+
+def test_backup_maintenance_runs_immediately_when_worker_starts(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    called = threading.Event()
+
+    def maintain(url, token):
+        called.set()
+        return {"ok": True}
+
+    worker = OutboxSyncWorker(
+        store,
+        "https://example.test",
+        "token",
+        interval=0.01,
+        maintenance_enabled=True,
+        maintenance=maintain,
+    )
+    worker.start()
+    assert called.wait(1.0)
+    worker.stop()
+    store.close()
+
+
+def test_backup_maintenance_sends_local_checksum_and_prunes_after_release(tmp_path) -> None:
+    now = datetime.now(timezone.utc)
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    measurement = store.save(
+        "ROLL-RETENTION-SYNC",
+        2.5,
+        "kg",
+        np.zeros((24, 24, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+        event_id="33333333-3333-4333-8333-333333333333",
+        captured_at=(now - timedelta(days=8)).isoformat(),
+    )
+    store.mark_synced(
+        measurement.event_id,
+        301,
+        "https://res.cloudinary.com/demo/retention.jpg",
+        "retention",
+    )
+    reports: list[dict[str, object]] = []
+
+    def maintain(url, token, report):
+        reports.append(report)
+        item = report["items"][0]
+        return {
+            "ok": True,
+            "released": [
+                {
+                    "table": item["table"],
+                    "event_id": item["event_id"],
+                    "role": "core",
+                    "sha256": item["roles"]["core"]["sha256"],
+                }
+            ],
+        }
+
+    worker = OutboxSyncWorker(
+        store,
+        "https://example.test",
+        "token",
+        maintenance_enabled=True,
+        maintenance=maintain,
+    )
+    assert worker.run_maintenance() is True
+    assert reports and reports[0]["provider"] == "render_persistent_disk"
+    assert reports[0]["items"][0]["roles"]["core"]["bytes"] > 0
+    assert not Path(measurement.image_path).exists()
+    assert store.get(measurement.event_id) is not None
+    status = worker.maintenance_status()
+    assert status["result"]["local_prune"]["deleted"] == 1
+    store.close()
+
+
 @pytest.mark.parametrize(
     "response_factory",
     [
@@ -307,7 +410,12 @@ def test_outbox_can_allow_legacy_ack_without_image_when_explicitly_configured(tm
     )
 
     def fake_send(*args):
-        return {"ok": True, "event_id": measurement.event_id, "id": "7"}
+        return {
+            "ok": True,
+            "event_id": measurement.event_id,
+            "id": "7",
+            "local_backup_committed": True,
+        }
 
     worker = OutboxSyncWorker(
         store,
@@ -322,6 +430,36 @@ def test_outbox_can_allow_legacy_ack_without_image_when_explicitly_configured(tm
     assert saved is not None
     assert saved.sync_status == "synced"
     assert saved.remote_id == 7
+    store.close()
+
+
+def test_outbox_keeps_local_ack_cloudinary_pending_for_retry(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    measurement = store.save(
+        "ROLL-CLOUDINARY-PENDING",
+        3,
+        "kg",
+        np.zeros((20, 20, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+    )
+
+    def fake_send(*args):
+        return {
+            "ok": True,
+            "event_id": measurement.event_id,
+            "id": 9,
+            "local_backup_committed": True,
+            "cloudinary_pending": True,
+        }
+
+    worker = OutboxSyncWorker(store, "https://example.test", "token", send=fake_send)
+    assert worker.sync_once() == 1
+    saved = store.get(measurement.event_id)
+    assert saved is not None
+    assert saved.sync_status == "synced"
+    assert saved.sync_error == "cloudinary_pending"
+    assert store.pending_count() == 1
     store.close()
 
 
