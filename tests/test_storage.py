@@ -96,6 +96,34 @@ def test_photo_draft_saves_image_without_weight_or_required_qr(tmp_path) -> None
     store.close()
 
 
+def test_delete_photo_drafts_removes_every_image_row_for_parent(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    parent_id = "a5a53a31-3b46-484e-b111-59735657bed7"
+    for index, kind in enumerate(("core", "product")):
+        store.save_photo_draft_idempotent(
+            np.full((32, 48, 3), index, dtype=np.uint8),
+            event_id=f"d037931d-089d-44ce-96c5-53d41a95c9{index:02d}",
+            parent_event_id=parent_id,
+            capture_kind=kind,
+            needs_sync=True,
+            gateway_id="gateway-test",
+        )
+    store.save_photo_draft_idempotent(
+        np.zeros((32, 48, 3), dtype=np.uint8),
+        event_id="d7a3f837-20be-43e4-aad1-0ae6c4e6bccf",
+        parent_event_id="other-parent",
+        needs_sync=True,
+        gateway_id="gateway-test",
+    )
+
+    assert store.delete_photo_drafts(parent_id) == 2
+    assert {row["parent_event_id"] for row in store.photo_draft_source_rows()} == {
+        "other-parent"
+    }
+    assert store.delete_photo_drafts(parent_id) == 0
+    store.close()
+
+
 def test_idempotent_save_persists_capture_identity_and_returns_duplicate(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     frame = np.full((32, 48, 3), 17, dtype=np.uint8)

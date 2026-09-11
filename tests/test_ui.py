@@ -2255,6 +2255,12 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "Đã kết nối camera dùng chung cho cân, QR và bảng nhiều chỉ số" in TEST_UI_HTML
 
 
+def test_ui_confirms_the_exact_row_before_deleting_saved_error_photos() -> None:
+    assert "CHỈ XÓA DÒNG NÀY?\\nMã QR:" in TEST_UI_HTML
+    assert "Hai ảnh cùng lượt sẽ được xóa khỏi danh sách/DB." in TEST_UI_HTML
+    assert "cloud_photo_drafts_deleted" in TEST_UI_HTML
+
+
 def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert 'id="roundCount"' in TEST_UI_HTML
     assert 'id="evidenceRounds"' in TEST_UI_HTML

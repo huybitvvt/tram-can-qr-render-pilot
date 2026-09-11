@@ -46,6 +46,15 @@ def test_ingest_routes_photo_draft_before_measurement_validation() -> None:
     assert "/photo-draft/${parentEventId}/${captureKind}-${captureRound + 1}/${eventId}" in FUNCTION
 
 
+def test_delete_measurement_also_deletes_grouped_photo_drafts() -> None:
+    delete_block = FUNCTION.split('if (body.action === "delete_measurement")', 1)[1].split(
+        'if (body.action === "update_measurement")', 1
+    )[0]
+    assert ".from(PHOTO_DRAFT_TABLE)" in delete_block
+    assert ".or(`parent_event_id.eq.${eventId},event_id.eq.${eventId}`)" in delete_block
+    assert "photo_drafts_deleted: photoDraftsDeleted" in delete_block
+
+
 def test_measurement_list_is_filtered_counted_and_bandwidth_limited() -> None:
     assert "const EVENT_LIST_SELECT" in FUNCTION
     assert '.select(EVENT_LIST_SELECT, { count: "exact" })' in FUNCTION

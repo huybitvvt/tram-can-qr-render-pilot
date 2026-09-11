@@ -420,6 +420,39 @@ def fetch_supabase_photo_draft_parent_ids(
     }
 
 
+def delete_supabase_photo_drafts(
+    supabase_url: str,
+    service_key: str,
+    parent_event_id: str,
+    *,
+    timeout: float = 10.0,
+) -> int:
+    """Delete every saved-error photo belonging to one displayed production row."""
+
+    event_id = str(parent_event_id or "").strip()
+    if not event_id or any(character in event_id for character in ",()"):
+        raise ValueError("Invalid photo draft parent event ID")
+    params = {
+        "select": "event_id,parent_event_id",
+        "or": f"(parent_event_id.eq.{event_id},event_id.eq.{event_id})",
+    }
+    request = urllib.request.Request(
+        f"{supabase_url.rstrip('/')}/rest/v1/anh_can_cho_ai?{urllib.parse.urlencode(params)}",
+        headers={
+            "Accept": "application/json",
+            "apikey": service_key,
+            "Authorization": f"Bearer {service_key}",
+            "Prefer": "return=representation",
+        },
+        method="DELETE",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        parsed = json.loads(response.read().decode("utf-8"))
+    if not isinstance(parsed, list):
+        raise RuntimeError("Supabase anh_can_cho_ai delete response is invalid")
+    return len(parsed)
+
+
 def persist_product_evidence(
     supabase_url: str,
     service_key: str,

@@ -851,6 +851,20 @@ class MeasurementStore:
             self.connection.commit()
             return cursor.rowcount > 0
 
+    def delete_photo_drafts(self, parent_event_id: str) -> int:
+        """Delete all local saved-error photos grouped into one displayed row."""
+
+        parent_event_id = str(parent_event_id or "").strip()
+        if not parent_event_id:
+            return 0
+        with self._lock:
+            cursor = self.connection.execute(
+                "DELETE FROM photo_drafts WHERE parent_event_id = ? OR event_id = ?",
+                (parent_event_id, parent_event_id),
+            )
+            self.connection.commit()
+            return max(0, int(cursor.rowcount))
+
     def update_measurement_fields(
         self,
         event_id: str,

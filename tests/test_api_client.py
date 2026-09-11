@@ -1,6 +1,7 @@
 import urllib.parse
 
 from roll_qr_scale.api_client import (
+    delete_supabase_photo_drafts,
     fetch_remote_measurement_page,
     fetch_remote_weigh_batches,
     fetch_supabase_photo_draft_parent_ids,
@@ -265,3 +266,41 @@ def test_fetch_supabase_photo_drafts_counts_distinct_error_products(monkeypatch)
     assert query["shift"] == ["eq.12C2"]
     assert query["machine"] == ["eq.Máy cách nhiệt"]
     assert query["production_order"] == ["eq.LSX-DH061"]
+
+
+def test_delete_supabase_photo_drafts_removes_the_whole_displayed_row(monkeypatch) -> None:
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return (
+                b'[{"event_id":"core-1","parent_event_id":"parent-1"},'
+                b'{"event_id":"product-1","parent_event_id":"parent-1"}]'
+            )
+
+    def fake_urlopen(request, timeout):
+        captured.update(request=request, timeout=timeout)
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    deleted = delete_supabase_photo_drafts(
+        "https://project.supabase.co",
+        "service-key",
+        "parent-1",
+    )
+
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlsplit(captured["request"].full_url).query
+    )
+    assert deleted == 2
+    assert captured["request"].method == "DELETE"
+    assert captured["request"].get_header("Prefer") == "return=representation"
+    assert query["or"] == ["(parent_event_id.eq.parent-1,event_id.eq.parent-1)"]
+    assert query["select"] == ["event_id,parent_event_id"]

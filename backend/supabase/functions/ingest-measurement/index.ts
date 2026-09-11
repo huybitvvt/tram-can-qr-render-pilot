@@ -816,14 +816,17 @@ Deno.serve(async (request: Request) => {
     const supabase = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    let deleted = false;
+    let measurementDeleted = false;
     const byEvent = await supabase
       .from(MEASUREMENT_TABLE)
       .delete()
       .eq("event_id", eventId)
       .select("id,event_id");
+    if (byEvent.error) {
+      return json(500, { ok: false, error: "measurement_delete_failed" });
+    }
     if (!byEvent.error && Array.isArray(byEvent.data) && byEvent.data.length) {
-      deleted = true;
+      measurementDeleted = true;
     } else {
       const byId = await supabase
         .from(MEASUREMENT_TABLE)
@@ -831,15 +834,30 @@ Deno.serve(async (request: Request) => {
         .eq("id", eventId)
         .select("id,event_id");
       if (!byId.error && Array.isArray(byId.data) && byId.data.length) {
-        deleted = true;
-      } else if (byEvent.error || byId.error) {
+        measurementDeleted = true;
+      } else if (byId.error) {
         return json(500, { ok: false, error: "measurement_delete_failed" });
       }
     }
-    if (!deleted) {
+    const photoDrafts = await supabase
+      .from(PHOTO_DRAFT_TABLE)
+      .delete()
+      .or(`parent_event_id.eq.${eventId},event_id.eq.${eventId}`)
+      .select("id,event_id,parent_event_id");
+    if (photoDrafts.error) {
+      return json(500, { ok: false, error: "photo_draft_delete_failed" });
+    }
+    const photoDraftsDeleted = Array.isArray(photoDrafts.data) ? photoDrafts.data.length : 0;
+    if (!measurementDeleted && photoDraftsDeleted === 0) {
       return json(404, { ok: false, error: "measurement_not_found" });
     }
-    return json(200, { ok: true, deleted: true, event_id: eventId });
+    return json(200, {
+      ok: true,
+      deleted: true,
+      event_id: eventId,
+      measurement_deleted: measurementDeleted,
+      photo_drafts_deleted: photoDraftsDeleted,
+    });
   }
 
   if (body.action === "update_measurement") {

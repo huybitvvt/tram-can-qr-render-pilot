@@ -40,6 +40,7 @@ from .codex_oauth import CodexOAuthClient, EncryptedCodexTokenStore
 from .codex_oauth_weight import CodexOAuthWeightReader
 from .capture_gate import frame_fingerprint
 from .api_client import (
+    delete_supabase_photo_drafts,
     fetch_remote_json,
     fetch_remote_measurement_page,
     fetch_remote_weigh_batches,
@@ -4567,21 +4568,51 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if not event_id:
                         raise ValueError("Thiếu event_id")
                     cloud_deleted = False
-                    cloud_error = ""
+                    cloud_measurement_deleted = False
+                    cloud_photo_drafts_deleted = 0
+                    cloud_errors: list[str] = []
+                    measurement_delete_error = ""
                     ingest_url = _ingest_api_url()
                     ingest_token = _ingest_api_token()
                     if ingest_url and ingest_token:
                         try:
-                            mutate_remote_measurement(
+                            remote_delete = mutate_remote_measurement(
                                 ingest_url,
                                 ingest_token,
                                 action="delete_measurement",
                                 event_id=event_id,
                             )
                             cloud_deleted = True
+                            cloud_measurement_deleted = bool(
+                                remote_delete.get("measurement_deleted", True)
+                            )
+                            cloud_photo_drafts_deleted = int(
+                                remote_delete.get("photo_drafts_deleted") or 0
+                            )
                         except Exception as exc:
-                            cloud_error = str(exc)
-                    local_deleted = store.delete_measurement(event_id)
+                            measurement_delete_error = str(exc)
+                    supabase_url = _supabase_project_url()
+                    supabase_key = _supabase_read_key()
+                    if supabase_url and supabase_key:
+                        try:
+                            direct_photo_drafts_deleted = delete_supabase_photo_drafts(
+                                supabase_url,
+                                supabase_key,
+                                event_id,
+                            )
+                            cloud_photo_drafts_deleted += direct_photo_drafts_deleted
+                            cloud_deleted = cloud_deleted or cloud_photo_drafts_deleted > 0
+                        except Exception as exc:
+                            cloud_errors.append(str(exc))
+                    if measurement_delete_error and not (
+                        cloud_photo_drafts_deleted > 0
+                        and measurement_delete_error == "measurement_not_found"
+                    ):
+                        cloud_errors.insert(0, measurement_delete_error)
+                    local_measurement_deleted = store.delete_measurement(event_id)
+                    local_photo_drafts_deleted = store.delete_photo_drafts(event_id)
+                    local_deleted = local_measurement_deleted or local_photo_drafts_deleted > 0
+                    cloud_error = "; ".join(dict.fromkeys(cloud_errors))
                     if not cloud_deleted and not local_deleted:
                         raise ValueError(
                             cloud_error or "Không tìm thấy dòng để xóa trên cloud/local"
@@ -4593,7 +4624,11 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "deleted": True,
                             "event_id": event_id,
                             "cloud_deleted": cloud_deleted,
+                            "cloud_measurement_deleted": cloud_measurement_deleted,
+                            "cloud_photo_drafts_deleted": cloud_photo_drafts_deleted,
                             "local_deleted": local_deleted,
+                            "local_measurement_deleted": local_measurement_deleted,
+                            "local_photo_drafts_deleted": local_photo_drafts_deleted,
                             "cloud_error": cloud_error or None,
                         },
                     )
