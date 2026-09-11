@@ -2261,6 +2261,16 @@ def test_ui_confirms_the_exact_row_before_deleting_saved_error_photos() -> None:
     assert "cloud_photo_drafts_deleted" in TEST_UI_HTML
 
 
+def test_production_history_only_offers_delete_for_error_rows() -> None:
+    assert 'class="record-actions-col">Thao tác</th>' in TEST_UI_HTML
+    assert 'id="productionRecordsStatus"' in TEST_UI_HTML
+    assert "function appendProductionDeleteAction(" in TEST_UI_HTML
+    assert "if(errorState==='error')" in TEST_UI_HTML
+    assert "button.textContent='Xóa dòng lỗi'" in TEST_UI_HTML
+    assert "CHỈ XÓA DÒNG LỖI NÀY?\\nMã QR:" in TEST_UI_HTML
+    assert "recordErrorStatus(item)!=='error'" in TEST_UI_HTML
+
+
 def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert 'id="roundCount"' in TEST_UI_HTML
     assert 'id="evidenceRounds"' in TEST_UI_HTML
