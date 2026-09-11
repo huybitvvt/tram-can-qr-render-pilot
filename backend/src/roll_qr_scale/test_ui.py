@@ -2189,7 +2189,12 @@ class StationUIService:
         *,
         require_machine: bool = False,
     ) -> dict[str, object]:
-        """Bind a logical camera to exactly one configured production machine."""
+        """Resolve the authoritative machine for a logical station/camera.
+
+        Browsers can remain open across a deploy and submit a stale machine
+        label. The station/camera identity is server-configured, so it must be
+        the source of truth instead of rejecting an otherwise valid weighing.
+        """
 
         station = next(
             (
@@ -2203,13 +2208,15 @@ class StationUIService:
             raise ValueError("Trạm hoặc camera không hợp lệ")
         configured_machine = str(station.get("machine_id") or "").strip()
         supplied_machine = str(machine or "").strip()
-        if configured_machine and require_machine and not supplied_machine:
-            raise ValueError(f"Thiếu máy đã gắn với camera {camera_id}")
-        if configured_machine and supplied_machine and supplied_machine != configured_machine:
-            raise ValueError(
-                f"Camera {camera_id} chỉ được gắn với máy {configured_machine}"
-            )
-        return station
+        resolved = dict(station)
+        resolved["machine_id"] = configured_machine or supplied_machine
+        resolved["machine_configured"] = bool(configured_machine)
+        resolved["machine_overridden"] = bool(
+            configured_machine
+            and supplied_machine
+            and supplied_machine != configured_machine
+        )
+        return resolved
 
     def stage_evidence_step(
         self,
@@ -2531,9 +2538,10 @@ class StationUIService:
             raise ValueError("Ô ảnh phải là cân lõi, cân sản phẩm hoặc kiểm kho")
         if not 0 <= capture_round <= 3:
             raise ValueError("Lần cân phải từ 1 đến 4")
-        self.validate_station_source(
+        station_source = self.validate_station_source(
             station_id, camera_id, machine, require_machine=True
         )
+        machine = str(station_source.get("machine_id") or "").strip()
 
         client_qr = client_qr_code.strip()
         if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
@@ -3128,8 +3136,24 @@ class StationUIService:
         if not math.isfinite(weight) or weight < 0:
             raise ValueError("Số cân phải là số không âm")
         machine = machine.strip()
+        station_source: dict[str, object] | None = None
+        if station_id and camera_id:
+            station_source = self.validate_station_source(
+                station_id,
+                camera_id,
+                machine,
+                require_machine=True,
+            )
+            machine = str(station_source.get("machine_id") or machine).strip()
         tagged_machine = _raw_tag(weight_raw, "SOURCE_MACHINE")
-        if machine and tagged_machine and machine != tagged_machine:
+        if station_source and station_source.get("machine_configured"):
+            if tagged_machine != machine:
+                # A stale tab can carry the previous station's SOURCE_MACHINE.
+                # Canonicalize it before persistence instead of losing a valid
+                # photographed weighing.
+                weight_raw = _upsert_raw_tag(weight_raw, "SOURCE_MACHINE", machine)
+                tagged_machine = machine
+        elif machine and tagged_machine and not _machine_labels_match(machine, tagged_machine):
             raise ValueError("Máy trong phiếu cân không khớp nguồn đã chọn")
         source_machine = machine or tagged_machine
         if source_machine and not tagged_machine:
@@ -3154,13 +3178,6 @@ class StationUIService:
             raise ValueError("Cần đủ event_id, analysis_id, station_id và camera_id")
         if bool(station_id) != bool(camera_id):
             raise ValueError("Cần đủ station_id và camera_id")
-        if station_id and camera_id:
-            self.validate_station_source(
-                station_id,
-                camera_id,
-                source_machine,
-                require_machine=True,
-            )
         computed_frame_sha = jpeg_sha256(encode_staged_jpeg(frame))
         if frame_sha256 and frame_sha256.lower() != computed_frame_sha:
             raise AnalysisBindingMismatch("frame_sha256 không khớp ảnh gửi để lưu")
@@ -3307,12 +3324,16 @@ class StationUIService:
         if machine and not station_id:
             raise ValueError("Không được chọn máy khi thiếu trạm và camera")
         if station_id and camera_id:
-            self.validate_station_source(
+            station_source = self.validate_station_source(
                 station_id,
                 camera_id,
                 machine,
                 require_machine=True,
             )
+            machine = str(station_source.get("machine_id") or machine).strip()
+            tagged_machine = _raw_tag(weight_raw, "SOURCE_MACHINE")
+            if station_source.get("machine_configured") and tagged_machine != machine:
+                weight_raw = _upsert_raw_tag(weight_raw, "SOURCE_MACHINE", machine)
         for label, value in (
             ("Khối lượng", weight),
             ("Khối lượng lõi", core_weight),
@@ -5304,6 +5325,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         camera_id=str(payload["camera_id"])
                         if payload.get("camera_id")
                         else None,
+                        machine=str(payload.get("machine", "")),
                         frame_sha256=str(payload["frame_sha256"])
                         if payload.get("frame_sha256")
                         else None,

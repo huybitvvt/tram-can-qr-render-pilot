@@ -302,7 +302,7 @@ def test_ui_inventory_ai_miss_photo_is_saved_without_weight(tmp_path) -> None:
     store.close()
 
 
-def test_each_camera_is_locked_to_its_configured_machine(tmp_path) -> None:
+def test_each_camera_resolves_to_its_configured_machine(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(
         store,
@@ -318,10 +318,11 @@ def test_each_camera_is_locked_to_its_configured_machine(tmp_path) -> None:
     assert service.validate_station_source(
         "station-01", "camera-01", "Máy tái chế"
     )["machine_id"] == "Máy tái chế"
-    with pytest.raises(ValueError, match="chỉ được gắn với máy Máy tái chế"):
-        service.validate_station_source(
-            "station-01", "camera-01", "Máy cách nhiệt"
-        )
+    stale = service.validate_station_source(
+        "station-01", "camera-01", "Máy cách nhiệt"
+    )
+    assert stale["machine_id"] == "Máy tái chế"
+    assert stale["machine_overridden"] is True
     with pytest.raises(ValueError, match="Trạm hoặc camera không hợp lệ"):
         service.validate_station_source("station-01", "camera-02", "Máy tái chế")
     assert "select.disabled=Boolean(locked)" in TEST_UI_HTML
@@ -360,6 +361,115 @@ def test_capture_accepts_machine_from_save_endpoint_and_persists_source(tmp_path
     assert result["ok"] is True
     assert saved is not None
     assert "SOURCE_MACHINE=Máy tái chế" in saved.weight_raw
+    service.close()
+    store.close()
+
+
+def test_capture_canonicalizes_stale_browser_machine_before_save(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(
+        store,
+        None,
+        None,
+        None,
+        station_count=2,
+        station_ids=["station-01", "station-02"],
+        camera_ids=["camera-01", "camera-02"],
+        machine_ids=["Máy tái chế", "Máy cách nhiệt"],
+    )
+
+    result = service.capture(
+        "MT-MN005_STALE",
+        1.02,
+        "kg",
+        make_qr_frame("MT-MN005_STALE"),
+        weight_raw="SOURCE_MACHINE=Máy cách nhiệt; HUMAN_CONFIRMED=1.02",
+        station_id="station-01",
+        camera_id="camera-01",
+        machine="Máy cách nhiệt",
+    )
+    saved = store.get(str(result["event_id"]))
+
+    assert result["ok"] is True
+    assert saved is not None
+    assert "SOURCE_MACHINE=Máy tái chế" in saved.weight_raw
+    assert "SOURCE_MACHINE=Máy cách nhiệt" not in saved.weight_raw
+    service.close()
+    store.close()
+
+
+def test_photo_draft_canonicalizes_stale_browser_machine(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(
+        store,
+        None,
+        None,
+        None,
+        station_count=2,
+        station_ids=["station-01", "station-02"],
+        camera_ids=["camera-01", "camera-02"],
+        machine_ids=["Máy tái chế", "Máy cách nhiệt"],
+    )
+    capture_id = str(uuid.uuid4())
+
+    service.capture_photo_draft(
+        make_qr_frame("MT-MN005-DRAFT"),
+        event_id=capture_id,
+        station_id="station-01",
+        camera_id="camera-01",
+        machine="Máy cách nhiệt",
+    )
+    saved = store.get_photo_draft(capture_id)
+
+    assert saved is not None
+    assert saved.machine == "Máy tái chế"
+    service.close()
+    store.close()
+
+
+def test_inventory_canonicalizes_stale_browser_machine(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(
+        store,
+        None,
+        None,
+        None,
+        station_count=2,
+        station_ids=["station-01", "station-02"],
+        camera_ids=["camera-01", "camera-02"],
+        machine_ids=["Máy tái chế", "Máy cách nhiệt"],
+    )
+
+    frame = make_qr_frame("MT-MN005-INVENTORY")
+    event_id = str(uuid.uuid4())
+    binding = service.sessions.stage(
+        frame,
+        event_id=event_id,
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+    binding = service.sessions.mark_ready(binding.analysis_id)
+
+    result = service.capture_inventory(
+        "MT-MN005-INVENTORY",
+        6.86,
+        1.02,
+        0.16,
+        "kg",
+        frame,
+        weight_raw="SOURCE_MACHINE=Máy cách nhiệt",
+        event_id=event_id,
+        analysis_id=binding.analysis_id,
+        station_id="station-01",
+        camera_id="camera-01",
+        machine="Máy cách nhiệt",
+        frame_sha256=binding.frame_sha256,
+    )
+    saved = store.get_inventory_check(str(result["event_id"]))
+
+    assert saved is not None
+    assert "SOURCE_MACHINE=Máy tái chế" in saved.weight_raw
+    assert "SOURCE_MACHINE=Máy cách nhiệt" not in saved.weight_raw
     service.close()
     store.close()
 
