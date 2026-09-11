@@ -297,6 +297,7 @@ button.save:hover:not(:disabled){background:var(--primary-dark);border-color:var
     line-height:1.35;
 }
 .settings-empty-hint[hidden]{display:none}
+.settings-empty-hint button{display:block;width:100%;margin-top:8px;min-height:36px;padding:6px 10px;border-color:var(--primary);background:#fff;color:var(--primary);font-size:12px}
 .round-count-inline {
     margin: 0;
     display: flex;
@@ -368,11 +369,15 @@ button.save:hover:not(:disabled){background:var(--primary-dark);border-color:var
   flex:1 1 auto;
 }
 .camera-ops-card .settings-btn{
+  display:inline-flex !important;
+  align-items:center;
+  gap:6px;
   min-width:34px !important;
   min-height:34px !important;
-  padding:6px !important;
+  padding:6px 10px !important;
 }
 .camera-ops-card .settings-btn svg{width:16px;height:16px}
+.camera-ops-card .settings-btn::after{content:"Cài đặt";font-size:12px;font-weight:700}
 .camera-ops-card .round-count-inline{
   margin:0;
   min-width:110px;
@@ -699,7 +704,7 @@ try{const savedProvider=localStorage.getItem(RECOGNITION_PROVIDER_KEY);if(['gemi
 function recognitionLabel(){const provider=recognitionProvider.value==='codex'?'Codex · ChatGPT':'Gemini';if(recognitionProvider.value!=='gemini')return provider;const labels={flash31:'Mặc định · 3.1 Flash-Lite',fast:'Nhanh · 3.5 Flash-Lite',flash37:'Cân bằng · 3.7 Flash',accurate:'Chính xác · Pro'};return provider+' · '+(labels[recognitionProfile.value]||recognitionProfile.value)}
 function syncRecognitionSettings(announce=false){const primary=Boolean(appStatus&&appStatus.weight_engine==='gemini'),codex=(appStatus&&appStatus.codex)||{},profiles=(appStatus&&appStatus.recognition_profiles)||{},codexOption=recognitionProvider.querySelector('option[value="codex"]'),hint=$('recognitionHint');if(codexOption)codexOption.disabled=!Boolean(codex.available);for(const option of recognitionProfile.options)option.disabled=!Boolean(profiles[option.value]&&profiles[option.value].enabled);if(recognitionProvider.value==='codex'&&!codex.available){recognitionProvider.value='gemini';try{localStorage.setItem(RECOGNITION_PROVIDER_KEY,'gemini')}catch{}}if(recognitionProfile.selectedOptions[0]?.disabled)recognitionProfile.value='fast';const usingGemini=recognitionProvider.value==='gemini';if($('recognitionProviderOption'))$('recognitionProviderOption').hidden=!primary;if($('recognitionProfileOption'))$('recognitionProfileOption').hidden=!primary||!usingGemini;if($('codexLoginBtn')){$('codexLoginBtn').hidden=!primary||(Boolean(codex.available)&&recognitionProvider.value!=='codex');$('codexLoginBtn').textContent=codex.available?'Đăng nhập lại Codex':'Đăng nhập Codex'}if(hint){if(!primary){hint.hidden=true;hint.textContent=''}else if(!codex.available){hint.hidden=false;hint.textContent=codex.message||'Codex chưa sẵn sàng trên máy này. Dùng Gemini (Flash-Lite/Pro) hoặc cài Codex CLI rồi đăng nhập.'}else{hint.hidden=usingGemini;hint.textContent=usingGemini?'':'Đang dùng Codex · ChatGPT (không dùng Flash-Lite/Pro).'}}if(announce)status(captureStatus,'Đã chọn AI: '+recognitionLabel(),'ok')}
 
- function syncSettingsHint(){const panel=$('settingsPanel');if(!panel)return;let hint=$('settingsEmptyHint');if(!hint){hint=document.createElement('div');hint.id='settingsEmptyHint';hint.className='settings-empty-hint';hint.setAttribute('role','status');hint.setAttribute('aria-live','polite');panel.appendChild(hint)}const primary=Boolean(appStatus&&appStatus.weight_engine==='gemini');hint.hidden=Boolean(appStatus&&primary);hint.textContent=appStatus&&!primary?'AI Gemini chưa bật trên gateway (đang dùng OCR cục bộ).':'Đang tải cấu hình AI…'}
+ function syncSettingsHint(){const panel=$('settingsPanel');if(!panel)return;let hint=$('settingsEmptyHint');if(!hint){hint=document.createElement('div');hint.id='settingsEmptyHint';hint.className='settings-empty-hint';hint.setAttribute('role','status');hint.setAttribute('aria-live','polite');panel.appendChild(hint)}const primary=Boolean(appStatus&&appStatus.weight_engine==='gemini');hint.hidden=Boolean(appStatus&&primary);hint.textContent=appStatus&&!primary?'AI Gemini chưa bật trên gateway (đang dùng OCR cục bộ).':'Đang tải cấu hình AI…';let login=$('settingsLoginBtn');if(!appStatus&&!login){login=document.createElement('button');login.id='settingsLoginBtn';login.type='button';login.textContent='Đăng nhập để mở cài đặt';login.addEventListener('click',()=>redirectToLogin(false));hint.appendChild(login)}if(appStatus&&login)login.remove()}
  const syncRecognitionSettingsBase=syncRecognitionSettings;
  syncRecognitionSettings=function(announce=false){syncRecognitionSettingsBase(announce);syncSettingsHint()};
 
@@ -730,12 +735,16 @@ function sourceRawTags(){persistSourceFromFields();let tags=' SOURCE_DATE='+sour
 function status(el,text,type=''){el.textContent=text;el.className='status '+type}
 const SESSION_KEY='tram_can_session';
 let sessionToken='';
+let loginRedirecting=false;
 function persistSessionToken(token){token=String(token||'').trim();if(!token)return '';sessionToken=token;try{localStorage.setItem(SESSION_KEY,token)}catch{}try{sessionStorage.setItem(SESSION_KEY,token)}catch{}try{window.name='tram_can_session='+token}catch{}return token}
 function clearSessionToken(){sessionToken='';try{localStorage.removeItem(SESSION_KEY)}catch{}try{sessionStorage.removeItem(SESSION_KEY)}catch{}try{if(String(window.name||'').indexOf('tram_can_session=')===0)window.name=''}catch{}}
+function loginReturnPath(){const url=new URL(location.href);url.searchParams.delete('session');return url.pathname+url.search}
+function redirectToLogin(replace=true){if(loginRedirecting)return;loginRedirecting=true;clearSessionToken();const target='/login?next='+encodeURIComponent(loginReturnPath());if(replace)location.replace(target);else location.assign(target)}
 function readSessionToken(){const params=new URLSearchParams(location.search),hash=new URLSearchParams(String(location.hash||'').replace(/^#/,''));const fromUrl=params.get('session')||hash.get('session')||'';if(fromUrl)persistSessionToken(fromUrl);if(sessionToken)return sessionToken;try{const stored=localStorage.getItem(SESSION_KEY);if(stored)return persistSessionToken(stored)}catch{}try{const stored=sessionStorage.getItem(SESSION_KEY);if(stored)return persistSessionToken(stored)}catch{}try{const named=String(window.name||'');if(named.indexOf('tram_can_session=')===0)return persistSessionToken(named.slice('tram_can_session='.length))}catch{}return ''}
 window.addEventListener('message',event=>{const data=event&&event.data;if(!data||data.source!=='tram-can'||!data.session)return;persistSessionToken(data.session)});
 readSessionToken();
-async function api(path,options){options=options||{};const headers=Object.assign({},options.headers||{});const token=readSessionToken();if(token){if(!headers.Authorization&&!headers.authorization)headers.Authorization='Bearer '+token;if(!headers['X-Tram-Can-Session']&&!headers['x-tram-can-session'])headers['X-Tram-Can-Session']=token}const response=await fetch(path,Object.assign({credentials:'include'},options,{headers}));let data;try{data=await response.json()}catch{throw new Error('Server trả dữ liệu không hợp lệ')}if(response.status===401||(data&&data.error==='authentication_required')){const message=(data&&data.message)||'Cần đăng nhập lại';if(!/\/login(?:$|[?#])/.test(location.pathname)){clearSessionToken();location.replace('/login?next=/kiem-kho')}throw new Error(message)}if(!response.ok)throw new Error(data.message||data.error||('HTTP '+response.status));return data}
+async function api(path,options){options=options||{};const headers=Object.assign({},options.headers||{});const token=readSessionToken();if(token){if(!headers.Authorization&&!headers.authorization)headers.Authorization='Bearer '+token;if(!headers['X-Tram-Can-Session']&&!headers['x-tram-can-session'])headers['X-Tram-Can-Session']=token}const response=await fetch(path,Object.assign({credentials:'include'},options,{headers}));let data;try{data=await response.json()}catch{throw new Error('Server trả dữ liệu không hợp lệ')}if(response.status===401||(data&&data.error==='authentication_required')){const error=new Error((data&&data.message)||'Cần đăng nhập lại');error.code='authentication_required';if(!/\/login(?:$|[?#])/.test(location.pathname))redirectToLogin();throw error}if(!response.ok)throw new Error(data.message||data.error||('HTTP '+response.status));return data}
+function isAuthenticationRequired(error){return Boolean(error&&error.code==='authentication_required')}
 function newEventId(){if(window.crypto&&typeof crypto.randomUUID==='function')return crypto.randomUUID();return'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c==='x'?r:(r&3|8);return v.toString(16)})}
 function mappingKey(){return CAMERA_MAP_PREFIX+(appStatus&&appStatus.gateway_id||'gateway-01')}
 function readMappings(){try{const value=JSON.parse(localStorage.getItem(mappingKey())||'{}');return value&&typeof value==='object'?value:{}}catch{return{}}}
@@ -1037,6 +1046,7 @@ async function saveCaptureWithFailedImages(){
  const savedStationIndex=stations.indexOf(session),total=sessionRoundCount(session),cloudEnabled=Boolean(appStatus&&appStatus.sync_enabled);session.setState('saving','ĐANG LƯU '+indexes.length+' LƯỢT','');status(captureStatus,'Đang lưu '+indexes.length+' lượt…','warn');
  let savedNow=0,errorSavedNow=0,syncedAll=true,failed=null;
  for(const index of indexes){const round=session.rounds[index]||emptyWeighRound(),complete=roundReadyToSave(session,index);try{const bound=Boolean(complete&&session.eventId===round.eventId&&session.analysisId&&session.frameSha256&&roundOwnsSessionBinding(session,round)),data=complete?await saveMeasurementRound(session,round,index,bound):await saveFailedRound(session,round,index);if(data.event_id&&data.event_id!==round.eventId)throw new Error('Backend trả sai event_id cho lần '+(index+1));round.saved=true;round.syncStatus=String(data.sync_status||'local');round.syncError=String(data.sync_error||'');savedNow+=1;if(data.error_saved)errorSavedNow+=1;syncedAll=syncedAll&&(!cloudEnabled||round.syncStatus==='synced');if(complete&&bound){session.eventId=null;session.analysisId=null;session.frameSha256=null;session.hydratedPending=false}}catch(error){failed={index,error};break}}
+ if(failed&&isAuthenticationRequired(failed.error)){session.state='awaiting-weight';session.stateElement.textContent='PHIÊN ĐĂNG NHẬP HẾT HẠN · ĐANG MỞ ĐĂNG NHẬP';session.stateElement.className='station-state bad';status(captureStatus,'Phiên đăng nhập đã hết hạn. Đang mở trang đăng nhập; lượt cân chưa được ghi và không tạo bản trùng.','warn');renderControls();return}
  captureCount+=savedNow;session.captureCount+=savedNow;await loadRecords();
  const savedMessage='Đã lưu '+savedNow+' lượt'+(errorSavedNow?' ('+errorSavedNow+' lượt chưa có số cân; ảnh đã hiện ở danh sách bên dưới)':'')+'. ';
  if(allRoundsSaved(session)&&!failed){const stillSelected=session===current();session.setState('saved','ĐÃ LƯU ĐỦ '+total+'/'+total,'ready');prepareNextCapture('',session);if(stillSelected){const cloudMessage=!cloudEnabled?'Đã lưu cục bộ.':syncedAll?'Đã đồng bộ Supabase.':'Bản chưa đồng bộ sẽ tự thử lại.';status(captureStatus,savedMessage+cloudMessage,syncedAll||!cloudEnabled?'ok':'warn');if($('autoAdvance').checked&&stations.length>1)selectStation((savedStationIndex+1)%stations.length)}return}
