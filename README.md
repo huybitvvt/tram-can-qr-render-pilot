@@ -184,7 +184,7 @@ Ba trạm:
   --inference-queue-size 8 --auto-advance
 ```
 
-Nếu bỏ các `--station-id` và `--camera-id`, chương trình tạo lần lượt `station-01..03` và `camera-01..03`. Nếu truyền `--machine-id`, mỗi máy được khóa vào đúng một trạm/camera và mỗi cờ phải lặp đúng bằng `--station-count`. `--auto-advance` là mặc định; dùng `--no-auto-advance` nếu muốn giữ nguyên trạm sau khi lưu.
+Nếu bỏ các `--station-id` và `--camera-id`, chương trình tạo lần lượt `station-01..03` và `camera-01..03`. Mặc định camera không khóa loại máy sản xuất; người vận hành chọn Máy theo phiếu. Chỉ truyền `--machine-id` (hoặc `ROLL_SCALE_CAMERA_MACHINE_IDS` trên Render) khi camera được cố định vật lý vĩnh viễn vào đúng loại máy sản xuất; mỗi giá trị phải lặp đúng bằng `--station-count`. Biến Render cũ `ROLL_SCALE_MACHINE_IDS` bị bỏ qua để cấu hình tồn dư không thể chặn lưu. `--auto-advance` là mặc định; dùng `--no-auto-advance` nếu muốn giữ nguyên trạm sau khi lưu.
 
 Mở `http://127.0.0.1:8080` rồi vận hành như sau:
 

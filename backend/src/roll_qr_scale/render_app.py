@@ -44,7 +44,10 @@ def build_render_argv() -> list[str]:
         argv.extend(("--station-id", station_id))
     for camera_id in _csv_env("ROLL_SCALE_CAMERA_IDS"):
         argv.extend(("--camera-id", camera_id))
-    for machine_id in _csv_env("ROLL_SCALE_MACHINE_IDS"):
+    # Production-machine locking is optional and must be explicitly enabled.
+    # Ignore the legacy Render variable so a stale dashboard value cannot
+    # confuse browser camera slots with production machine types.
+    for machine_id in _csv_env("ROLL_SCALE_CAMERA_MACHINE_IDS"):
         argv.extend(("--machine-id", machine_id))
     return argv
 

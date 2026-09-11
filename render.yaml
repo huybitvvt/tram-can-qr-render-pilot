@@ -36,8 +36,6 @@ services:
         value: station-01,station-02
       - key: ROLL_SCALE_CAMERA_IDS
         value: camera-01,camera-02
-      - key: ROLL_SCALE_MACHINE_IDS
-        value: Máy tái chế,Máy cách nhiệt
       - key: ROLL_SCALE_GATEWAY_ID
         value: render-pilot-01
       - key: ROLL_SCALE_DATA_ROOT

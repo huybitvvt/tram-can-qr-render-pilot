@@ -22,7 +22,8 @@ def test_render_argv_uses_public_host_port_and_configured_data_root(
     monkeypatch.setenv("ROLL_SCALE_STATION_COUNT", "2")
     monkeypatch.setenv("ROLL_SCALE_STATION_IDS", "scale-a,scale-b")
     monkeypatch.setenv("ROLL_SCALE_CAMERA_IDS", "cam-a,cam-b")
-    monkeypatch.setenv("ROLL_SCALE_MACHINE_IDS", "machine-a,machine-b")
+    monkeypatch.setenv("ROLL_SCALE_MACHINE_IDS", "stale-a,stale-b")
+    monkeypatch.delenv("ROLL_SCALE_CAMERA_MACHINE_IDS", raising=False)
 
     argv = build_render_argv()
 
@@ -38,6 +39,18 @@ def test_render_argv_uses_public_host_port_and_configured_data_root(
         "cam-a",
         "cam-b",
     ]
+    assert "--machine-id" not in argv
+
+
+def test_render_argv_only_locks_machine_when_explicitly_configured(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("ROLL_SCALE_DATA_ROOT", str(tmp_path))
+    monkeypatch.setenv("ROLL_SCALE_STATION_COUNT", "2")
+    monkeypatch.setenv("ROLL_SCALE_CAMERA_MACHINE_IDS", "machine-a,machine-b")
+
+    argv = build_render_argv()
+
     assert [argv[index + 1] for index, value in enumerate(argv) if value == "--machine-id"] == [
         "machine-a",
         "machine-b",
