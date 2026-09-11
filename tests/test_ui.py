@@ -42,17 +42,15 @@ def test_decode_image_accepts_browser_data_url() -> None:
     assert decoded.shape == frame.shape
 
 
-def test_photo_only_and_factory_buttons_are_removed_from_operator_view() -> None:
+def test_ai_failures_stay_temporary_and_cannot_be_saved_by_operator() -> None:
     assert "#photoOnlyBtn,#factoryBtn,#inventoryPhoneBtn{display:none!important}" in TEST_UI_HTML
     assert "'/api/photo-capture'" in TEST_UI_HTML
-    assert "function persistFailedImage(" in TEST_UI_HTML
-    assert "function saveFailedRound(" in TEST_UI_HTML
     assert "function saveMeasurementRound(" in TEST_UI_HTML
-    assert "saveCapture=saveCaptureWithFailedImages" in TEST_UI_HTML
+    assert "saveCapture=saveValidatedCapture" in TEST_UI_HTML
     assert "round.eventId=newEventId()" in TEST_UI_HTML
-    assert "Nhấn Enter để lưu ảnh với số trống" in TEST_UI_HTML
-    assert "ID ảnh sẽ được tự tạo an toàn" in TEST_UI_HTML
-    assert "error_saved:true" in TEST_UI_HTML
+    assert "round&&!round.saved&&roundReadyToSave(session,index)" in TEST_UI_HTML
+    assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
+    assert "Nhấn Enter để lưu ảnh với số trống" not in TEST_UI_HTML
     assert "row.classList.add('photo-draft-row')" in TEST_UI_HTML
 
 
@@ -1664,7 +1662,7 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "Số lượng trong ca" in TEST_UI_HTML
     assert "data.total_count" in TEST_UI_HTML
     assert "data.error_count" in TEST_UI_HTML
-    assert "ảnh đã hiện ở danh sách bên dưới" in TEST_UI_HTML
+    assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
     assert 'id="shiftCountDetail"' in TEST_UI_HTML
     assert "Theo Ngày · Ca · Máy · Lệnh sản xuất" in TEST_UI_HTML
     assert "session.captureCount+=savedNow;await loadRecords()" in TEST_UI_HTML
@@ -2084,10 +2082,9 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "if(isProduct&&!coreReady(session))" in TEST_UI_HTML
     assert "session._analyzeLock=false;renderControls();status(captureStatus,error.message" in TEST_UI_HTML
     assert "await api('/api/session/discard'" in TEST_UI_HTML
-    assert "retryingFailedCore=!isProduct&&targetRound===0&&session.state==='error'&&Boolean(session.eventId)" in TEST_UI_HTML
+    assert "retryingFailedCore=!isProduct&&targetRound===0&&Boolean(session.eventId)&&!roundCoreReady(session,targetRound)" in TEST_UI_HTML
     assert "if(retryingFailedCore&&round.eventId===discardedEventId)round.eventId=null" in TEST_UI_HTML
-    assert "Nhấn Enter để lưu ảnh với số trống" in TEST_UI_HTML
-    assert "ID ảnh sẽ được tự tạo an toàn" in TEST_UI_HTML
+    assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
     assert 'id="analyzeCoreBtn"' in TEST_UI_HTML
     assert 'id="analyzeProductBtn"' in TEST_UI_HTML
     assert 'id="productWeight"' in TEST_UI_HTML

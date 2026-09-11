@@ -52,7 +52,7 @@ def test_frontend_blocks_overweight_even_with_error_reason_and_images():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = ["weightToKg", "productWeightLimitKg", "coreWeightOverLimit", "productWeightOverLimit", "roundOverWeightLimit", "sessionOverWeightLimit", "roundCanSave"]
     script = "const assert=require('node:assert/strict');const CORE_WEIGHT_ALERT_KG=1.2;const PRODUCT_WEIGHT_ALERT_KG=" + json.dumps({"Máy Bao Bì": 9, "Máy cách nhiệt": 15.5}) + ";let sourceContext={machine:'Máy cách nhiệt'};"
-    script += "function sessionRoundCount(s){return s.rounds.length}function roundHasDuplicateQr(){return false}function roundQualityReady(){return true}function roundReadyToSave(){return true}function roundHasSavedImage(){return true}"
+    script += "function sessionRoundCount(s){return s.rounds.length}function roundHasDuplicateQr(){return false}function roundQualityReady(){return true}function roundReadyToSave(){return true}"
     script += "\n".join(next(line for line in html.splitlines() if line.startswith("function " + name + "(")) for name in names)
     script += """
 const round={weight:1.2,productWeight:15.5,errorStatus:'error',errorReason:'confirmed',coreImage:'image'};
@@ -67,6 +67,41 @@ assert.equal(roundCanSave(session,0),false);
 round.weight=1;sourceContext.machine='Máy Bao Bì';round.productWeight=9.001;
 assert.equal(roundCanSave(session,0),false);
 round.saved=true;assert.equal(sessionOverWeightLimit(session),false);
+"""
+    result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_frontend_does_not_save_images_when_ai_weight_is_unreadable():
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
+    names = [
+        "validWeightValue",
+        "roundCoreReady",
+        "roundProductReady",
+        "roundReadyToSave",
+        "roundQualityReady",
+        "roundOverWeightLimit",
+        "roundCanSave",
+    ]
+    script = (
+        "const assert=require('node:assert/strict');"
+        "function roundCode(s,i){return s.rounds[i].qr}"
+        "function roundHasDuplicateQr(){return false}"
+        "function coreWeightOverLimit(){return false}"
+        "function productWeightOverLimit(){return false}"
+    )
+    script += "\n".join(
+        next(line for line in html.splitlines() if line.startswith("function " + name + "("))
+        for name in names
+    )
+    script += """
+const round={saved:false,coreImage:'core',productImage:'product',coreAnalysis:{},productAnalysis:{},weight:'',productWeight:'',qr:'ROLL-001',errorStatus:'ok'};
+const session={unit:'kg',rounds:[round]};
+assert.equal(roundReadyToSave(session,0),false);
+assert.equal(roundCanSave(session,0),false);
+round.weight='0.16';round.productWeight='1.25';
+assert.equal(roundReadyToSave(session,0),true);
+assert.equal(roundCanSave(session,0),true);
 """
     result = subprocess.run(["node", "-e", script], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
