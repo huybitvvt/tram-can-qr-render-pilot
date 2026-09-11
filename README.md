@@ -186,6 +186,14 @@ Ba trạm:
 
 Nếu bỏ các `--station-id` và `--camera-id`, chương trình tạo lần lượt `station-01..03` và `camera-01..03`. Mặc định camera không khóa loại máy sản xuất; người vận hành chọn Máy theo phiếu. Chỉ truyền `--machine-id` (hoặc `ROLL_SCALE_CAMERA_MACHINE_IDS` trên Render) khi camera được cố định vật lý vĩnh viễn vào đúng loại máy sản xuất; mỗi giá trị phải lặp đúng bằng `--station-count`. Biến Render cũ `ROLL_SCALE_MACHINE_IDS` bị bỏ qua để cấu hình tồn dư không thể chặn lưu. `--auto-advance` là mặc định; dùng `--no-auto-advance` nếu muốn giữ nguyên trạm sau khi lưu.
 
+Khi hai camera nằm trên hai máy tính khác nhau, mở URL gán trạm một lần trên từng máy. Lựa chọn được lưu riêng trong trình duyệt và các lần mở sau chỉ tải đúng trạm đó:
+
+- Máy tính 1: `https://YOUR_RENDER_HOST/?station=station-01`
+- Máy tính 2: `https://YOUR_RENDER_HOST/?station=station-02`
+- Chuyển phân công: mở URL của trạm mới. Bỏ phân công để xem tất cả: `?station=all`.
+
+Gán trạm chỉ khóa `station_id/camera_id`; trường **Máy** trên phiếu vẫn là loại máy sản xuất do người vận hành chọn.
+
 Mở `http://127.0.0.1:8080` rồi vận hành như sau:
 
 1. Cho phép quyền camera, bấm `Làm mới camera`, sau đó chọn đúng camera vật lý trong dropdown của từng trạm. Không dựa vào thứ tự camera `0/1/2` của hệ điều hành.

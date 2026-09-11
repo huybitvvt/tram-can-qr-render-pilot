@@ -334,6 +334,16 @@ def test_each_camera_resolves_to_its_configured_machine(tmp_path) -> None:
     store.close()
 
 
+def test_each_computer_can_be_persistently_pinned_to_one_station() -> None:
+    assert "STATION_ASSIGNMENT_KEY='rollQrScale.stationAssignment.v1'" in TEST_UI_HTML
+    assert "new URLSearchParams(location.search).get('station')" in TEST_UI_HTML
+    assert "localStorage.setItem(STATION_ASSIGNMENT_KEY,requested)" in TEST_UI_HTML
+    assert "buildStations=configs=>buildStationsBase(assignedStationConfigs(configs))" in TEST_UI_HTML
+    assert "list.filter(config=>String(config.station_id||'')===assignedStationId)" in TEST_UI_HTML
+    assert "auto.disabled=true" in TEST_UI_HTML
+    assert "Không thể tự nhảy sang trạm khác" in TEST_UI_HTML
+
+
 def test_capture_accepts_machine_from_save_endpoint_and_persists_source(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(
