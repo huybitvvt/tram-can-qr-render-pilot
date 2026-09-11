@@ -4157,6 +4157,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "production_order": production_order,
                             "qr_code": qr_code,
                             "total_count": local_total_count,
+                            "measurement_count": local_total_count - local_error_count,
+                            "synced_measurement_count": 0,
                             "error_count": local_error_count,
                             "count_exact": True,
                             "offset": offset,
@@ -4319,13 +4321,20 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 )
                 items = items[:limit]
                 if remote_total_count is not None:
+                    synced_measurement_count = remote_total_count
                     measurement_count = remote_total_count + len(
                         local_unsynced_measurement_ids
                     )
                     count_exact = remote_error_parent_ids is not None
                 else:
                     # Ingest GET has no filtered count; use returned window size.
-                    measurement_count = max(len(items), len(local_unsynced_measurement_ids))
+                    synced_measurement_count = max(
+                        0,
+                        len(measurement_item_ids - local_unsynced_measurement_ids),
+                    )
+                    measurement_count = max(
+                        len(measurement_item_ids), len(local_unsynced_measurement_ids)
+                    )
                     count_exact = False
                     if not count_error:
                         count_error = "Đếm gần đúng theo cửa sổ dữ liệu cloud gần nhất"
@@ -4346,6 +4355,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         "offset": offset,
                         "limit": limit,
                         "total_count": total_count,
+                        "measurement_count": measurement_count,
+                        "synced_measurement_count": synced_measurement_count,
                         "error_count": error_count,
                         "count_exact": count_exact,
                         "count_error": count_error or None,

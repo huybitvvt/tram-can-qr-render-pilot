@@ -84,4 +84,8 @@ def test_every_ten_roll_batch_is_persisted_and_must_be_confirmed_in_order() -> N
     assert "danh_sach_san_pham jsonb" in lowered
     assert 'if (body.action === "confirm_weighing_batch")' in FUNCTION
     assert 'error: "previous_weighing_batch_not_confirmed"' in FUNCTION
-    assert ".slice(offset, offset + 10)" in FUNCTION
+    confirm_block = FUNCTION.split('if (body.action === "confirm_weighing_batch")', 1)[1].split(
+        'if (body.action === "delete_measurement")', 1
+    )[0]
+    assert ".range(offset, offset + 9)" in confirm_block
+    assert ".from(PHOTO_DRAFT_TABLE)" not in confirm_block

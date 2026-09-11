@@ -1661,7 +1661,12 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert 'id="shiftCountValue"' in TEST_UI_HTML
     assert "Số lượng trong ca" in TEST_UI_HTML
     assert "data.total_count" in TEST_UI_HTML
+    assert "data.measurement_count" in TEST_UI_HTML
+    assert "data.synced_measurement_count" in TEST_UI_HTML
     assert "data.error_count" in TEST_UI_HTML
+    assert "ảnh AI lỗi không tính" in TEST_UI_HTML
+    assert "maybePromptRollBatchConfirm(batchReadyTotal)" in TEST_UI_HTML
+    assert "rollBatchPendingMilestone>available" in TEST_UI_HTML
     assert "Ảnh chỉ đang xem tạm, KHÔNG lưu vào danh sách/DB" in TEST_UI_HTML
     assert 'id="shiftCountDetail"' in TEST_UI_HTML
     assert "Theo Ngày · Ca · Máy · Lệnh sản xuất" in TEST_UI_HTML

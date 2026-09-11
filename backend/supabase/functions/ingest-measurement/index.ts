@@ -664,21 +664,9 @@ Deno.serve(async (request: Request) => {
       .eq("metadata->>shift", shift)
       .eq("metadata->>production_order", productionOrder)
       .order("captured_at", { ascending: true })
-      .range(0, milestone - 1);
+      .range(offset, offset + 9);
     if (machine) rowsQuery = rowsQuery.eq("metadata->>machine", machine);
-    let photoQuery = supabase
-      .from(PHOTO_DRAFT_TABLE)
-      .select(
-        "parent_event_id,event_id,qr_code,captured_at,work_date,shift,machine,production_order,status",
-      )
-      .eq("work_date", workDate)
-      .eq("shift", shift)
-      .eq("production_order", productionOrder)
-      .order("captured_at", { ascending: true })
-      .limit(Math.min(1000, milestone * 2));
-    if (machine) photoQuery = photoQuery.eq("machine", machine);
-    const [{ data: measurementRows, error: rowsError }, { data: photoRows, error: photoError }] =
-      await Promise.all([rowsQuery, photoQuery]);
+    const { data: batchRows, error: rowsError } = await rowsQuery;
     if (rowsError) {
       return json(500, {
         ok: false,
@@ -686,44 +674,6 @@ Deno.serve(async (request: Request) => {
         detail: rowsError.message,
       });
     }
-    if (photoError) {
-      return json(500, {
-        ok: false,
-        error: "weighing_batch_photo_rows_failed",
-        detail: photoError.message,
-      });
-    }
-    const measurementIds = new Set(
-      (measurementRows ?? []).map((row) => String((row as Record<string, unknown>).event_id ?? "")),
-    );
-    const failedPhotos = new Map<string, Record<string, unknown>>();
-    for (const row of photoRows ?? []) {
-      const photo = row as Record<string, unknown>;
-      const parentId = String(photo.parent_event_id ?? photo.event_id ?? "");
-      if (!parentId || measurementIds.has(parentId)) continue;
-      const existingPhoto = failedPhotos.get(parentId);
-      if (!existingPhoto || String(photo.captured_at ?? "") > String(existingPhoto.captured_at ?? "")) {
-        failedPhotos.set(parentId, {
-          event_id: parentId,
-          qr_code: photo.qr_code ?? "",
-          weight: null,
-          tare_weight: null,
-          net_weight: null,
-          unit: "kg",
-          captured_at: photo.captured_at,
-          error_status: "error",
-          error_reason: "AI chưa đọc được số cân",
-          error_only: true,
-          metadata: {},
-        });
-      }
-    }
-    const allRows = [...(measurementRows ?? []), ...failedPhotos.values()].sort((left, right) =>
-      String((left as Record<string, unknown>).captured_at ?? "").localeCompare(
-        String((right as Record<string, unknown>).captured_at ?? ""),
-      )
-    );
-    const batchRows = allRows.slice(offset, offset + 10);
     if (!Array.isArray(batchRows) || batchRows.length !== 10) {
       return json(409, {
         ok: false,
@@ -740,7 +690,6 @@ Deno.serve(async (request: Request) => {
         : {};
       const qrCode = String(item.qr_code ?? "").trim();
       const productCode = qrCode.includes("_") ? qrCode.split("_", 1)[0].trim() : qrCode;
-      const errorOnly = item.error_only === true;
       const status = String(item.error_status ?? metadata.error_status ?? "ok") === "error"
         ? "error"
         : "ok";
@@ -749,9 +698,9 @@ Deno.serve(async (request: Request) => {
         event_id: item.event_id,
         qr_code: qrCode,
         ma_san_pham: productCode,
-        can_loi: errorOnly ? null : Number(metadata.core_weight ?? item.tare_weight ?? 0),
-        can_san_pham: errorOnly ? null : Number(metadata.product_weight ?? item.weight ?? 0),
-        trong_luong_nvl: errorOnly ? null : Number(item.net_weight ?? 0),
+        can_loi: Number(metadata.core_weight ?? item.tare_weight ?? 0),
+        can_san_pham: Number(metadata.product_weight ?? item.weight ?? 0),
+        trong_luong_nvl: Number(item.net_weight ?? 0),
         don_vi: item.unit,
         can_luc: item.captured_at,
         trang_thai_loi: status,
