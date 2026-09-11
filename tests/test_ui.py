@@ -2164,7 +2164,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "Authorization='Bearer '" in TEST_UI_HTML
     assert "X-Tram-Can-Session" in TEST_UI_HTML
     assert "window.name='tram_can_session='" in TEST_UI_HTML
-    assert "if(!token&&!/\\/login(?:$|[?#])/.test(location.pathname))" in TEST_UI_HTML
+    assert "clearSessionToken();location.replace('/login?next=/kiem-kho')" in TEST_UI_HTML
     assert "function wantsInventoryMode(" in TEST_UI_HTML
     assert "/kiem-kho" in TEST_UI_HTML
     assert "analyzeInventory()" in TEST_UI_HTML
@@ -2465,6 +2465,10 @@ def test_ui_does_not_offer_fake_gemini_profile_when_backend_is_local() -> None:
     assert 'id="useGeminiPrimaryBtn"' in TEST_UI_HTML
     assert 'id="settingsBtn"' in TEST_UI_HTML
     assert 'id="settingsPanel"' in TEST_UI_HTML
+    assert "function syncSettingsHint()" in TEST_UI_HTML
+    assert "AI Gemini chưa bật trên gateway (đang dùng OCR cục bộ)." in TEST_UI_HTML
+    assert 'className=\'settings-empty-hint\'' in TEST_UI_HTML
+    assert "function clearSessionToken()" in TEST_UI_HTML
     assert 'id="geminiApiKeyInput" type="password"' in TEST_UI_HTML
     assert 'id="geminiKeyStatus"' in TEST_UI_HTML
     assert "ĐỔI GEMINI KEY THÀNH CÔNG" in TEST_UI_HTML
