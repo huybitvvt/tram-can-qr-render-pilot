@@ -57,6 +57,14 @@ def test_ai_failures_are_saved_as_independent_photo_drafts() -> None:
     assert "capture_kind:'inventory'" in TEST_UI_HTML
 
 
+def test_expired_ai_analysis_falls_back_to_durable_browser_images() -> None:
+    assert "function isExpiredAnalysisFailure(error)" in TEST_UI_HTML
+    assert "(không tồn tại|hết hạn)" in TEST_UI_HTML
+    assert "if(isExpiredAnalysisFailure(error))" in TEST_UI_HTML
+    assert "tiếp tục lưu từ ảnh trình duyệt" in TEST_UI_HTML
+    assert "captureBodyForRound(session,round,index,false)" in TEST_UI_HTML
+
+
 def test_ui_capture_decodes_qr_and_saves_stable_manual_weight(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
@@ -2895,6 +2903,85 @@ def test_bound_capture_survives_service_restart_before_product_save(
     assert result["event_id"] == event_id
     assert result["analysis_id"] == analysis["analysis_id"]
     assert row is not None and row.product_weight == 21.15
+
+
+def test_missing_analysis_binding_falls_back_to_durable_unbound_save(
+    tmp_path, monkeypatch
+) -> None:
+    class FakeOCRSource:
+        def __init__(self, *args, reader=None, **kwargs):
+            self._reader = reader or object()
+
+        def capture(self, frame):
+            return WeightReading(1.15, "kg", True, "OCR: 1.15@0.96", 0.96)
+
+    monkeypatch.setattr(test_ui_module, "CameraOCRWeightSource", FakeOCRSource)
+    database = tmp_path / "measurements.db"
+    captures = tmp_path / "captures"
+    frame = make_qr_frame("ROLL-LOST-BINDING-001")
+    event_id = str(uuid.uuid4())
+
+    first_store = MeasurementStore(database, captures)
+    first_service = StationUIService(
+        first_store,
+        None,
+        None,
+        None,
+        gateway_id="gateway-test",
+        station_count=1,
+        station_ids=["station-01"],
+        camera_ids=["camera-01"],
+    )
+    analysis = first_service.analyze(
+        frame,
+        "0.4,0.7,0.6,0.9",
+        "kg",
+        event_id=event_id,
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+    state_path = first_service.sessions.staging_dir / ".active-bindings.json"
+    first_service.close()
+    first_store.close()
+    state_path.unlink()
+
+    restarted_store = MeasurementStore(database, captures)
+    restarted_service = StationUIService(
+        restarted_store,
+        None,
+        None,
+        None,
+        gateway_id="gateway-test",
+        station_count=1,
+        station_ids=["station-01"],
+        camera_ids=["camera-01"],
+    )
+    result = restarted_service.capture(
+        "ROLL-LOST-BINDING-001",
+        1.15,
+        "kg",
+        frame,
+        True,
+        "OCR",
+        product_frame=frame,
+        product_weight=21.15,
+        event_id=event_id,
+        analysis_id=str(analysis["analysis_id"]),
+        station_id="station-01",
+        camera_id="camera-01",
+        frame_sha256=str(analysis["frame_sha256"]),
+    )
+    row = restarted_store.get(event_id)
+    restarted_service.close()
+    restarted_store.close()
+
+    assert result["ok"] is True
+    assert result["event_id"] == event_id
+    assert result["analysis_id"] == ""
+    assert row is not None
+    assert row.product_weight == 21.15
+    assert Path(row.image_path).is_file()
+    assert Path(row.product_image_path).is_file()
 
 
 def test_discard_session_removes_transient_step_evidence(tmp_path) -> None:

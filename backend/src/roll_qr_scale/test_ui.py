@@ -3199,19 +3199,27 @@ class StationUIService:
                 # must remain idempotent even after that TTL or a process restart.
                 existing = self.store.get(event_id)
                 if existing is None:
-                    raise
-                expected = (
-                    getattr(existing, "analysis_id", ""),
-                    getattr(existing, "station_id", ""),
-                    getattr(existing, "camera_id", ""),
-                    getattr(existing, "frame_sha256", ""),
-                )
-                supplied = (analysis_id, station_id, camera_id, computed_frame_sha)
-                if supplied != expected:
-                    raise AnalysisBindingMismatch(
-                        "Danh tính lần lưu lại không khớp bản ghi cục bộ"
+                    # Render can restart after the browser received an analysis
+                    # but before the operator saves. The request still contains
+                    # both evidence images and a verified frame hash, so degrade
+                    # to the normal durable unbound path instead of losing the
+                    # weighing because the in-memory analysis binding vanished.
+                    analysis_id = None
+                    frame_sha256 = None
+                    bound_capture = False
+                else:
+                    expected = (
+                        getattr(existing, "analysis_id", ""),
+                        getattr(existing, "station_id", ""),
+                        getattr(existing, "camera_id", ""),
+                        getattr(existing, "frame_sha256", ""),
                     )
-                captured_at = existing.captured_at
+                    supplied = (analysis_id, station_id, camera_id, computed_frame_sha)
+                    if supplied != expected:
+                        raise AnalysisBindingMismatch(
+                            "Danh tính lần lưu lại không khớp bản ghi cục bộ"
+                        )
+                    captured_at = existing.captured_at
 
         with self._lock:
             capture_key = frame_fingerprint(frame)
