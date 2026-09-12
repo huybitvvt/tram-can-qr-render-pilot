@@ -104,6 +104,14 @@ def test_web_auth_protects_ui_but_leaves_health_check_public(
     try:
         with urllib.request.urlopen(f"{base_url}/api/health", timeout=2) as response:
             assert response.status == 200
+        health_head = urllib.request.Request(
+            f"{base_url}/api/health",
+            method="HEAD",
+        )
+        with urllib.request.urlopen(health_head, timeout=2) as response:
+            assert response.status == 200
+            assert response.headers.get_content_type() == "application/json"
+            assert response.read() == b""
         with pytest.raises(urllib.error.HTTPError) as error:
             urllib.request.urlopen(f"{base_url}/api/status", timeout=2)
         assert error.value.code == 401

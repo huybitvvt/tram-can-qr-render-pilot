@@ -3958,7 +3958,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 "access-control-allow-headers",
                 "Authorization, Content-Type, X-Tram-Can-Session",
             )
-            self.send_header("access-control-allow-methods", "GET, POST, OPTIONS")
+            self.send_header("access-control-allow-methods", "GET, HEAD, POST, OPTIONS")
 
         def issue_session_cookie(self) -> str:
             if not web_username:
@@ -4046,7 +4046,14 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             self.send_header("cache-control", "no-store")
             self.end_headers()
 
-        def send_bytes(self, status_code: int, content_type: str, body: bytes) -> None:
+        def send_bytes(
+            self,
+            status_code: int,
+            content_type: str,
+            body: bytes,
+            *,
+            include_body: bool = True,
+        ) -> None:
             self.send_response(status_code)
             self.send_header("content-type", content_type)
             self.send_header("content-length", str(len(body)))
@@ -4057,7 +4064,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             if cookie:
                 self.send_header("set-cookie", cookie)
             self.end_headers()
-            self.wfile.write(body)
+            if include_body:
+                self.wfile.write(body)
 
         def send_json(self, status_code: int, payload: dict[str, object]) -> None:
             self.send_bytes(
@@ -4077,6 +4085,30 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             if not isinstance(payload, dict):
                 raise ValueError("JSON phải là object")
             return payload
+
+        def do_HEAD(self) -> None:
+            parsed = urllib.parse.urlparse(self.path)
+            if parsed.path == "/api/health":
+                body = json.dumps(
+                    {
+                        "ok": True,
+                        "release": os.environ.get("RENDER_GIT_COMMIT", "local")[:12],
+                    },
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                self.send_bytes(
+                    200,
+                    "application/json; charset=utf-8",
+                    body,
+                    include_body=False,
+                )
+                return
+            self.send_bytes(
+                404,
+                "application/json; charset=utf-8",
+                b'{"ok":false,"error":"not_found"}',
+                include_body=False,
+            )
 
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
