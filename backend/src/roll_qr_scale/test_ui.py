@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import base64
@@ -2129,6 +2129,8 @@ class StationUIService:
                 {
                     **self.gemini_reader.status(),
                     **(self.gemini_key_manager.status() if self.gemini_key_manager else {}),
+                    "usage_note": "Số liệu do ứng dụng đếm; quota Gemini tính theo project.",
+                    "quota_limits": {"rpm": 15, "rpd": 500},
                 }
                 if self.gemini_reader is not None
                 else {"enabled": False}
@@ -5422,3 +5424,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
