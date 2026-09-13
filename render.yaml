@@ -26,6 +26,12 @@ services:
         value: gemini-3.7-flash
       - key: ROLL_SCALE_GEMINI_37_TIMEOUT
         value: "30.0"
+      - key: ROLL_SCALE_GEMINI_RPM_LIMIT
+        value: "15"
+      - key: ROLL_SCALE_GEMINI_TPM_LIMIT
+        value: "250000"
+      - key: ROLL_SCALE_GEMINI_RPD_LIMIT
+        value: "500"
       - key: ROLL_SCALE_CODEX_ENABLED
         value: "true"
       - key: ROLL_SCALE_CODEX_MODE
@@ -43,6 +49,8 @@ services:
       - key: ROLL_SCALE_LOCAL_RETENTION_DAYS
         value: "7"
       - key: ROLL_SCALE_GEMINI_API_KEY
+        sync: false
+      - key: ROLL_SCALE_GEMINI_BACKUP_API_KEY
         sync: false
       - key: ROLL_SCALE_API_URL
         sync: false

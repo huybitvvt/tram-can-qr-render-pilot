@@ -25,6 +25,9 @@ test = [
 build = [
     "pyinstaller==6.21.0",
 ]
+antigravity = [
+    "google-antigravity==0.1.16",
+]
 
 [project.scripts]
 roll-qr-scale = "roll_qr_scale.app:main"

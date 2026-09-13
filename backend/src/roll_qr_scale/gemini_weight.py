@@ -5,6 +5,7 @@ import math
 import re
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 
 import cv2
@@ -23,6 +24,9 @@ DEFAULT_GEMINI_ACCURATE_TIMEOUT_SECONDS = 30.0
 DEFAULT_GEMINI_MAX_IMAGE_EDGE = 1280
 DEFAULT_GEMINI_JPEG_QUALITY = 86
 DEFAULT_GEMINI_MEDIA_RESOLUTION = "medium"
+DEFAULT_GEMINI_RPM_LIMIT = 15
+DEFAULT_GEMINI_TPM_LIMIT = 250_000
+DEFAULT_GEMINI_RPD_LIMIT = 500
 _FIXED_WEIGHT = re.compile(r"^(?:0|[1-9]\d{0,3})\.\d{2}$")
 
 
@@ -121,6 +125,9 @@ class GeminiWeightReader:
         jpeg_quality: int = DEFAULT_GEMINI_JPEG_QUALITY,
         media_resolution: str = DEFAULT_GEMINI_MEDIA_RESOLUTION,
         include_qr: bool = True,
+        rpm_limit: int = DEFAULT_GEMINI_RPM_LIMIT,
+        tpm_limit: int = DEFAULT_GEMINI_TPM_LIMIT,
+        rpd_limit: int = DEFAULT_GEMINI_RPD_LIMIT,
         client: object | None = None,
     ) -> None:
         if not api_key.strip():
@@ -145,6 +152,9 @@ class GeminiWeightReader:
         self.jpeg_quality = int(jpeg_quality)
         self.media_resolution = media_resolution
         self.include_qr = bool(include_qr)
+        self.rpm_limit = max(1, int(rpm_limit))
+        self.tpm_limit = max(1, int(tpm_limit))
+        self.rpd_limit = max(1, int(rpd_limit))
         if client is None:
             try:
                 from google import genai
@@ -170,6 +180,76 @@ class GeminiWeightReader:
         self._input_tokens = 0
         self._output_tokens = 0
         self._thinking_tokens = 0
+        # Gemini quota is exposed by AI Studio at project level, not by the
+        # generate-content response. This local timeline powers an explicitly
+        # approximate usage meter without exposing an API key to the browser.
+        self._request_times: deque[float] = deque()
+        self._token_events: deque[tuple[float, int, int, int]] = deque()
+        self._tracked_since = time.time()
+
+    def _record_request(self) -> None:
+        now = time.time()
+        with self._lock:
+            self._requests += 1
+            self._request_times.append(now)
+            cutoff = now - 24 * 60 * 60
+            while self._request_times and self._request_times[0] < cutoff:
+                self._request_times.popleft()
+
+    def _request_usage(self) -> tuple[int, int]:
+        now = time.time()
+        with self._lock:
+            cutoff_day = now - 24 * 60 * 60
+            while self._request_times and self._request_times[0] < cutoff_day:
+                self._request_times.popleft()
+            cutoff_minute = now - 60
+            minute = sum(timestamp >= cutoff_minute for timestamp in self._request_times)
+            return minute, len(self._request_times)
+
+    def _record_token_usage(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        thinking_tokens: int,
+        total_tokens: int,
+    ) -> None:
+        now = time.time()
+        total = max(0, int(total_tokens or 0))
+        if not total:
+            total = (
+                max(0, int(input_tokens or 0))
+                + max(0, int(output_tokens or 0))
+                + max(0, int(thinking_tokens or 0))
+            )
+        with self._lock:
+            self._token_events.append(
+                (
+                    now,
+                    max(0, int(input_tokens or 0)),
+                    max(0, int(output_tokens or 0)),
+                    total,
+                )
+            )
+            cutoff = now - 24 * 60 * 60
+            while self._token_events and self._token_events[0][0] < cutoff:
+                self._token_events.popleft()
+
+    def _token_usage(self) -> tuple[int, int, int, int]:
+        now = time.time()
+        with self._lock:
+            cutoff_day = now - 24 * 60 * 60
+            while self._token_events and self._token_events[0][0] < cutoff_day:
+                self._token_events.popleft()
+            cutoff_minute = now - 60
+            input_minute = sum(
+                item[1] for item in self._token_events if item[0] >= cutoff_minute
+            )
+            total_minute = sum(
+                item[3] for item in self._token_events if item[0] >= cutoff_minute
+            )
+            input_day = sum(item[1] for item in self._token_events)
+            total_day = sum(item[3] for item in self._token_events)
+            return input_minute, total_minute, input_day, total_day
 
     @staticmethod
     def _sample_frames(frames: list[np.ndarray]) -> list[np.ndarray]:
@@ -360,8 +440,7 @@ class GeminiWeightReader:
                 0.0,
             )
         started = time.perf_counter()
-        with self._lock:
-            self._requests += 1
+        self._record_request()
         try:
             from google.genai import types
 
@@ -423,6 +502,12 @@ class GeminiWeightReader:
             output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
             thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
             total_tokens = int(getattr(usage, "total_token_count", 0) or 0)
+            self._record_token_usage(
+                input_tokens,
+                output_tokens,
+                thinking_tokens,
+                total_tokens,
+            )
             digits = (payload.weight_digits or "").strip()
             reading = (
                 f"{digits[:-2]}.{digits[-2:]}"
@@ -499,8 +584,7 @@ class GeminiWeightReader:
         if not isinstance(image, np.ndarray) or image.size == 0:
             raise ValueError("Panel image is empty")
         started = time.perf_counter()
-        with self._lock:
-            self._requests += 1
+        self._record_request()
         try:
             from google.genai import types
 
@@ -602,6 +686,12 @@ class GeminiWeightReader:
             output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
             thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
             total_tokens = int(getattr(usage, "total_token_count", 0) or 0)
+            self._record_token_usage(
+                input_tokens,
+                output_tokens,
+                thinking_tokens,
+                total_tokens,
+            )
             with self._lock:
                 self._last_latency_seconds = latency
                 self._last_error = None
@@ -666,8 +756,7 @@ class GeminiWeightReader:
             label_keys.add(clean_label.casefold())
 
         started = time.perf_counter()
-        with self._lock:
-            self._requests += 1
+        self._record_request()
         try:
             from google.genai import types
 
@@ -778,6 +867,12 @@ class GeminiWeightReader:
             output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
             thinking_tokens = int(getattr(usage, "thoughts_token_count", 0) or 0)
             total_tokens = int(getattr(usage, "total_token_count", 0) or 0)
+            self._record_token_usage(
+                input_tokens,
+                output_tokens,
+                thinking_tokens,
+                total_tokens,
+            )
             with self._lock:
                 self._last_latency_seconds = latency
                 self._last_error = None
@@ -810,7 +905,17 @@ class GeminiWeightReader:
             raise RuntimeError(error) from exc
 
     def status(self) -> dict[str, object]:
+        requests_last_minute, requests_last_day = self._request_usage()
+        (
+            input_tokens_last_minute,
+            total_tokens_last_minute,
+            input_tokens_last_day,
+            total_tokens_last_day,
+        ) = self._token_usage()
         with self._lock:
+            total_tokens = (
+                self._input_tokens + self._output_tokens + self._thinking_tokens
+            )
             return {
                 "enabled": True,
                 "model": self.model,
@@ -821,6 +926,16 @@ class GeminiWeightReader:
                 "include_qr": self.include_qr,
                 "timeout_seconds": self.timeout_seconds,
                 "requests": self._requests,
+                "requests_last_minute": requests_last_minute,
+                "requests_last_day": requests_last_day,
+                "rpm_limit": self.rpm_limit,
+                "input_tokens_last_minute": input_tokens_last_minute,
+                "total_tokens_last_minute": total_tokens_last_minute,
+                "input_tokens_last_day": input_tokens_last_day,
+                "total_tokens_last_day": total_tokens_last_day,
+                "tpm_limit": self.tpm_limit,
+                "rpd_limit": self.rpd_limit,
+                "tracked_since": self._tracked_since,
                 "successes": self._successes,
                 "failures": self._failures,
                 "last_latency_seconds": self._last_latency_seconds,
@@ -828,6 +943,7 @@ class GeminiWeightReader:
                 "input_tokens": self._input_tokens,
                 "output_tokens": self._output_tokens,
                 "thinking_tokens": self._thinking_tokens,
+                "total_tokens": total_tokens,
             }
 
     def close(self) -> None:

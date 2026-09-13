@@ -57,6 +57,22 @@ def test_ai_failures_are_saved_as_independent_photo_drafts() -> None:
     assert "capture_kind:'inventory'" in TEST_UI_HTML
 
 
+def test_ui_offers_antigravity_as_third_ai_provider() -> None:
+    assert "new Option('Antigravity · Google','antigravity')" in TEST_UI_HTML
+    assert "'/api/antigravity/login'" in TEST_UI_HTML
+    assert "'/api/antigravity/login/check'" in TEST_UI_HTML
+    assert "ANTIGRAVITY ĐÃ ĐĂNG NHẬP" in TEST_UI_HTML
+    assert "'/api/antigravity/usage'" in TEST_UI_HTML
+
+
+def test_ui_can_temporarily_analyze_an_uploaded_scale_image() -> None:
+    assert "button.id='testImageBtn'" in TEST_UI_HTML
+    assert "button.id='inventoryTestImageBtn'" in TEST_UI_HTML
+    assert "async function loadLocalTestImage(file)" in TEST_UI_HTML
+    assert "await analyzeCurrent(captureSlot(session).kind)" in TEST_UI_HTML
+    assert "if(!sourceReady(session)){await openDefaultCamera(session)" in TEST_UI_HTML
+
+
 def test_expired_ai_analysis_falls_back_to_durable_browser_images() -> None:
     assert "function isExpiredAnalysisFailure(error)" in TEST_UI_HTML
     assert "(không tồn tại|hết hạn)" in TEST_UI_HTML

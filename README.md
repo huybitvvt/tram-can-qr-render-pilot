@@ -307,6 +307,8 @@ Không đặt API key trên dòng lệnh hoặc trong JavaScript. Với source/d
 
 ```powershell
 $env:ROLL_SCALE_GEMINI_API_KEY = "YOUR_GOOGLE_AI_STUDIO_KEY"
+# Tùy chọn key thứ hai; chỉ dùng khi key chính trả lỗi API.
+$env:ROLL_SCALE_GEMINI_BACKUP_API_KEY = "YOUR_SECOND_GOOGLE_AI_STUDIO_KEY"
 $env:ROLL_SCALE_WEIGHT_ENGINE = "gemini"
 $env:ROLL_SCALE_GEMINI_MODEL = "gemini-3.5-flash-lite"
 $env:ROLL_SCALE_GEMINI_37_MODEL = "gemini-3.7-flash"
@@ -314,6 +316,10 @@ $env:ROLL_SCALE_GEMINI_ACCURATE_MODEL = "gemini-3.1-pro-preview"
 $env:ROLL_SCALE_GEMINI_TIMEOUT = "10.0"
 $env:ROLL_SCALE_GEMINI_37_TIMEOUT = "30.0"
 $env:ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT = "30.0"
+# Tuỳ chọn ngưỡng đồng hồ cục bộ theo hạn mức project/model của bạn.
+$env:ROLL_SCALE_GEMINI_RPM_LIMIT = "15"
+$env:ROLL_SCALE_GEMINI_TPM_LIMIT = "250000"
+$env:ROLL_SCALE_GEMINI_RPD_LIMIT = "500"
 .\.venv\Scripts\roll-test-ui.exe
 ```
 
@@ -323,6 +329,14 @@ thinking `minimal`; `flash31` dùng Gemini 3.1 Flash-Lite và là mặc định 
 với thinking `medium`.
 Lựa chọn model không thay đổi luồng QR độc lập hoặc quy tắc chỉ gửi Supabase
 sau khi đủ hai ảnh cân và mã sản phẩm.
+
+Nếu key đang dùng trả lỗi API (ví dụ bị thu hồi hoặc hết quyền), backend tự
+quarantine key đó, chuyển ca sang key còn lại và không gọi lại key lỗi trong
+suốt vòng đời tiến trình. Kết quả trả về `gemini_fallback_key_slot` và trạng
+thái `/api/status` có `failed_key_slots` để giao diện biết. Hai key cùng một
+project vẫn dùng chung quota; thanh **Gemini / 24h** và các bộ đếm theo key chỉ
+đếm request/token của tiến trình, cần đối chiếu hạn mức thật tại Google AI
+Studio.
 
 `ROLL_SCALE_WEIGHT_ENGINE` có ba chế độ: `local` chỉ dùng Paddle, `hybrid`
 dùng Paddle trước rồi Gemini xác nhận ứng viên local, và `gemini` dùng Gemini
@@ -367,6 +381,31 @@ Function vào `roll_scale_secrets`. Mặc định khóa được dẫn xuất t�
 giữ nguyên khóa đó qua mọi lần deploy. Đây là tích hợp endpoint ChatGPT nội bộ,
 không phải OpenAI API ổn định dành cho production; OpenAI có thể thay đổi luồng
 hoặc giới hạn tài khoản. Khi Codex lỗi, chọn lại Gemini API để tiếp tục vận hành.
+
+### Antigravity đăng nhập Google
+
+Antigravity là lựa chọn thứ ba trong `AI`. Trên máy Windows cần cài Antigravity
+CLI (`agy`) trước, sau đó bấm `Đăng nhập Antigravity` trong giao diện; backend
+sẽ mở một cửa sổ CLI riêng để đăng nhập Google. Đăng nhập xong bấm lại nút để
+kiểm tra rồi chụp ảnh cân. Có thể chạy thủ công `agy` một lần nếu cửa sổ CLI
+không tự mở.
+
+SDK Antigravity là tùy chọn, không cài cùng bản Render mặc định:
+
+```powershell
+.\.venv\Scripts\pip.exe install -e ".[antigravity]"
+$env:ROLL_SCALE_WEIGHT_ENGINE = "gemini"
+$env:ROLL_SCALE_ANTIGRAVITY_API_KEY = "YOUR_SEPARATE_GEMINI_KEY"
+.\.venv\Scripts\roll-test-ui.exe
+```
+
+Nếu máy có cả `agy` và API key, backend ưu tiên CLI (tài khoản Google) để
+không gửi nhầm key Gemini hiện tại. Model mặc định của Antigravity là
+`gemini-3.6-flash-low`; `gemini-3.5-flash-lite` không nằm trong danh sách model
+Antigravity hiện tại, nên muốn dùng đúng 3.5 Flash-Lite hãy chọn `Gemini API`.
+Backend giữ một tiến trình `stream-json` chạy nền và làm nóng ngay lúc kiểm tra
+đăng nhập. Các lần chụp sau tái sử dụng agent đó thay vì khởi động lại `agy`;
+tiến trình được đóng cùng gateway và tự tạo lại nếu CLI bị dừng.
 
 Hai mục `Key ca ngày · 12C1` và `Key ca đêm · 12C2` cho phép quản trị thay key
 mà không sửa biến môi trường và không redeploy. Backend tự chọn key từ ca của

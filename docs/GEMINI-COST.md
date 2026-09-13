@@ -49,6 +49,22 @@ billing. Ứng dụng trả các trường `gemini_input_tokens`,
 `gemini_output_tokens`, `gemini_thinking_tokens` và `gemini_total_tokens` để đối
 soát từng request; token có thể thay đổi theo kích thước/tỷ lệ ảnh và phản hồi.
 
+## Key dự phòng và đồng hồ quota
+
+Đặt `ROLL_SCALE_GEMINI_BACKUP_API_KEY` (hoặc mở Cài đặt → Key ca đêm) để backend
+tự chuyển sang key thứ hai khi key đang dùng trả lỗi API, ví dụ key bị thu hồi
+hoặc không hợp lệ. Key lỗi được quarantine cho đến khi tiến trình khởi động lại
+hoặc bạn lưu key mới; backend không thử lại key lỗi trên từng lần chụp. Key dự
+phòng không làm tăng quota nếu hai key cùng thuộc một project, vì Gemini áp hạn
+mức theo project.
+
+`/api/status` và thanh nhỏ trên giao diện hiển thị số request mà tiến trình đã
+ghi nhận trong khoảng một phút và 24 giờ gần nhất. Trường `quota.keys.day` và
+`quota.keys.night` tách riêng RPM, TPM đầu vào và RPD theo key; đây là số liệu
+cục bộ để cảnh báo sớm, không phải số dư quota chính thức (các client khác trong
+cùng project không được biết). Hạn mức thực tế thay đổi theo model, project và
+tier, nên cần đối chiếu Google AI Studio.
+
 Nguồn đơn giá chính thức:
 
 - https://ai.google.dev/gemini-api/docs/pricing

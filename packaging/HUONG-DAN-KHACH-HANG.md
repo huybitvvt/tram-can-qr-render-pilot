@@ -48,6 +48,9 @@ thuận việc gửi ảnh camera tới Google và cấp key bằng kênh riêng
 ROLL_SCALE_GEMINI_ENABLED=true
 ROLL_SCALE_WEIGHT_ENGINE=hybrid
 ROLL_SCALE_GEMINI_API_KEY=replace-with-google-ai-studio-key
+# Tùy chọn: key thứ hai; tự chuyển khi key trên trả lỗi API và quarantine key
+# lỗi cho tới khi khởi động lại hoặc lưu key mới.
+# ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-google-ai-studio-key
 ROLL_SCALE_GEMINI_MODEL=gemini-3.5-flash-lite
 ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview
 ROLL_SCALE_GEMINI_TIMEOUT=10.0
@@ -74,6 +77,12 @@ Sau khi camera đã được bắt cố định, đơn vị triển khai nên hi
 số gross cho từng trạm và điền vào `config.env`; ROI cũng được dùng để tăng tốc
 Gemini. Nếu chưa cấu hình, backend tự dò LED. Mỗi ROI có dạng
 `x1,y1,x2,y2` từ 0 đến 1; các trạm ngăn cách bằng dấu chấm phẩy:
+
+Antigravity là lựa chọn AI thứ ba (sau Gemini API và Codex). Cần cài CLI
+`agy` trên đúng máy chạy backend; trong menu **AI**, chọn **Antigravity · Google**,
+bấm **Đăng nhập Antigravity**, hoàn tất Google login ở cửa sổ mới rồi bấm lại
+để kiểm tra. Antigravity không dùng model Gemini 3.5 Flash-Lite; muốn dùng
+model đó hãy chọn Gemini API.
 
 ```text
 ROLL_SCALE_WEIGHT_ROIS=0.4500,0.8000,0.5400,0.8500;0.4450,0.7950,0.5350,0.8450;0.4550,0.8050,0.5450,0.8550

@@ -25,6 +25,10 @@ class GeminiKeyManager:
         flash37_timeout: float,
         accurate_timeout: float,
         initial_key: str,
+        initial_backup_key: str = "",
+        rpm_limit: int = 15,
+        tpm_limit: int = 250_000,
+        rpd_limit: int = 500,
         reader_factory: Callable[..., GeminiWeightReader] = GeminiWeightReader,
     ) -> None:
         self.store = store
@@ -37,7 +41,11 @@ class GeminiKeyManager:
         self.flash31_timeout = float(flash31_timeout)
         self.flash37_timeout = float(flash37_timeout)
         self.accurate_timeout = float(accurate_timeout)
+        self.rpm_limit = max(1, int(rpm_limit))
+        self.tpm_limit = max(1, int(tpm_limit))
+        self.rpd_limit = max(1, int(rpd_limit))
         self.initial_key = initial_key.strip()
+        self.initial_backup_key = initial_backup_key.strip()
         self.reader_factory = reader_factory
         self._lock = threading.RLock()
         self._source = "environment" if self.initial_key else "none"
@@ -69,7 +77,11 @@ class GeminiKeyManager:
         return self.initial_key, "environment" if self.initial_key else "none", "primary"
 
     def _backup_key(self) -> str:
-        return self._saved_key(self.backup_store)
+        try:
+            saved = self._saved_key(self.backup_store)
+        except Exception:
+            saved = ""
+        return saved or self.initial_backup_key
 
     def load_key(self) -> str:
         errors: list[str] = []
@@ -150,6 +162,9 @@ class GeminiKeyManager:
                     jpeg_quality=90,
                     media_resolution="high",
                     include_qr=False,
+                    rpm_limit=self.rpm_limit,
+                    tpm_limit=self.tpm_limit,
+                    rpd_limit=self.rpd_limit,
                 )
             )
             readers.append(
@@ -162,6 +177,9 @@ class GeminiKeyManager:
                     jpeg_quality=90,
                     media_resolution="high",
                     include_qr=False,
+                    rpm_limit=self.rpm_limit,
+                    tpm_limit=self.tpm_limit,
+                    rpd_limit=self.rpd_limit,
                 )
             )
             readers.append(
@@ -174,6 +192,9 @@ class GeminiKeyManager:
                     jpeg_quality=90,
                     media_resolution="high",
                     include_qr=False,
+                    rpm_limit=self.rpm_limit,
+                    tpm_limit=self.tpm_limit,
+                    rpd_limit=self.rpd_limit,
                 )
             )
             readers.append(
@@ -186,6 +207,9 @@ class GeminiKeyManager:
                     jpeg_quality=90,
                     media_resolution="high",
                     include_qr=False,
+                    rpm_limit=self.rpm_limit,
+                    tpm_limit=self.tpm_limit,
+                    rpd_limit=self.rpd_limit,
                 )
             )
         except Exception:

@@ -31,6 +31,9 @@ from .gemini_weight import (
     DEFAULT_GEMINI_ACCURATE_MODEL,
     DEFAULT_GEMINI_ACCURATE_TIMEOUT_SECONDS,
     DEFAULT_GEMINI_MODEL,
+    DEFAULT_GEMINI_RPD_LIMIT,
+    DEFAULT_GEMINI_RPM_LIMIT,
+    DEFAULT_GEMINI_TPM_LIMIT,
     DEFAULT_GEMINI_TIMEOUT_SECONDS,
     GeminiWeightReader,
 )
@@ -38,6 +41,13 @@ from .gemini_key_manager import GeminiKeyManager
 from .codex_weight import DEFAULT_CODEX_TIMEOUT_SECONDS, CodexWeightReader
 from .codex_oauth import CodexOAuthClient, EncryptedCodexTokenStore
 from .codex_oauth_weight import CodexOAuthWeightReader
+from .antigravity_weight import (
+    DEFAULT_ANTIGRAVITY_COMMAND,
+    DEFAULT_ANTIGRAVITY_MODEL,
+    DEFAULT_ANTIGRAVITY_ROTATE_IMAGE_TURNS,
+    DEFAULT_ANTIGRAVITY_TIMEOUT_SECONDS,
+    AntigravityWeightReader,
+)
 from .capture_gate import frame_fingerprint
 from .api_client import (
     delete_supabase_photo_drafts,
@@ -195,7 +205,7 @@ DEFAULT_WEIGHT_BURST_FRAMES = 5
 UNITS = {"kg", "g", "lb"}
 WEIGHT_ENGINES = {"local", "hybrid", "gemini"}
 GEMINI_RECOGNITION_PROFILES = {"flash31", "fast", "flash37", "accurate"}
-AI_RECOGNITION_PROVIDERS = {"gemini", "codex"}
+AI_RECOGNITION_PROVIDERS = {"gemini", "codex", "antigravity"}
 PRODUCTION_ORDER_TABLES = (
     "lenh_san_xuat",
     "Lenh_San_Xuat",
@@ -460,7 +470,8 @@ def _project_root() -> Path:
 
 
 def _load_local_dotenv() -> None:
-    env_path = _project_root() / ".env"
+    cwd_env_path = Path.cwd() / ".env"
+    env_path = cwd_env_path if cwd_env_path.is_file() else _project_root() / ".env"
     if not env_path.is_file():
         return
     try:
@@ -1348,6 +1359,19 @@ def _env_flag(name: str, default: bool = False) -> bool:
     raise ValueError(f"{name} phải là true hoặc false")
 
 
+def _env_positive_int(name: str, default: int) -> int:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return int(default)
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} phải là số nguyên dương") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} phải là số nguyên dương")
+    return parsed
+
+
 def decode_image(value: str) -> np.ndarray:
     encoded = value.split(",", 1)[1] if value.startswith("data:") and "," in value else value
     if len(encoded) > MAX_REQUEST_BYTES:
@@ -1651,6 +1675,7 @@ class StationUIService:
         | None = None,
         gemini_key_manager: GeminiKeyManager | None = None,
         codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None,
+        antigravity_reader: AntigravityWeightReader | None = None,
         weight_engine: str = "local",
     ):
         if not 1 <= int(station_count) <= 3:
@@ -1721,7 +1746,13 @@ class StationUIService:
             self.gemini_shift_readers["night"] = gemini_night_readers
         self.gemini_key_manager = gemini_key_manager
         self._retired_gemini_readers: list[GeminiWeightReader] = []
+        # A failed key is quarantined for the lifetime of this backend
+        # process. Requests routed to that shift then stay on the healthy
+        # alternate key instead of retrying the broken key on every capture.
+        self._gemini_slot_routes: dict[str, str] = {"day": "day", "night": "night"}
+        self._gemini_failed_slots: set[str] = set()
         self.codex_reader = codex_reader
+        self.antigravity_reader = antigravity_reader
         self.weight_engine = weight_engine
         self.weight_rois: dict[str, NormalizedROI] = {
             station_id: roi
@@ -1803,6 +1834,8 @@ class StationUIService:
                 closed.add(id(reader))
         if self.codex_reader is not None:
             self.codex_reader.close()
+        if self.antigravity_reader is not None:
+            self.antigravity_reader.close()
 
     @staticmethod
     def _reader_model(reader: GeminiWeightReader | None) -> str | None:
@@ -1822,6 +1855,43 @@ class StationUIService:
             return "night"
         return "day"
 
+    def _gemini_active_slot(self, requested_slot: str) -> str:
+        with self._lock:
+            return self._gemini_slot_routes.get(requested_slot, requested_slot)
+
+    @staticmethod
+    def _gemini_other_slot(slot: str) -> str:
+        return "night" if slot == "day" else "day"
+
+    def _mark_gemini_slot_failed(self, slot: str) -> None:
+        """Quarantine a key and route its shifts to the other configured key."""
+
+        alternate = self._gemini_other_slot(slot)
+        with self._lock:
+            self._gemini_failed_slots.add(slot)
+            if (
+                alternate in self.gemini_shift_readers
+                and alternate not in self._gemini_failed_slots
+            ):
+                for requested, active in tuple(self._gemini_slot_routes.items()):
+                    if active == slot:
+                        self._gemini_slot_routes[requested] = alternate
+
+    def _gemini_fallback_reader_from_slot(
+        self,
+        profile: str,
+        failed_slot: str,
+    ) -> tuple[GeminiWeightReader, str] | None:
+        alternate_slot = self._gemini_other_slot(failed_slot)
+        if alternate_slot in self._gemini_failed_slots:
+            return None
+        if alternate_slot not in self.gemini_shift_readers:
+            return None
+        try:
+            return self._gemini_reader_for(profile, alternate_slot), alternate_slot
+        except (RuntimeError, ValueError):
+            return None
+
     def _gemini_reader_for(
         self,
         profile: str,
@@ -1831,9 +1901,10 @@ class StationUIService:
             raise ValueError(
                 "Chế độ nhận diện phải là flash31, fast, flash37 hoặc accurate"
             )
-        readers = self.gemini_shift_readers.get(key_slot)
+        active_slot = self._gemini_active_slot(key_slot)
+        readers = self.gemini_shift_readers.get(active_slot)
         if readers is None:
-            label = "ca đêm (12C2)" if key_slot == "night" else "ca ngày (12C1)"
+            label = "ca đêm (12C2)" if active_slot == "night" else "ca ngày (12C1)"
             raise ValueError(f"Chưa cấu hình Gemini Key {label}")
         fast, flash31, flash37, accurate = readers
         if profile == "flash31":
@@ -1852,6 +1923,168 @@ class StationUIService:
             raise RuntimeError("Gemini primary chưa được cấu hình")
         return fast
 
+    def _gemini_fallback_reader_for(
+        self,
+        profile: str,
+        key_slot: str,
+    ) -> tuple[GeminiWeightReader, str] | None:
+        """Return the other configured key as a last-resort API fallback.
+
+        Shift routing remains deterministic on the normal path. A second key
+        is used only after Gemini reports an API/transport error, so a bad or
+        exhausted key cannot stop a weighing when the other key is healthy.
+        """
+
+        return self._gemini_fallback_reader_from_slot(
+            profile,
+            self._gemini_active_slot(key_slot),
+        )
+
+    @staticmethod
+    def _gemini_request_failed(suggestion: object) -> bool:
+        raw = str(getattr(suggestion, "raw", "") or "").strip().upper()
+        return raw.startswith("GEMINI ERROR:")
+
+    def _gemini_quota_status(self) -> dict[str, object]:
+        """Return local request/token counters, separated by configured key slot."""
+
+        def as_int(value: object, default: int = 0) -> int:
+            try:
+                return int(value or default)
+            except (TypeError, ValueError):
+                return default
+
+        def meter(used: int, limit: int) -> dict[str, object]:
+            safe_limit = max(1, limit)
+            percent = min(100.0, max(0.0, (used / safe_limit) * 100.0))
+            return {"used": used, "limit": safe_limit, "percent": round(percent, 1)}
+
+        by_key: dict[str, dict[str, object]] = {}
+        all_statuses: list[dict[str, object]] = []
+        for slot, profile_readers in self.gemini_shift_readers.items():
+            statuses: list[dict[str, object]] = []
+            seen: set[int] = set()
+            for reader in profile_readers:
+                if reader is None or id(reader) in seen:
+                    continue
+                seen.add(id(reader))
+                status = getattr(reader, "status", None)
+                if not callable(status):
+                    continue
+                try:
+                    value = status()
+                except Exception:
+                    continue
+                if isinstance(value, dict):
+                    statuses.append(value)
+            if not statuses:
+                continue
+            all_statuses.extend(statuses)
+            rpm_limit = max(
+                as_int(item.get("rpm_limit"), DEFAULT_GEMINI_RPM_LIMIT)
+                for item in statuses
+            )
+            rpd_limit = max(
+                as_int(item.get("rpd_limit"), DEFAULT_GEMINI_RPD_LIMIT)
+                for item in statuses
+            )
+            tpm_limit = max(
+                as_int(item.get("tpm_limit"), DEFAULT_GEMINI_TPM_LIMIT)
+                for item in statuses
+            )
+            tracked_values = [
+                float(item["tracked_since"])
+                for item in statuses
+                if item.get("tracked_since") is not None
+            ]
+            manager_status_raw = (
+                self.gemini_key_manager.status()
+                if self.gemini_key_manager is not None
+                else {}
+            )
+            manager_status = (
+                manager_status_raw if isinstance(manager_status_raw, dict) else {}
+            )
+            by_key[slot] = {
+                "key_id": manager_status.get(
+                    "day_key_id" if slot == "day" else "night_key_id"
+                ),
+                "rpm": meter(
+                    sum(as_int(item.get("requests_last_minute")) for item in statuses),
+                    rpm_limit,
+                ),
+                "rpd": meter(
+                    sum(as_int(item.get("requests_last_day")) for item in statuses),
+                    rpd_limit,
+                ),
+                "tpm": meter(
+                    sum(
+                        as_int(item.get("input_tokens_last_minute"))
+                        for item in statuses
+                    ),
+                    tpm_limit,
+                ),
+                "requests": sum(as_int(item.get("requests")) for item in statuses),
+                "total_tokens": sum(
+                    as_int(item.get("total_tokens")) for item in statuses
+                ),
+                "failed": slot in self._gemini_failed_slots,
+                "tracked_since": min(tracked_values) if tracked_values else time.time(),
+            }
+
+        # Keep the legacy aggregate fields for existing clients. They are an
+        # application-only summary; use `keys` for per-key/project counters.
+        aggregate_rpm_limit = max(
+            [
+                as_int(item.get("rpm_limit"), DEFAULT_GEMINI_RPM_LIMIT)
+                for item in all_statuses
+            ]
+            or [DEFAULT_GEMINI_RPM_LIMIT]
+        )
+        aggregate_rpd_limit = max(
+            [
+                as_int(item.get("rpd_limit"), DEFAULT_GEMINI_RPD_LIMIT)
+                for item in all_statuses
+            ]
+            or [DEFAULT_GEMINI_RPD_LIMIT]
+        )
+        aggregate_tpm_limit = max(
+            [
+                as_int(item.get("tpm_limit"), DEFAULT_GEMINI_TPM_LIMIT)
+                for item in all_statuses
+            ]
+            or [DEFAULT_GEMINI_TPM_LIMIT]
+        )
+        return {
+            "source": "application-counter",
+            "approximate": True,
+            "scope": "backend-all-key-slots",
+            "rpm": meter(
+                sum(as_int(item.get("requests_last_minute")) for item in all_statuses),
+                aggregate_rpm_limit,
+            ),
+            "rpd": meter(
+                sum(as_int(item.get("requests_last_day")) for item in all_statuses),
+                aggregate_rpd_limit,
+            ),
+            "tpm": meter(
+                sum(
+                    as_int(item.get("input_tokens_last_minute"))
+                    for item in all_statuses
+                ),
+                aggregate_tpm_limit,
+            ),
+            "requests": sum(as_int(item.get("requests")) for item in all_statuses),
+            "total_tokens": sum(as_int(item.get("total_tokens")) for item in all_statuses),
+            "tracked_since": min(
+                [float(item.get("tracked_since")) for item in all_statuses if item.get("tracked_since")]
+                or [time.time()]
+            ),
+            "keys": by_key,
+            "routes": dict(self._gemini_slot_routes),
+            "failed_slots": sorted(self._gemini_failed_slots),
+        }
+
     def _install_gemini_readers(
         self,
         readers: tuple[
@@ -1867,6 +2100,8 @@ class StationUIService:
         with self._lock:
             previous = self.gemini_shift_readers.get(slot, (None, None, None, None))
             self.gemini_shift_readers[slot] = readers
+            self._gemini_failed_slots.discard(slot)
+            self._gemini_slot_routes[slot] = slot
             if slot == "day":
                 self.gemini_reader = fast
                 self.gemini_flash31_reader = flash31
@@ -2130,7 +2365,30 @@ class StationUIService:
                     **self.gemini_reader.status(),
                     **(self.gemini_key_manager.status() if self.gemini_key_manager else {}),
                     "usage_note": "Số liệu do ứng dụng đếm; quota Gemini tính theo project.",
-                    "quota_limits": {"rpm": 15, "rpd": 500},
+                    "quota_limits": {
+                        "rpm": int(
+                            os.environ.get(
+                                "ROLL_SCALE_GEMINI_RPM_LIMIT",
+                                str(DEFAULT_GEMINI_RPM_LIMIT),
+                            )
+                        ),
+                        "tpm": int(
+                            os.environ.get(
+                                "ROLL_SCALE_GEMINI_TPM_LIMIT",
+                                str(DEFAULT_GEMINI_TPM_LIMIT),
+                            )
+                        ),
+                        "rpd": int(
+                            os.environ.get(
+                                "ROLL_SCALE_GEMINI_RPD_LIMIT",
+                                str(DEFAULT_GEMINI_RPD_LIMIT),
+                            )
+                        ),
+                    },
+                    "quota": self._gemini_quota_status(),
+                    "automatic_key_fallback": len(self.gemini_shift_readers) > 1,
+                    "active_key_routes": dict(self._gemini_slot_routes),
+                    "failed_key_slots": sorted(self._gemini_failed_slots),
                 }
                 if self.gemini_reader is not None
                 else {"enabled": False}
@@ -2145,6 +2403,17 @@ class StationUIService:
                     "available": False,
                 }
             ),
+            "antigravity": (
+                self.antigravity_reader.status()
+                if self.antigravity_reader is not None
+                else {
+                    "enabled": False,
+                    "installed": False,
+                    "authenticated": False,
+                    "available": False,
+                    "message": "Antigravity chưa được khởi tạo trên gateway",
+                }
+            ),
             "recognition_providers": {
                 "default": "gemini",
                 "gemini": {"available": self.gemini_reader is not None},
@@ -2152,6 +2421,12 @@ class StationUIService:
                     "available": bool(
                         self.codex_reader is not None
                         and self.codex_reader.status().get("available")
+                    )
+                },
+                "antigravity": {
+                    "available": bool(
+                        self.antigravity_reader is not None
+                        and self.antigravity_reader.status().get("available")
                     )
                 },
             },
@@ -2272,11 +2547,32 @@ class StationUIService:
         *,
         recognition_profile: str = "fast",
     ) -> dict[str, object]:
-        reader = self._gemini_reader_for(recognition_profile)
+        active_slot = self._gemini_active_slot("day")
+        reader = self._gemini_reader_for(recognition_profile, active_slot)
         detector = getattr(reader, "detect_panel_regions", None)
         if detector is None:
             raise ValueError("Gemini hiện tại chưa hỗ trợ tự tìm màn hình")
-        result = detector(frame)
+        fallback_slot: str | None = None
+        try:
+            result = detector(frame)
+        except Exception as primary_error:
+            self._mark_gemini_slot_failed(active_slot)
+            fallback_target = self._gemini_fallback_reader_from_slot(
+                recognition_profile, active_slot
+            )
+            if fallback_target is None:
+                raise
+            fallback_reader, fallback_slot = fallback_target
+            fallback_detector = getattr(fallback_reader, "detect_panel_regions", None)
+            if fallback_detector is None:
+                raise primary_error
+            try:
+                result = fallback_detector(frame)
+            except Exception as fallback_error:
+                self._mark_gemini_slot_failed(fallback_slot)
+                raise RuntimeError(
+                    f"Gemini primary lỗi: {primary_error}; fallback lỗi: {fallback_error}"
+                ) from fallback_error
         items = result.get("regions") if isinstance(result, dict) else None
         if not isinstance(items, list):
             raise RuntimeError("Kết quả tự tìm màn hình không hợp lệ")
@@ -2316,7 +2612,12 @@ class StationUIService:
                     "y2": round(y2, 5),
                 }
             )
-        return {**result, "regions": normalized}
+        return {
+            **result,
+            "regions": normalized,
+            "fallback_used": fallback_slot is not None,
+            "fallback_key_slot": fallback_slot,
+        }
 
     def analyze_panel_regions(
         self,
@@ -2363,12 +2664,32 @@ class StationUIService:
                     "y2": roi.y2,
                 }
             )
-        reader = self._gemini_reader_for(recognition_profile)
-        result = reader.read_panel_regions(cropped)
+        active_slot = self._gemini_active_slot("day")
+        reader = self._gemini_reader_for(recognition_profile, active_slot)
+        fallback_slot: str | None = None
+        try:
+            result = reader.read_panel_regions(cropped)
+        except Exception as primary_error:
+            self._mark_gemini_slot_failed(active_slot)
+            fallback_target = self._gemini_fallback_reader_from_slot(
+                recognition_profile, active_slot
+            )
+            if fallback_target is None:
+                raise
+            fallback_reader, fallback_slot = fallback_target
+            try:
+                result = fallback_reader.read_panel_regions(cropped)
+            except Exception as fallback_error:
+                self._mark_gemini_slot_failed(fallback_slot)
+                raise RuntimeError(
+                    f"Gemini primary lỗi: {primary_error}; fallback lỗi: {fallback_error}"
+                ) from fallback_error
         return {
             **result,
             "regions": normalized,
             "recognition_profile": recognition_profile,
+            "fallback_used": fallback_slot is not None,
+            "fallback_key_slot": fallback_slot,
         }
 
     def panel_regions(self, station_id: str) -> list[dict[str, object]]:
@@ -2639,7 +2960,7 @@ class StationUIService:
             )
         recognition_provider = recognition_provider.strip().lower()
         if recognition_provider not in AI_RECOGNITION_PROVIDERS:
-            raise ValueError("Bộ AI nhận diện phải là gemini hoặc codex")
+            raise ValueError("Bộ AI nhận diện phải là gemini, codex hoặc antigravity")
         if capture_kind not in {"", "core", "product", "inventory"}:
             raise ValueError("capture_kind phải là core, product hoặc inventory")
         quality = self.assess_quality(frame)
@@ -2729,6 +3050,8 @@ class StationUIService:
                     "recognition_source": "none",
                     "local_candidate": None,
                     "gemini_used": False,
+                    "codex_used": False,
+                    "antigravity_used": False,
                     "gemini_suggestion": None,
                     "gemini_latency_seconds": None,
                     "gemini_input_tokens": None,
@@ -2747,8 +3070,9 @@ class StationUIService:
             roi_method = roi_method_override or "manual"
 
         local_candidate: WeightReading | None = None
-        gemini_used = self.weight_engine == "gemini"
+        gemini_used = self.weight_engine == "gemini" and recognition_provider == "gemini"
         codex_used = False
+        antigravity_used = False
         gemini_suggestion: float | None = None
         gemini_latency_seconds: float | None = None
         gemini_input_tokens: int | None = None
@@ -2757,6 +3081,8 @@ class StationUIService:
         gemini_total_tokens: int | None = None
         gemini_attempts = 0
         gemini_fallback_used = False
+        gemini_fallback_key_slot: str | None = None
+        gemini_active_key_slot = gemini_key_slot
         ai_crop_applied = False
         requires_human_review = False
         if self.weight_engine == "gemini":
@@ -2769,12 +3095,47 @@ class StationUIService:
                 selected_ai_reader = self.codex_reader
                 gemini_used = False
                 codex_used = True
+            elif recognition_provider == "antigravity":
+                if self.antigravity_reader is None:
+                    raise ValueError("Antigravity chưa được bật trên máy backend")
+                antigravity_status = self.antigravity_reader.status()
+                if not antigravity_status.get("available"):
+                    raise ValueError(
+                        str(
+                            antigravity_status.get("message")
+                            or "Antigravity chưa đăng nhập"
+                        )
+                    )
+                selected_ai_reader = self.antigravity_reader
+                gemini_used = False
+                antigravity_used = True
             else:
+                gemini_active_key_slot = self._gemini_active_slot(gemini_key_slot)
                 selected_ai_reader = self._gemini_reader_for(
-                    recognition_profile, gemini_key_slot
+                    recognition_profile, gemini_active_key_slot
                 )
-            provider_label = "CODEX" if codex_used else "GEMINI"
-            provider_source = "codex-primary" if codex_used else "gemini-primary"
+            provider_label = (
+                "CODEX"
+                if codex_used
+                else "ANTIGRAVITY"
+                if antigravity_used
+                else "GEMINI"
+            )
+            provider_source = (
+                "codex-primary"
+                if codex_used
+                else "antigravity-primary"
+                if antigravity_used
+                else "gemini-primary"
+            )
+            if (
+                not codex_used
+                and not antigravity_used
+                and gemini_active_key_slot != gemini_key_slot
+            ):
+                provider_source = f"gemini-fallback-{gemini_active_key_slot}"
+                gemini_fallback_used = True
+                gemini_fallback_key_slot = gemini_active_key_slot
             single_image_request = len(frames) == 1
             ai_frames = [frame] if single_image_request else frames
             if len(ai_frames) == 2:
@@ -2790,6 +3151,39 @@ class StationUIService:
                 gemini_attempts = 1
                 suggestion_raw = suggestion.raw
                 suggestions = [suggestion]
+                # A quota/auth/transport failure is returned by the reader as
+                # ``GEMINI ERROR``. Quarantine that key and move this shift to
+                # the alternate key; the failed key is not retried on later
+                # captures until it is replaced or the backend restarts.
+                if (
+                    not codex_used
+                    and not antigravity_used
+                    and self._gemini_request_failed(suggestion)
+                ):
+                    self._mark_gemini_slot_failed(gemini_active_key_slot)
+                    fallback_target = self._gemini_fallback_reader_from_slot(
+                        recognition_profile, gemini_active_key_slot
+                    )
+                    if fallback_target is not None:
+                        fallback_reader, fallback_slot = fallback_target
+                        try:
+                            fallback_suggestion = fallback_reader.read(ai_frames, unit=unit)
+                        except Exception:
+                            self._mark_gemini_slot_failed(fallback_slot)
+                            raise
+                        suggestions.append(fallback_suggestion)
+                        gemini_attempts = 2
+                        gemini_fallback_used = True
+                        gemini_fallback_key_slot = fallback_slot
+                        gemini_active_key_slot = fallback_slot
+                        if self._gemini_request_failed(fallback_suggestion):
+                            self._mark_gemini_slot_failed(fallback_slot)
+                        provider_source = f"gemini-fallback-{fallback_slot}"
+                        suggestion_raw = (
+                            f"PRIMARY KEY ERROR: {suggestion.raw}; "
+                            f"FALLBACK KEY ({fallback_slot}): {fallback_suggestion.raw}"
+                        )
+                        suggestion = fallback_suggestion
                 crop_is_available = bool(
                     capture_kind in {"core", "product", "inventory"} and roi is not None
                 )
@@ -2800,7 +3194,8 @@ class StationUIService:
                 if (
                     crop_is_available
                     and suggestion.value is None
-                    and not suggestion.raw.startswith(f"{provider_label} ERROR:")
+                    and not antigravity_used
+                    and not self._gemini_request_failed(suggestion)
                 ):
                     cropped_frames = [self._gemini_crop(item, roi) for item in ai_frames]
                     fallback = selected_ai_reader.read(cropped_frames, unit=unit)
@@ -2849,7 +3244,7 @@ class StationUIService:
                         None,
                         unit,
                         False,
-                        f"{suggestion_raw}{qr_note}; {provider_label} PRIMARY: rejected",
+                        f"{suggestion_raw}{qr_note}; {provider_label}: rejected",
                     )
                     recognition_source = "none"
                 else:
@@ -2858,14 +3253,21 @@ class StationUIService:
                         suggestion.unit,
                         True,
                         (
-                            f"{suggestion_raw}{qr_note}; {provider_label} PRIMARY: "
+                            f"{suggestion_raw}{qr_note}; {provider_label} "
                             + (
                                 "single focused-crop retry accepted"
                                 if ai_crop_applied
+                                else "fallback key accepted"
+                                if gemini_fallback_key_slot
                                 else "single full-image accepted"
                             )
                             if single_image_request
-                            else f"{suggestion_raw}{qr_note}; {provider_label} PRIMARY: 3-frame schema accepted"
+                            else f"{suggestion_raw}{qr_note}; {provider_label} "
+                            + (
+                                "fallback key accepted"
+                                if gemini_fallback_key_slot
+                                else "primary key: 3-frame schema accepted"
+                            )
                         ),
                     )
                     recognition_source = provider_source
@@ -2898,19 +3300,44 @@ class StationUIService:
             and len(frames) >= 3
         ):
             gemini_used = True
+            gemini_active_key_slot = self._gemini_active_slot(gemini_key_slot)
+            if gemini_active_key_slot != gemini_key_slot:
+                gemini_fallback_used = True
+                gemini_fallback_key_slot = gemini_active_key_slot
             selected_gemini_reader = self._gemini_reader_for(
-                recognition_profile, gemini_key_slot
+                recognition_profile, gemini_active_key_slot
             )
             suggestion = selected_gemini_reader.read(
                 frames,
                 unit=unit,
             )
+            suggestions = [suggestion]
+            if self._gemini_request_failed(suggestion):
+                self._mark_gemini_slot_failed(gemini_active_key_slot)
+                fallback_target = self._gemini_fallback_reader_from_slot(
+                    recognition_profile, gemini_active_key_slot
+                )
+                if fallback_target is not None:
+                    fallback_reader, fallback_slot = fallback_target
+                    try:
+                        fallback_suggestion = fallback_reader.read(frames, unit=unit)
+                    except Exception:
+                        self._mark_gemini_slot_failed(fallback_slot)
+                        raise
+                    suggestions.append(fallback_suggestion)
+                    gemini_fallback_used = True
+                    gemini_fallback_key_slot = fallback_slot
+                    gemini_active_key_slot = fallback_slot
+                    if self._gemini_request_failed(fallback_suggestion):
+                        self._mark_gemini_slot_failed(fallback_slot)
+                    suggestion = fallback_suggestion
             gemini_suggestion = suggestion.value
-            gemini_latency_seconds = suggestion.latency_seconds
-            gemini_input_tokens = suggestion.input_tokens
-            gemini_output_tokens = suggestion.output_tokens
-            gemini_thinking_tokens = suggestion.thinking_tokens
-            gemini_total_tokens = suggestion.total_tokens
+            gemini_attempts = len(suggestions)
+            gemini_latency_seconds = sum(item.latency_seconds for item in suggestions)
+            gemini_input_tokens = sum(item.input_tokens for item in suggestions)
+            gemini_output_tokens = sum(item.output_tokens for item in suggestions)
+            gemini_thinking_tokens = sum(item.thinking_tokens for item in suggestions)
+            gemini_total_tokens = sum(item.total_tokens for item in suggestions)
             local_cloud_agree = (
                 suggestion.value is not None
                 and local_candidate is not None
@@ -2930,7 +3357,11 @@ class StationUIService:
                     ),
                     confidence,
                 )
-                recognition_source = "paddle-local+gemini"
+                recognition_source = (
+                    "paddle-local+gemini"
+                    if not gemini_fallback_key_slot
+                    else f"paddle-local+gemini-fallback-{gemini_fallback_key_slot}"
+                )
             else:
                 requires_human_review = suggestion.value is not None
                 reading = WeightReading(
@@ -2955,6 +3386,9 @@ class StationUIService:
             "recognition_profile": recognition_profile,
             "recognition_provider": recognition_provider,
             "gemini_key_slot": gemini_key_slot if recognition_provider == "gemini" else None,
+            "gemini_active_key_slot": (
+                gemini_active_key_slot if recognition_provider == "gemini" else None
+            ),
             "local_candidate": (
                 local_candidate.value
                 if local_candidate is not None
@@ -2962,6 +3396,7 @@ class StationUIService:
             ),
             "gemini_used": gemini_used,
             "codex_used": codex_used,
+            "antigravity_used": antigravity_used,
             "gemini_suggestion": gemini_suggestion,
             "gemini_latency_seconds": gemini_latency_seconds,
             "gemini_input_tokens": gemini_input_tokens,
@@ -2970,6 +3405,7 @@ class StationUIService:
             "gemini_total_tokens": gemini_total_tokens,
             "gemini_attempts": gemini_attempts,
             "gemini_fallback_used": gemini_fallback_used,
+            "gemini_fallback_key_slot": gemini_fallback_key_slot,
             "ai_latency_seconds": gemini_latency_seconds,
             "ai_attempts": gemini_attempts,
             "ai_fallback_used": gemini_fallback_used,
@@ -3682,6 +4118,37 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--antigravity-command",
+        default=os.environ.get("ROLL_SCALE_ANTIGRAVITY_COMMAND", DEFAULT_ANTIGRAVITY_COMMAND),
+        help="Lệnh Antigravity CLI; mặc định là agy",
+    )
+    parser.add_argument(
+        "--antigravity-model",
+        default=os.environ.get("ROLL_SCALE_ANTIGRAVITY_MODEL", DEFAULT_ANTIGRAVITY_MODEL),
+        help="Model Antigravity (mặc định gemini-3.6-flash-low; 3.5 Flash-Lite không thuộc Antigravity)",
+    )
+    parser.add_argument(
+        "--antigravity-timeout",
+        type=float,
+        default=float(
+            os.environ.get(
+                "ROLL_SCALE_ANTIGRAVITY_TIMEOUT",
+                str(DEFAULT_ANTIGRAVITY_TIMEOUT_SECONDS),
+            )
+        ),
+    )
+    parser.add_argument(
+        "--antigravity-rotate-image-turns",
+        type=int,
+        default=int(
+            os.environ.get(
+                "ROLL_SCALE_ANTIGRAVITY_ROTATE_IMAGE_TURNS",
+                str(DEFAULT_ANTIGRAVITY_ROTATE_IMAGE_TURNS),
+            )
+        ),
+        help="Số ảnh tối đa trong một context Antigravity trước khi đổi phiên nóng",
+    )
+    parser.add_argument(
         "--diagnostic-image",
         default=os.environ.get("ROLL_SCALE_DIAGNOSTIC_IMAGE"),
         help="Ghi đè ảnh phân tích gần nhất để hiệu chỉnh OCR tại xưởng",
@@ -3823,6 +4290,16 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             flash37_timeout=args.gemini_37_timeout,
             accurate_timeout=args.gemini_accurate_timeout,
             initial_key=os.environ.get("ROLL_SCALE_GEMINI_API_KEY", ""),
+            initial_backup_key=os.environ.get("ROLL_SCALE_GEMINI_BACKUP_API_KEY", ""),
+            rpm_limit=_env_positive_int(
+                "ROLL_SCALE_GEMINI_RPM_LIMIT", DEFAULT_GEMINI_RPM_LIMIT
+            ),
+            tpm_limit=_env_positive_int(
+                "ROLL_SCALE_GEMINI_TPM_LIMIT", DEFAULT_GEMINI_TPM_LIMIT
+            ),
+            rpd_limit=_env_positive_int(
+                "ROLL_SCALE_GEMINI_RPD_LIMIT", DEFAULT_GEMINI_RPD_LIMIT
+            ),
         )
         gemini_shift_keys = gemini_key_manager.load_shift_keys()
         gemini_api_key = gemini_shift_keys["day"]
@@ -3867,6 +4344,13 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 model=args.codex_model,
                 timeout_seconds=args.codex_timeout,
             )
+    antigravity_reader = AntigravityWeightReader(
+        args.antigravity_command,
+        model=args.antigravity_model,
+        timeout_seconds=args.antigravity_timeout,
+        api_key=os.environ.get("ROLL_SCALE_ANTIGRAVITY_API_KEY", ""),
+        rotate_image_turns=args.antigravity_rotate_image_turns,
+    )
     store = MeasurementStore(args.db, args.captures)
     worker = None
     if args.api_url:
@@ -3912,6 +4396,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         gemini_night_readers=gemini_night_readers,
         gemini_key_manager=gemini_key_manager,
         codex_reader=codex_reader,
+        antigravity_reader=antigravity_reader,
         weight_engine=weight_engine,
     )
     demo_path = Path(args.demo_image)
@@ -4215,6 +4700,24 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         "quality_settings": service.quality_settings,
                         **identity_status,
                     },
+                )
+                return
+            if parsed.path == "/api/antigravity/usage":
+                if service.antigravity_reader is None:
+                    self.send_json(
+                        200,
+                        {
+                            "ok": False,
+                            "source": "antigravity-cli",
+                            "approximate": False,
+                            "groups": [],
+                            "message": "Antigravity chưa được khởi tạo trên gateway",
+                        },
+                    )
+                    return
+                self.send_json(
+                    200,
+                    service.antigravity_reader.quota_status(refresh=True),
                 )
                 return
             if parsed.path == "/api/production-orders":
@@ -5144,6 +5647,21 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if poll_login is None:
                         raise ValueError("Chế độ Codex local không dùng đăng nhập web")
                     self.send_json(200, poll_login(str(payload.get("session_id", ""))))
+                    return
+                if self.path == "/api/antigravity/login":
+                    if service.antigravity_reader is None:
+                        raise ValueError("Antigravity chưa được bật trên máy backend")
+                    self.send_json(
+                        200,
+                        service.antigravity_reader.start_login(
+                            force=bool(payload.get("force"))
+                        ),
+                    )
+                    return
+                if self.path == "/api/antigravity/login/check":
+                    if service.antigravity_reader is None:
+                        raise ValueError("Antigravity chưa được bật trên máy backend")
+                    self.send_json(200, service.antigravity_reader.check_login())
                     return
                 if self.path == "/api/gemini/key":
                     self.send_json(200, service.replace_gemini_key(str(payload.get("api_key", ""))))
