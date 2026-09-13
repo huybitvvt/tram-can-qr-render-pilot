@@ -1531,7 +1531,7 @@ def test_gemini_profiles_use_their_configured_readers(tmp_path) -> None:
     assert status["recognition_profiles"]["flash31"]["model"] == "gemini-3.1-flash-lite"
     assert status["recognition_profiles"]["flash37"]["model"] == "gemini-3.7-flash"
     assert status["recognition_profiles"]["accurate"]["model"] == "gemini-3.1-pro-preview"
-    assert status["recognition_profiles"]["default"] == "flash31"
+    assert status["recognition_profiles"]["default"] == "fast"
 
 
 def test_ui_capture_blocks_same_frame_but_allows_consecutive_new_frames(tmp_path) -> None:
@@ -2663,7 +2663,7 @@ def test_multistation_defaults_and_html_controls(monkeypatch) -> None:
         'id="analyzeProductBtn"',
         'id="productWeight"',
         "analyzeCurrent('product')",
-        "Nhanh · 3.5 Flash-Lite · Free",
+            "Mặc định · 3.5 Flash-Lite · Free",
         "Cân bằng · 3.7 Flash · Low · Free",
         "Chính xác · Pro · cần trả phí",
         "savedStationIndex=stations.indexOf(session)",
@@ -2702,8 +2702,9 @@ def test_ui_does_not_offer_fake_gemini_profile_when_backend_is_local() -> None:
     assert 'id="recognitionProvider"' in TEST_UI_HTML
     assert 'id="recognitionHint"' in TEST_UI_HTML
     assert "function syncRecognitionSettings" in TEST_UI_HTML
-    assert "new Option('Mặc định · 3.1 Flash-Lite · Free','flash31')" in TEST_UI_HTML
-    assert "recognitionProfile.value='flash31'" in TEST_UI_HTML
+    assert "new Option('3.1 Flash-Lite · Free','flash31')" in TEST_UI_HTML
+    assert "recognitionProfile.value='fast'" in TEST_UI_HTML
+    assert "rollQrScale.recognitionProfile.v3" in TEST_UI_HTML
     assert '<option value="gemini">Gemini API</option>' in TEST_UI_HTML
     assert '<option value="codex">Codex · ChatGPT</option>' in TEST_UI_HTML
     assert "$('recognitionProviderOption').hidden=!primary" in TEST_UI_HTML

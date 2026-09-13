@@ -2431,7 +2431,7 @@ class StationUIService:
                 },
             },
             "recognition_profiles": {
-                "default": "flash31",
+                "default": "fast",
                 "flash31": {
                     "enabled": self.gemini_flash31_reader is not None,
                     "model": self._reader_model(self.gemini_flash31_reader),
