@@ -1903,8 +1903,8 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "data.synced_measurement_count" in TEST_UI_HTML
     assert "data.error_count" in TEST_UI_HTML
     assert "ảnh AI lỗi không tính" in TEST_UI_HTML
-    assert "maybePromptRollBatchConfirm(batchReadyTotal)" in TEST_UI_HTML
-    assert "rollBatchPendingMilestone>available" in TEST_UI_HTML
+    assert "maybePromptRollBatchConfirm" not in TEST_UI_HTML
+    assert 'id="openRollBatchBtn"' in TEST_UI_HTML
     assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
     assert 'id="shiftCountDetail"' in TEST_UI_HTML
     assert "Theo Ngày · Ca · Máy · Lệnh sản xuất" in TEST_UI_HTML
@@ -1913,7 +1913,7 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "persistSourceFromFields();renderControls();loadRecords()" in TEST_UI_HTML
     assert 'id="rollBatchModal"' in TEST_UI_HTML
     assert "ROLL_BATCH_SIZE=10" in TEST_UI_HTML
-    assert "function maybePromptRollBatchConfirm" in TEST_UI_HTML
+    assert "function requestRollBatchConfirm" in TEST_UI_HTML
     assert "function confirmRollBatchCount" in TEST_UI_HTML
     assert "rollBatchConfirmActive()" in TEST_UI_HTML
     assert 'id="dismissRollBatchBtn"' in TEST_UI_HTML
