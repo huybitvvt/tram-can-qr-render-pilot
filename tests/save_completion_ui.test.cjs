@@ -60,6 +60,22 @@ test('only one station is selected even with legacy multi-station configuration'
  ctx.assignedStationId='station-02';assert.equal(ctx.assignedStationConfigs(configs).length,1);
  ctx.assignedStationId='removed';assert.equal(ctx.assignedStationConfigs(configs)[0].station_id,'station-01');
 });
+test('clicking round status opens and focuses the reason, and toggling back clears it',()=>{
+ const {ctx,session,nodes}=setup();let focused=0,scrolled=0,rendered=0;
+ nodes.errorReason1={focus(){focused++},scrollIntoView(){scrolled++}};
+ nodes.evidenceRounds={querySelector:()=>({focus(){}})};
+ ctx.persistEditor=()=>{};ctx.renderEvidence=()=>{rendered++};
+ const start=script.indexOf('function setRoundErrorStatus(');
+ vm.runInContext(script.slice(start,script.indexOf('\nfunction fillInput(',start)),ctx);
+ ctx.setRoundErrorStatus(0);
+ assert.equal(session.rounds[0].errorStatus,'error');assert.equal(focused,1);assert.equal(scrolled,1);
+ assert.equal(nodes.saveBtn.disabled,true);
+ session.rounds[0].errorReason='Damaged';ctx.setRoundErrorStatus(0);
+ assert.equal(session.rounds[0].errorStatus,'ok');assert.equal(session.rounds[0].errorReason,'');
+ assert.equal(nodes.saveBtn.disabled,false);assert.equal(rendered,2);
+ session.rounds[0].saved=true;ctx.setRoundErrorStatus(0);assert.equal(rendered,2);
+ session.rounds[0].saved=false;session._saveLock=true;ctx.setRoundErrorStatus(0);assert.equal(rendered,2);
+});
 test('discarding a failed image preserves the other image and selects the discarded slot for retry',async()=>{
  const {ctx,session}=setup();const round=session.rounds[0],requests=[];
  Object.assign(ctx,{persistEditor(){},syncSessionAliases(){},renderEvidence(){},showVideo(){},console,
