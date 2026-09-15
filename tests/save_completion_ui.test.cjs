@@ -1,0 +1,53 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+new vm.Script(script);
+function setup(items=[]){
+ const nodes={},messages=[];
+ const session={state:'review',roundCount:1,unit:'kg',stateElement:{},rounds:[{eventId:'current',coreImage:'core',productImage:'product',coreAnalysis:{},productAnalysis:{},weight:'1.18',productWeight:'12.96',qr:'MT-TCN0013_D5NW9YJHA2T',errorStatus:'ok'}]};
+ const ctx=vm.createContext({stations:[session],current:()=>session,MAX_WEIGH_ROUNDS:3,
+  selectedRoundCount:()=>1,coreWeightOverLimit:()=>false,productWeightOverLimit:()=>false,
+  $:id=>nodes[id]??=( {classList:{toggle(){}},setAttribute(){}} ),
+  status:(_,message,tone)=>messages.push({message,tone}),captureStatus:{},
+  sourceQuery:()=>'',api:async()=>({items}),syncCaptureProductCodes:()=>{},
+  statusForPartialWeights:()=> 'Continue capturing',
+ });
+ const names=['sessionRoundCount','ensureRounds','validWeightValue','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
+ vm.runInContext('let productionQrByCode={};',ctx);
+ for(const name of names){const line=script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'('));assert.ok(line,name);vm.runInContext(line,ctx)}
+ ctx.renderControls=()=>{nodes.saveBtn={disabled:!ctx.savableRoundIndexes(session).length}};
+ const start=script.indexOf('function refreshCompletionState(');
+ vm.runInContext(script.slice(start,script.indexOf('\nfunction applyMappings(',start)),ctx);
+ return {ctx,session,nodes,messages};
+}
+test('complete weights and QR enable save despite an unreadable photo draft',async()=>{
+ const fixture=setup();const {ctx,session,nodes,messages}=fixture;
+ const draft={event_id:'current',qr_code:session.rounds[0].qr,error_only:true};
+ ctx.rebuildProductionQrIndex([draft]);ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,false);assert.equal(messages.at(-1).tone,'ok');
+ ctx.api=async()=>({items:[draft]});
+ assert.equal(await ctx.verifyQrAgainstServer(draft.qr_code,session,0),false);
+ assert.equal(session.rounds[0].qr,draft.qr_code);
+});
+test('a completed measurement still blocks duplicate QR and explains why',()=>{
+ const {ctx,session,nodes,messages}=setup();
+ ctx.rebuildProductionQrIndex([{event_id:'saved',qr_code:session.rounds[0].qr}]);ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/TRÙNG MÃ QR/);
+ assert.doesNotMatch(messages.at(-1).message,/Nhấn Enter|Đã chụp đủ 0/);
+});
+test('server duplicate rejection retains its warning after refreshing controls',async()=>{
+ const {ctx,session,nodes,messages}=setup();const code=session.rounds[0].qr;
+ ctx.api=async()=>({items:[{event_id:'saved',qr_code:code}]});
+ assert.equal(await ctx.verifyQrAgainstServer(code,session,0),true);
+ assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/TRÙNG MÃ QR/);
+});
+test('missing QR and missing defect reason explain disabled save and recover after correction',()=>{
+ const {ctx,session,nodes,messages}=setup();const round=session.rounds[0],code=round.qr;
+ round.qr='';ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/nhập mã QR/);
+ round.qr=code;round.errorStatus='error';ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/Lý do lỗi/);
+ round.errorReason='Damaged';ctx.refreshCompletionState(session);assert.equal(nodes.saveBtn.disabled,false);
+});
