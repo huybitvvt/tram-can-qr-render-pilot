@@ -37,11 +37,11 @@ services:
       - key: ROLL_SCALE_CODEX_MODE
         value: oauth
       - key: ROLL_SCALE_STATION_COUNT
-        value: "2"
+        value: "1"
       - key: ROLL_SCALE_STATION_IDS
-        value: station-01,station-02
+        value: station-01
       - key: ROLL_SCALE_CAMERA_IDS
-        value: camera-01,camera-02
+        value: camera-01
       - key: ROLL_SCALE_GATEWAY_ID
         value: render-pilot-01
       - key: ROLL_SCALE_DATA_ROOT

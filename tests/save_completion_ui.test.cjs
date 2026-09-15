@@ -51,3 +51,29 @@ test('missing QR and missing defect reason explain disabled save and recover aft
  assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/Lý do lỗi/);
  round.errorReason='Damaged';ctx.refreshCompletionState(session);assert.equal(nodes.saveBtn.disabled,false);
 });
+test('only one station is selected even with legacy multi-station configuration',()=>{
+ const ctx=vm.createContext({assignedStationId:'',localStorage:{removeItem(){}},STATION_ASSIGNMENT_KEY:'station'});
+ vm.runInContext(script.split('\n').find(line=>line.trim().startsWith('function assignedStationConfigs(')),ctx);
+ const configs=[{station_id:'station-01'},{station_id:'station-02'}];
+ assert.equal(ctx.assignedStationConfigs(configs).length,1);
+ assert.equal(ctx.assignedStationConfigs(configs)[0].station_id,'station-01');
+ ctx.assignedStationId='station-02';assert.equal(ctx.assignedStationConfigs(configs).length,1);
+ ctx.assignedStationId='removed';assert.equal(ctx.assignedStationConfigs(configs)[0].station_id,'station-01');
+});
+test('discarding a failed image preserves the other image and selects the discarded slot for retry',async()=>{
+ const {ctx,session}=setup();const round=session.rounds[0],requests=[];
+ Object.assign(ctx,{persistEditor(){},syncSessionAliases(){},renderEvidence(){},showVideo(){},console,
+  api:async(path)=>{requests.push(path)},selectCaptureSlot(){},confirm:()=>true});
+ for(const name of ['roundHasData','slotHasData','discardSlot'])vm.runInContext(script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'(')),ctx);
+ session.setState=(state)=>{session.state=state};session.eventId='current';
+ round.weight='';round.coreAnalysis=null;round.corePhotoCaptureId='failed-core';
+ await ctx.discardSlot('core',0);
+ assert.equal(round.coreImage,'');assert.equal(round.corePhotoCaptureId,'');
+ assert.equal(round.productImage,'product');assert.equal(round.productWeight,'12.96');
+ assert.equal(session.selectedSlot.kind,'core');assert.equal(session.selectedSlot.round,0);
+ assert.equal(session.eventId,null);assert.equal(session._discardLock,false);
+ assert.deepEqual(requests,['/api/session/discard']);
+ round.productPhotoCaptureId='failed-product';await ctx.discardSlot('product',0);
+ assert.equal(round.productImage,'');assert.equal(round.productPhotoCaptureId,'');
+ assert.equal(session.selectedSlot.kind,'product');
+});
