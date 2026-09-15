@@ -2519,7 +2519,7 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert 'id="evidenceRounds"' in TEST_UI_HTML
     assert 'id="weight2"' in TEST_UI_HTML
     assert 'id="productWeight2"' in TEST_UI_HTML
-    assert "DEFAULT_WEIGH_ROUNDS=3" in TEST_UI_HTML
+    assert "DEFAULT_WEIGH_ROUNDS=2" in TEST_UI_HTML
     assert "MAX_WEIGH_ROUNDS=3" in TEST_UI_HTML
     assert "function nextCaptureStep(" in TEST_UI_HTML
     assert "function extraRoundTags(" in TEST_UI_HTML
@@ -2527,7 +2527,7 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "function discardRound(" in TEST_UI_HTML
     assert "function resetWeighRound(" in TEST_UI_HTML
     assert "className='slot-discard'" in TEST_UI_HTML
-    assert "Bỏ từng ô để đọc lại" in TEST_UI_HTML
+    assert "Bỏ ảnh, chụp lại" in TEST_UI_HTML
     assert "dataset.discardKind=kind" in TEST_UI_HTML
     assert "dataset.discardRound=String(round)" in TEST_UI_HTML
     assert "Ô còn lại giữ nguyên" in TEST_UI_HTML
