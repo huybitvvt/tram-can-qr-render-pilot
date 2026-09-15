@@ -1916,6 +1916,9 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "function maybePromptRollBatchConfirm" in TEST_UI_HTML
     assert "function confirmRollBatchCount" in TEST_UI_HTML
     assert "rollBatchConfirmActive()" in TEST_UI_HTML
+    assert 'id="dismissRollBatchBtn"' in TEST_UI_HTML
+    assert "function dismissRollBatchModal" in TEST_UI_HTML
+    assert "Không bắt buộc" in TEST_UI_HTML
     assert 'id="weightAlertModal"' in TEST_UI_HTML
     assert "CORE_WEIGHT_ALERT_KG=1.2" in TEST_UI_HTML
     assert "function markWeightThresholdAlerts" in TEST_UI_HTML
