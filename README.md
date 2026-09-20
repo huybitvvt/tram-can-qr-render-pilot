@@ -130,6 +130,13 @@ Edge Function dùng secret key mặc định của môi trường Supabase (`SUP
 
 Worker Render gọi `backup_maintenance` khi khởi động và mỗi 24 giờ. Worker đọc file local cũ ít nhất 7 ngày, chỉ gửi checksum + byte count (không gửi ảnh); Edge Function đối chiếu event/hash rồi mới xóa Cloudinary. Sau khi Edge xác nhận, worker xóa file local tương ứng, còn row cân vẫn giữ nguyên (URL ảnh được đặt null). Không tải bytes từ Supabase trong health check, không phát sinh egress định kỳ. Blueprint đã gắn Persistent Disk `/var/data`; nếu chạy ngoài Render phải trỏ `ROLL_SCALE_DATA_ROOT` vào ổ đĩa bền vững.
 
+Blueprint production hiện tạo bốn link Render độc lập. Mỗi link chạy một service,
+một station, một hàng đợi nhận diện, một SQLite/outbox và một Persistent Disk
+riêng; service đầu tiên giữ nguyên tên `tram-can-qr-pilot` để bảo toàn URL/disk
+đang dùng. Không đổi thành bốn station trong một service vì cấu hình đó vẫn dùng
+chung process và hàng đợi. Xem trình tự chuyển đổi, khai báo secret và bài kiểm
+tra lỗi chéo tại [docs/render_4_independent_links.md](docs/render_4_independent_links.md).
+
 ## 3. Cấu hình gateway
 
 Không commit token vào Git. Với bản source/developer, đặt biến môi trường trong PowerShell:

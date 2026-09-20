@@ -1,9 +1,11 @@
 services:
+  # Keep the original service name so link 01 and its existing disk remain intact.
   - type: web
     name: tram-can-qr-pilot
     runtime: python
     region: singapore
-    autoDeploy: true
+    autoDeployTrigger: "off"
+    numInstances: 1
     buildCommand: pip install -r backend/requirements-render.txt
     startCommand: PYTHONPATH=backend/src ROLL_SCALE_FRONTEND_DIR=frontend python -m roll_qr_scale.render_app
     healthCheckPath: /api/health
@@ -44,6 +46,207 @@ services:
         value: camera-01
       - key: ROLL_SCALE_GATEWAY_ID
         value: render-pilot-01
+      - key: ROLL_SCALE_DATA_ROOT
+        value: /var/data
+      - key: ROLL_SCALE_LOCAL_RETENTION_DAYS
+        value: "7"
+      - key: ROLL_SCALE_GEMINI_API_KEY
+        sync: false
+      - key: ROLL_SCALE_GEMINI_BACKUP_API_KEY
+        sync: false
+      - key: ROLL_SCALE_API_URL
+        sync: false
+      - key: ROLL_SCALE_DEVICE_TOKEN
+        sync: false
+      - key: ROLL_SCALE_LOOKUP_URL
+        sync: false
+      - key: ROLL_SCALE_LOOKUP_TOKEN
+        sync: false
+      - key: ROLL_SCALE_WEB_USERNAME
+        value: pilot
+      - key: ROLL_SCALE_WEB_PASSWORD
+        sync: false
+
+  - type: web
+    name: tram-can-qr-pilot-02
+    runtime: python
+    region: singapore
+    autoDeployTrigger: "off"
+    numInstances: 1
+    buildCommand: pip install -r backend/requirements-render.txt
+    startCommand: PYTHONPATH=backend/src ROLL_SCALE_FRONTEND_DIR=frontend python -m roll_qr_scale.render_app
+    healthCheckPath: /api/health
+    disk:
+      name: tram-can-qr-data-02
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ROLL_SCALE_WEIGHT_ENGINE
+        value: gemini
+      - key: ROLL_SCALE_GEMINI_ENABLED
+        value: "true"
+      - key: ROLL_SCALE_GEMINI_31_MODEL
+        value: gemini-3.1-flash-lite
+      - key: ROLL_SCALE_GEMINI_31_TIMEOUT
+        value: "15.0"
+      - key: ROLL_SCALE_GEMINI_37_MODEL
+        value: gemini-3.7-flash
+      - key: ROLL_SCALE_GEMINI_37_TIMEOUT
+        value: "30.0"
+      - key: ROLL_SCALE_GEMINI_RPM_LIMIT
+        value: "15"
+      - key: ROLL_SCALE_GEMINI_TPM_LIMIT
+        value: "250000"
+      - key: ROLL_SCALE_GEMINI_RPD_LIMIT
+        value: "500"
+      - key: ROLL_SCALE_CODEX_ENABLED
+        value: "true"
+      - key: ROLL_SCALE_CODEX_MODE
+        value: oauth
+      - key: ROLL_SCALE_STATION_COUNT
+        value: "1"
+      - key: ROLL_SCALE_STATION_IDS
+        value: station-02
+      - key: ROLL_SCALE_CAMERA_IDS
+        value: camera-02
+      - key: ROLL_SCALE_GATEWAY_ID
+        value: render-pilot-02
+      - key: ROLL_SCALE_DATA_ROOT
+        value: /var/data
+      - key: ROLL_SCALE_LOCAL_RETENTION_DAYS
+        value: "7"
+      - key: ROLL_SCALE_GEMINI_API_KEY
+        sync: false
+      - key: ROLL_SCALE_GEMINI_BACKUP_API_KEY
+        sync: false
+      - key: ROLL_SCALE_API_URL
+        sync: false
+      - key: ROLL_SCALE_DEVICE_TOKEN
+        sync: false
+      - key: ROLL_SCALE_LOOKUP_URL
+        sync: false
+      - key: ROLL_SCALE_LOOKUP_TOKEN
+        sync: false
+      - key: ROLL_SCALE_WEB_USERNAME
+        value: pilot
+      - key: ROLL_SCALE_WEB_PASSWORD
+        sync: false
+
+  - type: web
+    name: tram-can-qr-pilot-03
+    runtime: python
+    region: singapore
+    autoDeployTrigger: "off"
+    numInstances: 1
+    buildCommand: pip install -r backend/requirements-render.txt
+    startCommand: PYTHONPATH=backend/src ROLL_SCALE_FRONTEND_DIR=frontend python -m roll_qr_scale.render_app
+    healthCheckPath: /api/health
+    disk:
+      name: tram-can-qr-data-03
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ROLL_SCALE_WEIGHT_ENGINE
+        value: gemini
+      - key: ROLL_SCALE_GEMINI_ENABLED
+        value: "true"
+      - key: ROLL_SCALE_GEMINI_31_MODEL
+        value: gemini-3.1-flash-lite
+      - key: ROLL_SCALE_GEMINI_31_TIMEOUT
+        value: "15.0"
+      - key: ROLL_SCALE_GEMINI_37_MODEL
+        value: gemini-3.7-flash
+      - key: ROLL_SCALE_GEMINI_37_TIMEOUT
+        value: "30.0"
+      - key: ROLL_SCALE_GEMINI_RPM_LIMIT
+        value: "15"
+      - key: ROLL_SCALE_GEMINI_TPM_LIMIT
+        value: "250000"
+      - key: ROLL_SCALE_GEMINI_RPD_LIMIT
+        value: "500"
+      - key: ROLL_SCALE_CODEX_ENABLED
+        value: "true"
+      - key: ROLL_SCALE_CODEX_MODE
+        value: oauth
+      - key: ROLL_SCALE_STATION_COUNT
+        value: "1"
+      - key: ROLL_SCALE_STATION_IDS
+        value: station-03
+      - key: ROLL_SCALE_CAMERA_IDS
+        value: camera-03
+      - key: ROLL_SCALE_GATEWAY_ID
+        value: render-pilot-03
+      - key: ROLL_SCALE_DATA_ROOT
+        value: /var/data
+      - key: ROLL_SCALE_LOCAL_RETENTION_DAYS
+        value: "7"
+      - key: ROLL_SCALE_GEMINI_API_KEY
+        sync: false
+      - key: ROLL_SCALE_GEMINI_BACKUP_API_KEY
+        sync: false
+      - key: ROLL_SCALE_API_URL
+        sync: false
+      - key: ROLL_SCALE_DEVICE_TOKEN
+        sync: false
+      - key: ROLL_SCALE_LOOKUP_URL
+        sync: false
+      - key: ROLL_SCALE_LOOKUP_TOKEN
+        sync: false
+      - key: ROLL_SCALE_WEB_USERNAME
+        value: pilot
+      - key: ROLL_SCALE_WEB_PASSWORD
+        sync: false
+
+  - type: web
+    name: tram-can-qr-pilot-04
+    runtime: python
+    region: singapore
+    autoDeployTrigger: "off"
+    numInstances: 1
+    buildCommand: pip install -r backend/requirements-render.txt
+    startCommand: PYTHONPATH=backend/src ROLL_SCALE_FRONTEND_DIR=frontend python -m roll_qr_scale.render_app
+    healthCheckPath: /api/health
+    disk:
+      name: tram-can-qr-data-04
+      mountPath: /var/data
+      sizeGB: 10
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ROLL_SCALE_WEIGHT_ENGINE
+        value: gemini
+      - key: ROLL_SCALE_GEMINI_ENABLED
+        value: "true"
+      - key: ROLL_SCALE_GEMINI_31_MODEL
+        value: gemini-3.1-flash-lite
+      - key: ROLL_SCALE_GEMINI_31_TIMEOUT
+        value: "15.0"
+      - key: ROLL_SCALE_GEMINI_37_MODEL
+        value: gemini-3.7-flash
+      - key: ROLL_SCALE_GEMINI_37_TIMEOUT
+        value: "30.0"
+      - key: ROLL_SCALE_GEMINI_RPM_LIMIT
+        value: "15"
+      - key: ROLL_SCALE_GEMINI_TPM_LIMIT
+        value: "250000"
+      - key: ROLL_SCALE_GEMINI_RPD_LIMIT
+        value: "500"
+      - key: ROLL_SCALE_CODEX_ENABLED
+        value: "true"
+      - key: ROLL_SCALE_CODEX_MODE
+        value: oauth
+      - key: ROLL_SCALE_STATION_COUNT
+        value: "1"
+      - key: ROLL_SCALE_STATION_IDS
+        value: station-04
+      - key: ROLL_SCALE_CAMERA_IDS
+        value: camera-04
+      - key: ROLL_SCALE_GATEWAY_ID
+        value: render-pilot-04
       - key: ROLL_SCALE_DATA_ROOT
         value: /var/data
       - key: ROLL_SCALE_LOCAL_RETENTION_DAYS
