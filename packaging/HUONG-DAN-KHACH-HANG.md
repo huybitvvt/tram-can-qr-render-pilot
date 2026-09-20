@@ -93,6 +93,21 @@ số gross cho từng trạm và điền vào `config.env`; ROI cũng được d
 Gemini. Nếu chưa cấu hình, backend tự dò LED. Mỗi ROI có dạng
 `x1,y1,x2,y2` từ 0 đến 1; các trạm ngăn cách bằng dấu chấm phẩy:
 
+### Codex · ChatGPT
+
+Codex là lựa chọn AI độc lập với Gemini. Trên máy local, cài Codex CLI và đăng
+nhập đúng tài khoản ChatGPT trước khi dùng:
+
+```powershell
+codex login --device-auth
+codex login status
+```
+
+Mở menu **AI** trên giao diện, chọn **Codex · ChatGPT**, rồi bấm **Đăng nhập
+Codex**. Nút này mở lại cửa sổ đăng nhập CLI nếu tài khoản chưa được xác nhận;
+không cần dán API key Codex vào `config.env`. Nếu Codex chưa cài, giao diện sẽ
+hiện hướng dẫn cài CLI; có thể chọn lại **Gemini API** để cân tiếp.
+
 Antigravity là lựa chọn AI thứ ba (sau Gemini API và Codex). Cần cài CLI
 `agy` trên đúng máy chạy backend; trong menu **AI**, chọn **Antigravity · Google**,
 bấm **Đăng nhập Antigravity**, hoàn tất Google login ở cửa sổ mới rồi bấm lại
