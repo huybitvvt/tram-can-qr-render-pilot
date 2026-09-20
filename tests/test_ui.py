@@ -2723,6 +2723,8 @@ def test_ui_does_not_offer_fake_gemini_profile_when_backend_is_local() -> None:
     assert "body:JSON.stringify({force})" in TEST_UI_HTML
     assert "codexOption.disabled=!Boolean(codex.enabled)" in TEST_UI_HTML
     assert "$('codexLoginBtn').hidden=!primary||!usingCodex" in TEST_UI_HTML
+    assert "function pollLocalCodexLogin()" in TEST_UI_HTML
+    assert "result.started&&!result.session_id" in TEST_UI_HTML
     assert "codex.available?'Đăng nhập lại Codex':'Đăng nhập Codex'" in TEST_UI_HTML
     assert "Bấm Đăng nhập Codex để đăng nhập hoặc cài Codex CLI." in TEST_UI_HTML
     assert ".codex-login{align-self:flex-start;width:auto!important" in TEST_UI_HTML
