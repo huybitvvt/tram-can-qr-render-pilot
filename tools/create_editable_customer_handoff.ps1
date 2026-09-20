@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$version = "source-editable-gemini-pilot-0.2.0-rc8"
+$version = "source-editable-gemini-pilot-0.2.0-rc9"
 $dest = Join-Path $root "dist\$version"
 $zip = Join-Path $root "dist\$version.zip"
 $hashFile = Join-Path $root "dist\$version.SHA256.txt"

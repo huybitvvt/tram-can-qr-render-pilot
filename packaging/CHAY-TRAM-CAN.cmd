@@ -16,7 +16,7 @@ if not exist "%CONFIG_FILE%" (
   exit /b 1
 )
 
-findstr /C:"replace-with-google-ai-studio-key" "%CONFIG_FILE%" >nul
+findstr /C:"replace-with-key-" "%CONFIG_FILE%" >nul
 if not errorlevel 1 (
   echo Chua dien Gemini API key.
   start "" notepad.exe "%CONFIG_FILE%"

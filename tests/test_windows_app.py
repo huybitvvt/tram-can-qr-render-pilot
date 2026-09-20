@@ -35,7 +35,7 @@ def test_runtime_config_loads_only_desktop_keys_and_preserves_process_env(
         _read_runtime_config(config)
 
 
-def test_packaged_runtime_defaults_to_three_stations_and_tested_ocr_settings(
+def test_packaged_runtime_defaults_to_one_isolated_station_and_tested_ocr_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for name in (
@@ -54,7 +54,7 @@ def test_packaged_runtime_defaults_to_three_stations_and_tested_ocr_settings(
 
     argv = build_runtime_argv(tmp_path / "runtime", tmp_path / "assets")
 
-    assert argv[argv.index("--station-count") + 1] == "3"
+    assert argv[argv.index("--station-count") + 1] == "1"
     assert argv[argv.index("--yolo-imgsz") + 1] == "960"
     assert argv[argv.index("--ocr-min-confidence") + 1] == "0.6"
     assert argv[argv.index("--weight-burst-frames") + 1] == "5"

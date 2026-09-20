@@ -1,33 +1,46 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc8` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc9` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc8.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc9.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
-2. Nếu Windows SmartScreen cảnh báo, đối chiếu SHA-256 với file
+2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
+   **Trạm 04**. Trang chọn trạm được bỏ qua khi máy đã có `config.env`.
+3. Nếu Windows SmartScreen cảnh báo, đối chiếu SHA-256 với file
    `SHA256SUMS.txt` do đơn vị triển khai gửi trước khi tiếp tục.
-3. Mở **Trạm cân QR** từ Desktop. Trình duyệt sẽ mở địa chỉ
+4. Mở **Trạm cân QR** từ Desktop. Trình duyệt sẽ mở địa chỉ
    `http://127.0.0.1:8080`.
-4. Cho phép Chrome/Edge sử dụng camera khi trình duyệt hỏi.
+5. Cho phép Chrome/Edge sử dụng camera khi trình duyệt hỏi.
 
 Không cần cài Python. Không đổi tên, di chuyển hoặc xóa thư mục `_internal`
 trong bản portable.
 
-## 2. Chọn số camera/trạm
+## 2. Danh tính từng trạm
 
-Bản cài mặc định hiển thị 3 trạm. Muốn đổi cấu hình, sao chép
-`customer-config.env.example` trong thư mục cài đặt thành:
+Mỗi máy chạy đúng một gateway, một trạm và một camera độc lập. Bốn máy đều mở
+cùng URL local `http://127.0.0.1:8080`; hậu tố danh tính trong `config.env`
+phải khác nhau:
+
+| Máy | Gateway | Station | Camera |
+| --- | --- | --- | --- |
+| 01 | `gateway-01` | `station-01` | `camera-01` |
+| 02 | `gateway-02` | `station-02` | `camera-02` |
+| 03 | `gateway-03` | `station-03` | `camera-03` |
+| 04 | `gateway-04` | `station-04` | `camera-04` |
+
+Installer tự tạo file:
 
 ```text
 %LOCALAPPDATA%\TramCanQR\config.env
 ```
 
-Mở `config.env` bằng Notepad và đặt `ROLL_SCALE_STATION_COUNT` thành `1`, `2`
-hoặc `3`. Danh sách `ROLL_SCALE_STATION_IDS` và `ROLL_SCALE_CAMERA_IDS` phải có
-đúng số phần tử tương ứng. Đóng ứng dụng rồi mở lại sau khi sửa.
+Giữ `ROLL_SCALE_STATION_COUNT=1`. Mỗi máy điền **bộ URL/token Supabase riêng**
+và **Gemini key riêng** được cấp cho đúng trạm đó. Đóng ứng dụng rồi mở lại sau
+khi sửa. Không sao chép nguyên `config.env` từ máy 01 sang máy khác vì sẽ làm
+trùng danh tính và gửi dữ liệu sang sai Supabase.
 
 Mỗi camera chỉ được gán cho một trạm. Trên giao diện, chọn đúng camera ở từng
 thẻ trạm rồi bấm **Mở camera đã gán**. Trình duyệt lưu ánh xạ này trên chính
@@ -47,10 +60,10 @@ thuận việc gửi ảnh camera tới Google và cấp key bằng kênh riêng
 ```text
 ROLL_SCALE_GEMINI_ENABLED=true
 ROLL_SCALE_WEIGHT_ENGINE=hybrid
-ROLL_SCALE_GEMINI_API_KEY=replace-with-google-ai-studio-key
+ROLL_SCALE_GEMINI_API_KEY=replace-with-key-for-this-station
 # Tùy chọn: key thứ hai; tự chuyển khi key trên trả lỗi API và quarantine key
 # lỗi cho tới khi khởi động lại hoặc lưu key mới.
-# ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-google-ai-studio-key
+# ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-key-for-this-station
 ROLL_SCALE_GEMINI_MODEL=gemini-3.5-flash-lite
 ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview
 ROLL_SCALE_GEMINI_TIMEOUT=10.0
@@ -94,7 +107,7 @@ bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`
 
 ## 3. Vận hành
 
-- Phím `1`, `2`, `3`: chọn trạm đang làm việc.
+- Máy local chỉ có một trạm nên không cần chuyển trạm bằng phím số.
 - `Space`: chụp ảnh cân lõi và nhận diện đúng camera đang chọn. Giữ yên cân
   cho đến khi trạng thái chuyển sang `CHỜ ẢNH QR`.
 - `P`: sau khi có số cân lõi, đặt sản phẩm và tem QR trong khung rồi chụp cân
@@ -121,8 +134,8 @@ lại shortcut. Không chạy hai bản gateway cùng lúc trên cổng 8080.
 ## 4. Đồng bộ cloud
 
 Cloud là tùy chọn. Khi chưa cấu hình API, ứng dụng vẫn lưu local. Token ingest
-và lookup phải được đơn vị triển khai chuyển bằng kênh riêng rồi điền vào
-`config.env`.
+và lookup riêng của từng trạm phải được đơn vị triển khai chuyển bằng kênh
+riêng rồi điền vào `config.env` trên đúng máy.
 
 Không đặt Cloudinary API secret, Supabase service-role key hoặc bất kỳ secret
 quản trị nào trên máy khách. Máy khách chỉ dùng token thiết bị có quyền tối

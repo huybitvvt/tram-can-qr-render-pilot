@@ -75,7 +75,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc8.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc9.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -151,9 +151,13 @@ $env:ROLL_SCALE_GATEWAY_ID = "gateway-01"
 
 Giữ `ROLL_SCALE_GATEWAY_ID` ổn định cho đúng máy; không dùng ID trạm làm ID gateway. `ROLL_SCALE_DEVICE_ID` vẫn là alias tương thích nhưng không nên dùng cho cài đặt mới. Nếu mở cửa sổ PowerShell mới, phải đặt lại token hoặc lưu bằng cơ chế secret của Windows.
 
-Với bản installer giao cho khách, dùng file `config.env` tại
+Với bản installer giao cho khách, lần cài đầu chọn đúng Trạm 01-04. Installer
+tạo một gateway local độc lập với đúng một camera; cả bốn máy đều mở
+`http://127.0.0.1:8080` nhưng mang danh tính gateway/station/camera khác nhau.
+Khi cập nhật chỉ cần đóng ứng dụng và cài đè bản mới, không gỡ bản cũ. Dùng file `config.env` tại
 `%LOCALAPPDATA%\TramCanQR\config.env` (mẫu là
-`customer-config.env.example`). Chỉ đặt device/lookup token tối thiểu; không
+`customer-config.env.example`). Mỗi máy nhận bộ URL/token Supabase và Gemini
+key riêng của đúng trạm đó. Chỉ đặt device/lookup token tối thiểu; không
 đặt Cloudinary secret hoặc Supabase service-role key trên máy trạm.
 
 ## 4. Giao diện web 1/2/3 camera

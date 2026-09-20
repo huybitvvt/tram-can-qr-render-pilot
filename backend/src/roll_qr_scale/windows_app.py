@@ -74,7 +74,11 @@ def load_runtime_config(root: Path) -> Path | None:
 
 
 def _configured_station_count() -> int:
-    raw_value = os.environ.get("ROLL_SCALE_STATION_COUNT", "3")
+    # The Windows package is deployed as one isolated gateway per workstation.
+    # Multi-camera source deployments remain available through an explicit
+    # ROLL_SCALE_STATION_COUNT value, but an unconfigured customer machine must
+    # never silently claim the identities of three stations.
+    raw_value = os.environ.get("ROLL_SCALE_STATION_COUNT", "1")
     try:
         station_count = int(raw_value)
     except ValueError as exc:

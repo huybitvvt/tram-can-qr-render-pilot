@@ -2,7 +2,7 @@ TRAM CAN QR - PILOT GEMINI MOT CAMERA
 
 1. Giai nen ZIP vao mot thu muc co dinh, vi du C:\TramCanQR-Pilot.
 2. Chay CAI-DAT-LAN-DAU.cmd mot lan. May can Python 3.10+ va Internet.
-3. Notepad mo config.env. Thay replace-with-google-ai-studio-key bang API key pilot moi, sau do luu.
+3. Notepad mo config.env. Thay replace-with-key-for-this-station bang API key pilot moi, sau do luu.
 4. Chay CHAY-TRAM-CAN.cmd. Edge/Chrome se mo http://127.0.0.1:8080.
 5. Cho phep dung camera, chon dung camera, giu can va camera co dinh, bam Space de doc.
 6. Khong dong cua so lenh mau den trong luc test.
