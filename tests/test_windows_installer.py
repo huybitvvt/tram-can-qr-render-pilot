@@ -29,3 +29,11 @@ def test_installer_assigns_one_unique_local_station_from_four_choices() -> None:
 def test_installer_can_create_an_optional_windows_startup_shortcut() -> None:
     assert 'Name: "startupicon"' in INSTALLER
     assert 'Name: "{userstartup}\\{#MyAppName}"' in INSTALLER
+
+
+def test_first_install_opens_config_before_starting_the_gateway() -> None:
+    assert 'Check: ShouldOpenInitialConfig' in INSTALLER
+    assert 'Filename: "{sys}\\notepad.exe"' in INSTALLER
+    assert 'InitialConfigCreated := True' in INSTALLER
+    run_section = INSTALLER.split('[Run]', 1)[1].split('[Code]', 1)[0]
+    assert run_section.index('Filename: "{sys}\\notepad.exe"') < run_section.index('Filename: "{app}\\{#MyAppExeName}"')

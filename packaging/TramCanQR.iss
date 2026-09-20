@@ -34,15 +34,22 @@ Name: "desktopicon"; Description: "Tạo biểu tượng ngoài màn hình"; Gro
 Name: "startupicon"; Description: "Tự mở Trạm cân QR khi đăng nhập Windows"; GroupDescription: "Khởi động:"; Flags: unchecked
 
 [Run]
+Filename: "{sys}\notepad.exe"; Parameters: """{localappdata}\TramCanQR\config.env"""; Description: "Mở cấu hình để điền Supabase và Gemini (lần cài đầu)"; Flags: postinstall skipifsilent; Check: ShouldOpenInitialConfig
 Filename: "{app}\{#MyAppExeName}"; Description: "Mở {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
   StationPage: TInputOptionWizardPage;
+  InitialConfigCreated: Boolean;
 
 function RuntimeConfigPath: String;
 begin
   Result := ExpandConstant('{localappdata}\TramCanQR\config.env');
+end;
+
+function ShouldOpenInitialConfig: Boolean;
+begin
+  Result := InitialConfigCreated;
 end;
 
 function SelectedStationSuffix: String;
@@ -93,6 +100,7 @@ begin
   ConfigText :=
     '# Cấu hình riêng của máy Trạm ' + StationSuffix + #13#10 +
     '# Cài bản mới sẽ giữ nguyên file này và dữ liệu trong cùng thư mục.' + #13#10 +
+    '# Sau khi điền: bấm Ctrl+S, đóng Notepad; ứng dụng sẽ tự mở.' + #13#10 +
     'ROLL_SCALE_STATION_COUNT=1' + #13#10 +
     'ROLL_SCALE_GATEWAY_ID=gateway-' + StationSuffix + #13#10 +
     'ROLL_SCALE_STATION_IDS=station-' + StationSuffix + #13#10 +
@@ -117,6 +125,7 @@ begin
 
   if not SaveStringToFile(ConfigPath, ConfigText, False) then
     RaiseException('Không ghi được cấu hình: ' + ConfigPath);
+  InitialConfigCreated := True;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

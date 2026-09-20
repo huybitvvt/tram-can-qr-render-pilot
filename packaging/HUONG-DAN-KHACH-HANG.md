@@ -9,11 +9,13 @@ Phiên bản: `0.2.0-rc9` — bản chạy thử nghiệm thu tại xưởng.
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
    **Trạm 04**. Trang chọn trạm được bỏ qua khi máy đã có `config.env`.
-3. Nếu Windows SmartScreen cảnh báo, đối chiếu SHA-256 với file
+3. Installer tự mở file cấu hình. Điền Supabase/Gemini, bấm **Ctrl+S** rồi
+   đóng Notepad. Ứng dụng sẽ tự mở sau đó.
+4. Nếu Windows SmartScreen cảnh báo, đối chiếu SHA-256 với file
    `SHA256SUMS.txt` do đơn vị triển khai gửi trước khi tiếp tục.
-4. Mở **Trạm cân QR** từ Desktop. Trình duyệt sẽ mở địa chỉ
+5. Nếu ứng dụng chưa tự mở, mở **Trạm cân QR** từ Desktop. Trình duyệt sẽ mở địa chỉ
    `http://127.0.0.1:8080`.
-5. Cho phép Chrome/Edge sử dụng camera khi trình duyệt hỏi.
+6. Cho phép Chrome/Edge sử dụng camera khi trình duyệt hỏi.
 
 Không cần cài Python. Không đổi tên, di chuyển hoặc xóa thư mục `_internal`
 trong bản portable.
