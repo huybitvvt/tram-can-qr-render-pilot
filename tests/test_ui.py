@@ -65,6 +65,12 @@ def test_ui_offers_antigravity_as_third_ai_provider() -> None:
     assert "'/api/antigravity/usage'" in TEST_UI_HTML
 
 
+def test_ui_hides_quota_meters_and_does_not_poll_them() -> None:
+    assert ".gemini-quota-meter,.antigravity-quota-meter{display:none!important}" in TEST_UI_HTML
+    assert "setInterval(refreshGeminiQuota" not in TEST_UI_HTML
+    assert "setInterval(refreshAntigravityQuota" not in TEST_UI_HTML
+
+
 def test_ui_can_temporarily_analyze_an_uploaded_scale_image() -> None:
     assert "button.id='testImageBtn'" in TEST_UI_HTML
     assert "button.id='inventoryTestImageBtn'" in TEST_UI_HTML
