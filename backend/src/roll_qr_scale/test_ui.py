@@ -5755,7 +5755,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         if not isinstance(encoded_frame, str):
                             raise ValueError("Burst chứa ảnh không hợp lệ")
                         weight_frames.append(decode_image(encoded_frame))
-                    bind_core = capture_kind != "product"
+                    capture_round = int(payload.get("capture_round", 0))
+                    if not 0 <= capture_round <= 2:
+                        raise ValueError("Lần cân phải từ 1 đến 3")
+                    bind_core = capture_kind != "product" and capture_round == 0
                     result = service.analyze(
                         frame,
                         str(payload.get("roi", "")),

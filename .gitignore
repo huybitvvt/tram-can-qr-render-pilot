@@ -23,3 +23,5 @@ data/test_frame.png
 .env
 .env.*
 !.env.example
+Quanlycuahangxe/
+supabase/

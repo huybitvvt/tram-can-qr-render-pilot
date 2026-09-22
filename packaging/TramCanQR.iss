@@ -1,5 +1,5 @@
 #define MyAppName "Tram Can QR"
-#define MyAppVersion "0.2.0-rc9"
+#define MyAppVersion "0.2.0-rc11"
 #define MyAppExeName "TramCanQR.exe"
 
 [Setup]
@@ -98,9 +98,9 @@ begin
 
   StationSuffix := SelectedStationSuffix;
   ConfigText :=
-    '# Cấu hình riêng của máy Trạm ' + StationSuffix + #13#10 +
-    '# Cài bản mới sẽ giữ nguyên file này và dữ liệu trong cùng thư mục.' + #13#10 +
-    '# Sau khi điền: bấm Ctrl+S, đóng Notepad; ứng dụng sẽ tự mở.' + #13#10 +
+    '# Cau hinh rieng cua may Tram ' + StationSuffix + #13#10 +
+    '# Cai ban moi se giu nguyen file nay va du lieu trong cung thu muc.' + #13#10 +
+    '# Sau khi dien: bam Ctrl+S, dong Notepad; ung dung se tu mo.' + #13#10 +
     'ROLL_SCALE_STATION_COUNT=1' + #13#10 +
     'ROLL_SCALE_GATEWAY_ID=gateway-' + StationSuffix + #13#10 +
     'ROLL_SCALE_STATION_IDS=station-' + StationSuffix + #13#10 +
@@ -117,7 +117,7 @@ begin
     'ROLL_SCALE_GEMINI_TIMEOUT=10.0' + #13#10 +
     'ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT=30.0' + #13#10 +
     '' + #13#10 +
-    '# Điền bộ Supabase riêng được cấp cho đúng trạm này.' + #13#10 +
+    '# Dien bo Supabase rieng duoc cap cho dung tram nay.' + #13#10 +
     '# ROLL_SCALE_API_URL=https://YOUR_PROJECT_REF.supabase.co/functions/v1/ingest-measurement' + #13#10 +
     '# ROLL_SCALE_DEVICE_TOKEN=replace-with-device-ingest-token' + #13#10 +
     '# ROLL_SCALE_LOOKUP_URL=https://YOUR_PROJECT_REF.supabase.co/functions/v1/lookup-roll' + #13#10 +

@@ -33,10 +33,29 @@ def writable_root() -> Path:
     return root
 
 
+def _read_runtime_config_text(path: Path) -> str:
+    """Read config files saved by modern or legacy Windows Notepad/Inno Setup."""
+    data = path.read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16")
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        # Older installers wrote comments with the workstation ANSI code page.
+        # Environment names, URLs and tokens remain ASCII, so decoding the
+        # surrounding comments this way does not alter any configured value.
+        for encoding in ("mbcs", "cp1258", "cp1252", "latin-1"):
+            try:
+                return data.decode(encoding)
+            except (LookupError, UnicodeDecodeError):
+                continue
+    raise UnicodeError(f"Không nhận dạng được bảng mã của {path}")
+
+
 def _read_runtime_config(path: Path) -> dict[str, str]:
     """Read the small desktop config format without adding a dotenv dependency."""
     values: dict[str, str] = {}
-    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+    for line_number, raw_line in enumerate(_read_runtime_config_text(path).splitlines(), 1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue

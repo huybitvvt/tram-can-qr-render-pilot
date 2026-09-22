@@ -35,6 +35,33 @@ def test_runtime_config_loads_only_desktop_keys_and_preserves_process_env(
         _read_runtime_config(config)
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        (
+            b"# legacy Windows comment \x9e\r\n"
+            b"ROLL_SCALE_STATION_COUNT=1\r\n"
+            b"ROLL_SCALE_GATEWAY_ID=gateway-02\r\n"
+        ),
+        (
+            "# Cấu hình máy trạm\r\n"
+            "ROLL_SCALE_STATION_COUNT=1\r\n"
+            "ROLL_SCALE_GATEWAY_ID=gateway-02\r\n"
+        ).encode("utf-16"),
+    ],
+)
+def test_runtime_config_accepts_legacy_windows_encodings(
+    tmp_path: Path, content: bytes
+) -> None:
+    config = tmp_path / "config.env"
+    config.write_bytes(content)
+
+    assert _read_runtime_config(config) == {
+        "ROLL_SCALE_STATION_COUNT": "1",
+        "ROLL_SCALE_GATEWAY_ID": "gateway-02",
+    }
+
+
 def test_packaged_runtime_defaults_to_one_isolated_station_and_tested_ocr_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

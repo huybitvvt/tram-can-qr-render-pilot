@@ -355,7 +355,7 @@ def test_each_camera_resolves_to_its_configured_machine(tmp_path) -> None:
     assert stale["machine_overridden"] is True
     with pytest.raises(ValueError, match="Trạm hoặc camera không hợp lệ"):
         service.validate_station_source("station-01", "camera-02", "Máy tái chế")
-    assert "select.disabled=Boolean(locked)" in TEST_UI_HTML
+    assert "input.disabled=Boolean(locked)" in TEST_UI_HTML
     assert "Camera vật lý này đã gắn với máy khác" in TEST_UI_HTML
     assert "Hệ thống không tự đổi sang camera khác" in TEST_UI_HTML
     assert "const machineChanged=lockSourceMachine(session)" in TEST_UI_HTML
@@ -1609,7 +1609,7 @@ def test_ui_has_capture_controls_without_lookup_panel() -> None:
 
 
 def test_ui_uses_viet_nhat_red_black_roboto_branding() -> None:
-    assert "Trạm cân <span>Ai</span> Việt Nhật IPT" in TEST_UI_HTML
+    assert '<h1 class="brand-title">Ghi nhận lần cân</h1>' in TEST_UI_HTML
     assert '<img class="brand-mark" src="/logo.jpg" alt="Việt Nhật IPT">' in TEST_UI_HTML
     assert "font-family:Roboto" in TEST_UI_HTML
     assert 'local("Roboto Regular")' in TEST_UI_HTML
@@ -1652,8 +1652,8 @@ def test_ui_records_table_shows_bi_and_nvl_weights() -> None:
     assert 'HC1 · 06:00–14:00' in TEST_UI_HTML
     assert '12C2 · 18:00–06:00' in TEST_UI_HTML
     assert 'id="sourceMachine"' in TEST_UI_HTML
-    assert 'Máy tái chế' in TEST_UI_HTML
-    assert 'Máy cách nhiệt' in TEST_UI_HTML
+    assert 'MÁY CÁCH NHIỆT 11' in TEST_UI_HTML
+    assert 'MÁY BAO BÌ 11' in TEST_UI_HTML
     assert 'id="sourceOrder"' in TEST_UI_HTML
     assert 'list="sourceOrderList"' in TEST_UI_HTML
     assert "Chọn hoặc nhập LSX" in TEST_UI_HTML
@@ -1925,10 +1925,13 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert 'id="dismissRollBatchBtn"' in TEST_UI_HTML
     assert "function dismissRollBatchModal" in TEST_UI_HTML
     assert "Không bắt buộc" in TEST_UI_HTML
-    assert 'id="weightAlertModal"' in TEST_UI_HTML
-    assert "CORE_WEIGHT_ALERT_KG=1.2" in TEST_UI_HTML
-    assert "function markWeightThresholdAlerts" in TEST_UI_HTML
-    assert "PRODUCT_WEIGHT_ALERT_KG" in TEST_UI_HTML
+    assert "function markWeightThresholdAlerts(){return null}" in TEST_UI_HTML
+    assert "function coreWeightOverLimit(){return false}" in TEST_UI_HTML
+    assert "function productWeightOverLimit(){return false}" in TEST_UI_HTML
+    assert 'id="sourceMachine" list="sourceMachineList"' in TEST_UI_HTML
+    assert "MÁY CÁCH NHIỆT 11" in TEST_UI_HTML
+    assert "MÁY BAO BÌ 16" in TEST_UI_HTML
+    assert "Lưu riêng cặp " in TEST_UI_HTML
     assert "function qrDuplicateMessage" in TEST_UI_HTML
     assert "function rejectDuplicateQr" in TEST_UI_HTML
     assert "function verifyQrAgainstServer" in TEST_UI_HTML
@@ -2331,7 +2334,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "$('analyzeCoreBtn').disabled=panelMode||busy||!ready||!sourceChosen" not in TEST_UI_HTML
     assert "function coreCaptured(session)" in TEST_UI_HTML
     assert "function sourceReady(session)" in TEST_UI_HTML
-    assert "if(isProduct&&!coreReady(session))" in TEST_UI_HTML
+    assert "if(isProduct&&!roundCoreReady(session,targetRound))" in TEST_UI_HTML
     assert "session._analyzeLock=false;renderControls();status(captureStatus,error.message" in TEST_UI_HTML
     assert "await api('/api/session/discard'" in TEST_UI_HTML
     assert "retryingFailedCore=!isProduct&&targetRound===0&&Boolean(session.eventId)&&!roundCoreReady(session,targetRound)" in TEST_UI_HTML
@@ -2355,7 +2358,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "source-fields{grid-template-columns:repeat(2,minmax(0,1fr))" in TEST_UI_HTML
     assert "source-fields .apply{grid-column:1/-1" in TEST_UI_HTML
     assert "safe-area-inset-bottom" in TEST_UI_HTML
-    assert "#productionToolbar{position:sticky" in TEST_UI_HTML
+    assert "#productionToolbar.toolbar{" in TEST_UI_HTML
     assert 'id="productionModeBtn" role="tab"' in TEST_UI_HTML
     assert 'id="inventoryModeBtn" role="tab"' in TEST_UI_HTML
     assert 'id="listModeBtn" role="tab"' in TEST_UI_HTML
@@ -2419,7 +2422,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "function wantsInventoryMode(" in TEST_UI_HTML
     assert "/kiem-kho" in TEST_UI_HTML
     assert "analyzeInventory()" in TEST_UI_HTML
-    assert "if(!session.stream){await openDefaultCamera(session);if(!session.stream)return}" in TEST_UI_HTML
+    assert "if(!session.stream){await openDefaultCamera(session);if(!session.stream)return;" in TEST_UI_HTML
     assert "function captureInventoryPhoto(" in TEST_UI_HTML
     assert "function nextCaptureKind(" in TEST_UI_HTML
     assert "captureNextWeight()" in TEST_UI_HTML
@@ -2542,7 +2545,7 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "evidence-round split" in TEST_UI_HTML
     assert "session.eventId&&(retryingFailedCore||session.coreAnalysis&&session.analysisId)" in TEST_UI_HTML
     assert "if(targetRound===0)" in TEST_UI_HTML
-    assert "capture_kind:targetRound>0?'product':kind" in TEST_UI_HTML
+    assert "capture_kind:kind,capture_round:targetRound" in TEST_UI_HTML
     assert 'id="captureQr2"' in TEST_UI_HTML
     assert "Mã QR lần 1" in TEST_UI_HTML
     assert "Mã QR lần 2" in TEST_UI_HTML
@@ -2565,7 +2568,7 @@ def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> Non
     assert 'id="errorReason1"' in TEST_UI_HTML
     assert "ERROR_STATUS=" in TEST_UI_HTML
     assert "ERROR_REASON=" in TEST_UI_HTML
-    assert "Lý do lỗi trước khi lưu" in TEST_UI_HTML
+    assert "Có lỗi, hãy nhập Lý do lỗi." in TEST_UI_HTML
     assert 'id="weighBatchRecordsCard"' in TEST_UI_HTML
     assert 'id="printSheet"' in TEST_UI_HTML
     assert "function printWeighBatch" in TEST_UI_HTML

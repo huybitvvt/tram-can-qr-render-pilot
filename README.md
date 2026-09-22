@@ -1,5 +1,12 @@
 # Hệ thống offline ghép QR với số cân
 
+[![Tải bản mới nhất (Windows Setup)](https://img.shields.io/badge/⬇_Tải_bản_mới_nhất-Windows_Setup_(.exe)-2ea44f?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
+[![GitHub Release](https://img.shields.io/github/v/release/huybitvvt/tram-can-qr-render-pilot?style=for-the-badge&label=Phiên_bản)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest)
+
+> 🚀 **Link tải trực tiếp bản cài đặt mới nhất (không đổi theo phiên bản):**  
+> 👉 [https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)  
+> *(Trên máy trạm: chỉ cần tải về và chạy cài đè trực tiếp, dữ liệu và config.env cũ được giữ nguyên).*
+
 Một gateway có thể vận hành 1–3 trạm camera logic trong cùng giao diện web. Mỗi trạm giữ preview, ảnh đang kiểm tra và danh tính riêng; tác vụ QR/OCR của các trạm đi qua một hàng đợi FIFO dùng chung để các thư viện nhận dạng không chạy chồng nhau. `Space` chụp cân lõi; sau đó `P` chụp cân sản phẩm và đọc mã SP trong cùng ảnh thứ hai. `Enter` commit mã SP + hai số cân + hai ảnh vào cùng một event SQLite/outbox.
 
 Mã nguồn được tách theo ranh giới triển khai:
@@ -75,7 +82,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc9.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc11.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 

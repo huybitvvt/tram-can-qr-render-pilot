@@ -41,6 +41,17 @@ test('a duplicate QR stops all writes and releases save lock',async()=>{
  checks[0].resolve(true);checks[1].resolve(false);await pending;
  assert.deepEqual(calls,['verify0','verify1']);assert.equal(session._saveLock,false);
 });
+test('saving one completed pair keeps the other pair pending',async()=>{
+ const {ctx,session,calls,checks}=setup();
+ const pending=ctx.saveValidatedCapture(0);
+ assert.deepEqual(calls,['verify0']);
+ checks[0].resolve(false);await pending;
+ assert.deepEqual(calls,['verify0','saveone','history']);
+ assert.equal(session.rounds[0].saved,true);
+ assert.equal(session.rounds[1].saved,undefined);
+ assert.equal(session.state,'awaiting-weight');
+ assert.equal(session._saveLock,false);
+});
 test('partial save failure retains the remaining round and releases save lock',async()=>{
  const {ctx,session,calls,checks,messages}=setup();
  ctx.saveMeasurementRound=async(s,r)=>{if(r.eventId==='two')throw Error('Network failure');return {event_id:r.eventId,sync_status:'synced'}};

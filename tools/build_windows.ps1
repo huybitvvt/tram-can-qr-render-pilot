@@ -33,7 +33,7 @@ $innoCandidates = @(
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 )
 $iscc = $innoCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-$installerPath = Join-Path $installerDir "TramCanQR-Setup-0.2.0-rc9.exe"
+$installerPath = Join-Path $installerDir "TramCanQR-Setup-0.2.0-rc11.exe"
 if ($iscc) {
     & $iscc packaging\TramCanQR.iss
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build thất bại" }
@@ -44,14 +44,18 @@ if ($iscc) {
     Write-Warning "Inno Setup chưa cài; đã tạo bản portable tại dist\TramCanQR\TramCanQR.exe"
 }
 
-$handoffDir = Join-Path $projectRoot "dist\handoff-0.2.0-rc9"
+$handoffDir = Join-Path $projectRoot "dist\handoff-0.2.0-rc11"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\customer-config.env.example") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\gemini-pilot-config.env.example") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\HUONG-DAN-KHACH-HANG.md") -Destination $handoffDir -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAP-NHAT-BAN-MOI.cmd") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "docs\GEMINI-COST.md") -Destination $handoffDir -Force
 if (Test-Path -LiteralPath $installerPath) {
     Copy-Item -LiteralPath $installerPath -Destination $handoffDir -Force
+    $genericInstaller = Join-Path $installerDir "TramCanQR-Setup.exe"
+    Copy-Item -LiteralPath $installerPath -Destination $genericInstaller -Force
+    Copy-Item -LiteralPath $installerPath -Destination (Join-Path $handoffDir "TramCanQR-Setup.exe") -Force
     $hashes = @(
         ((Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash + "  " + (Split-Path $installerPath -Leaf))
     )

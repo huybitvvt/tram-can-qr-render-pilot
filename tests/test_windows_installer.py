@@ -23,7 +23,14 @@ def test_installer_assigns_one_unique_local_station_from_four_choices() -> None:
     assert "'ROLL_SCALE_CAMERA_IDS=camera-' + StationSuffix" in INSTALLER
     assert "'ROLL_SCALE_LOCAL_RETENTION_DAYS=7'" in INSTALLER
     assert "'ROLL_SCALE_GEMINI_API_KEY=replace-with-key-for-station-' + StationSuffix" in INSTALLER
-    assert "bộ Supabase riêng được cấp cho đúng trạm này" in INSTALLER
+    assert "Dien bo Supabase rieng duoc cap cho dung tram nay" in INSTALLER
+
+
+def test_installer_generated_config_is_ascii_safe_for_all_windows_code_pages() -> None:
+    config_block = INSTALLER.split("ConfigText :=", 1)[1].split(
+        "if not SaveStringToFile", 1
+    )[0]
+    config_block.encode("ascii")
 
 
 def test_installer_can_create_an_optional_windows_startup_shortcut() -> None:
