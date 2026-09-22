@@ -1033,14 +1033,17 @@ def _local_measurement_items(
                 item.weight_raw or "",
             )
             product_weight = float(match.group(1)) if match else None
-        has_core = bool(item.image_path and Path(item.image_path).is_file())
+        core_missing = _raw_tag(item.weight_raw or "", "CORE_MISSING") == "1"
+        has_core = not core_missing and bool(
+            item.image_path and Path(item.image_path).is_file()
+        )
         has_product = bool(
             item.product_image_path and Path(item.product_image_path).is_file()
         )
         core_url = (
             f"/api/measurement-image?event_id={urllib.parse.quote(item.event_id)}&kind=core"
             if has_core
-            else item.remote_image_url
+            else None if core_missing else item.remote_image_url
         )
         product_url = (
             f"/api/measurement-image?event_id={urllib.parse.quote(item.event_id)}&kind=product"
@@ -1055,8 +1058,14 @@ def _local_measurement_items(
         payload = {
             "event_id": item.event_id,
             "qr_code": item.qr_code,
-            "core_weight": item.weight,
+            "core_weight": None if core_missing else item.weight,
             "product_weight": product_weight,
+            "tare_weight": None if core_missing else item.weight,
+            "net_weight": (
+                round(product_weight - item.weight, 4)
+                if product_weight is not None and not core_missing
+                else None
+            ),
             "weight_raw": item.weight_raw
             or (
                 f"PRODUCT_WEIGHT={product_weight}"
@@ -4777,6 +4786,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             if parsed.path == "/api/measurements":
                 query = urllib.parse.parse_qs(parsed.query)
+                local_only = str(query.get("local_only", ["0"])[0]) == "1"
                 try:
                     limit = max(1, min(int(query.get("limit", ["50"])[0]), 200))
                 except ValueError:
@@ -4813,7 +4823,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 remote_total_count: int | None = None
                 remote_source = ""
                 fallback_error = ""
-                if supabase_url and publishable_key:
+                if not local_only and supabase_url and publishable_key:
                     try:
                         remote_items = fetch_supabase_table(
                             supabase_url,
@@ -4825,7 +4835,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         remote_source = "can_tu_dong"
                     except Exception as exc:
                         fallback_error = str(exc)
-                if remote_items is None and ingest_url and ingest_token:
+                if not local_only and remote_items is None and ingest_url and ingest_token:
                     try:
                         remote_items, remote_total_count = _fetch_ingest_measurements_paged(
                             ingest_url,
@@ -4939,6 +4949,9 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                                 pass
                     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
                     raw_weight = str(metadata.get("weight_raw", "") or item.get("weight_raw", ""))
+                    core_missing = _raw_tag(raw_weight, "CORE_MISSING") == "1"
+                    if core_missing:
+                        core_url = None
                     product_weight_value = item.get("product_weight")
                     if product_weight_value is None:
                         product_weight_value = metadata.get("product_weight")
@@ -4958,10 +4971,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         ),
                         "row_id": item.get("id"),
                         "qr_code": item.get("qr_code", ""),
-                        "core_weight": core_weight_value,
+                        "core_weight": None if core_missing else core_weight_value,
                         "product_weight": product_weight_value,
-                        "tare_weight": item.get("tare_weight"),
-                        "net_weight": item.get("net_weight"),
+                        "tare_weight": None if core_missing else item.get("tare_weight"),
+                        "net_weight": None if core_missing else item.get("net_weight"),
                         "weight_raw": (
                             raw_weight
                             if raw_weight
@@ -5017,9 +5030,36 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     (remote_error_rows or []) + local_error_rows,
                     **filters,
                 )
+                local_measurements = _local_measurement_items(
+                    store,
+                    max(limit, 200),
+                    **filters,
+                )
+                local_by_id = {
+                    str(item.get("event_id") or "").strip(): item
+                    for item in local_measurements
+                    if str(item.get("event_id") or "").strip()
+                }
+                for item in items:
+                    eid = str(item.get("event_id") or "").strip()
+                    if eid in local_by_id:
+                        loc = local_by_id[eid]
+                        if not item.get("core_image_url") and loc.get("core_image_url"):
+                            item["core_image_url"] = loc["core_image_url"]
+                            item["has_core_image"] = True
+                        if not item.get("product_image_url") and loc.get("product_image_url"):
+                            item["product_image_url"] = loc["product_image_url"]
+                            item["has_product_image"] = True
+
                 measurement_item_ids = {
                     str(item.get("event_id") or "").strip() for item in items
                 }
+                for local_item in local_measurements:
+                    event_id = str(local_item.get("event_id") or "").strip()
+                    if event_id and event_id not in measurement_item_ids:
+                        items.append(local_item)
+                        measurement_item_ids.add(event_id)
+
                 items.extend(
                     item
                     for item in error_items
@@ -5365,7 +5405,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     error_status = str(payload.get("error_status") or "ok").strip().lower()
                     error_reason = str(payload.get("error_reason") or "").strip()[:500]
                     try:
-                        core_weight = float(payload.get("core_weight"))
+                        raw_core = payload.get("core_weight")
+                        core_weight = float(raw_core) if raw_core not in (None, "") else 0.0
                         product_weight = float(payload.get("product_weight"))
                     except (TypeError, ValueError) as exc:
                         raise ValueError("Khối lượng không hợp lệ") from exc
@@ -5690,7 +5731,14 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         },
                     )
                     return
-                frame = decode_image(str(payload.get("image", "")))
+                raw_frame = str(payload.get("image", "") or "")
+                product_frame_raw = str(payload.get("product_image", "") or "")
+                if raw_frame:
+                    frame = decode_image(raw_frame)
+                elif product_frame_raw:
+                    frame = decode_image(product_frame_raw)
+                else:
+                    frame = decode_image("")
                 if self.path == "/api/panel/detect":
                     self.send_json(
                         200,
@@ -5819,10 +5867,13 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     return
                 if self.path == "/api/capture":
                     try:
-                        weight = float(payload.get("weight", ""))
+                        raw_weight = payload.get("weight")
+                        weight = float(raw_weight) if raw_weight not in (None, "") else 0.0
                     except (TypeError, ValueError) as exc:
                         raise ValueError("Số cân không hợp lệ") from exc
                     weight_raw = _merge_source_tags(str(payload.get("weight_raw", "")), payload)
+                    if not raw_frame and product_frame_raw and raw_weight in (None, "", 0, 0.0):
+                        weight_raw = _upsert_raw_tag(weight_raw, "CORE_MISSING", "1")
                     if not _raw_tag(weight_raw, "SOURCE_PRODUCTION_ORDER"):
                         raise ValueError("Thiếu Lệnh sản xuất")
                     product_weight_value = payload.get("product_weight")

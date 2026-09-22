@@ -151,7 +151,7 @@ def test_ui_capture_accepts_event_id_alone_and_retries_idempotently(tmp_path) ->
 def test_frontend_saves_only_complete_unsaved_rounds_in_separate_requests() -> None:
     assert "Lưu phần đã đủ" in TEST_UI_HTML
     assert "function savableRoundIndexes(session)" in TEST_UI_HTML
-    assert "round&&!round.saved&&roundCoreReady" in TEST_UI_HTML
+    assert "round&&!round.saved&&roundProductReady" in TEST_UI_HTML
     assert "for(const index of indexes)" in TEST_UI_HTML
     assert "event_id:round.eventId" in TEST_UI_HTML
     assert "product_weight:productValue" in TEST_UI_HTML
@@ -2330,11 +2330,11 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "reliableQr=Boolean(data.qr_found&&!data.qr_conflict&&!qrDecoder.startsWith('gemini'))" in TEST_UI_HTML
     assert "if(reliableQr&&String(data.qr_code||'').trim()&&!String(session.qr||'').trim())" in TEST_UI_HTML
     assert "$('analyzeCoreBtn').disabled=panelMode||busy||!ready" in TEST_UI_HTML
-    assert "$('analyzeProductBtn').disabled=panelMode||busy||!ready||!coreReady(session)" in TEST_UI_HTML
+    assert "$('analyzeProductBtn').disabled=panelMode||busy||!ready" in TEST_UI_HTML
     assert "$('analyzeCoreBtn').disabled=panelMode||busy||!ready||!sourceChosen" not in TEST_UI_HTML
     assert "function coreCaptured(session)" in TEST_UI_HTML
     assert "function sourceReady(session)" in TEST_UI_HTML
-    assert "if(isProduct&&!roundCoreReady(session,targetRound))" in TEST_UI_HTML
+    assert "function coreReady(session){return true}" in TEST_UI_HTML
     assert "session._analyzeLock=false;renderControls();status(captureStatus,error.message" in TEST_UI_HTML
     assert "await api('/api/session/discard'" in TEST_UI_HTML
     assert "retryingFailedCore=!isProduct&&targetRound===0&&Boolean(session.eventId)&&!roundCoreReady(session,targetRound)" in TEST_UI_HTML
@@ -2347,7 +2347,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "analyzeCurrent('product')" in TEST_UI_HTML
     assert "PRODUCT_WEIGHT=" in TEST_UI_HTML
     assert "function productReady(session)" in TEST_UI_HTML
-    assert "ĐÃ CÂN LÕI · CHỜ CÂN SẢN PHẨM" in TEST_UI_HTML
+    assert "CHỜ CÂN SẢN PHẨM" in TEST_UI_HTML
     assert 'id="weight" type="number" min="0" step="0.001" placeholder="AI tự đọc" readonly' in TEST_UI_HTML
     assert 'id="productWeight" type="number" min="0" step="0.001" placeholder="AI tự đọc" readonly' in TEST_UI_HTML
     assert TEST_UI_HTML.count('<span class="kbd">Space</span>') == 3
@@ -2670,7 +2670,7 @@ def test_multistation_defaults_and_html_controls(monkeypatch) -> None:
         "function completionReady(session)",
         "function sourceReady(session)",
         "function productReady(session)",
-        "ĐÃ CÂN LÕI · CHỜ CÂN SẢN PHẨM",
+        "CHỜ CÂN SẢN PHẨM",
         'id="analyzeCoreBtn"',
         'id="analyzeProductBtn"',
         'id="productWeight"',
@@ -3065,3 +3065,77 @@ def test_service_rejects_duplicate_logical_camera_ids(tmp_path) -> None:
             camera_ids=["camera-same", "camera-same"],
         )
     store.close()
+
+
+def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path) -> None:
+    import json
+    import threading
+    import urllib.request
+
+    server, service = test_ui_module.create_server(
+        test_ui_module.build_parser().parse_args(
+            [
+                "--db",
+                str(tmp_path / "measurements.db"),
+                "--captures",
+                str(tmp_path / "captures"),
+                "--yolo-model",
+                "",
+                "--port",
+                "0",
+            ]
+        )
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+
+    frame = make_qr_frame("PROD-999_TEST")
+    encoded = image_data_url(frame)
+
+    # Send capture without core weight or image, only product_image & product_weight
+    req = urllib.request.Request(
+        f"http://{host}:{port}/api/capture",
+        data=json.dumps(
+            {
+                "qr_code": "PROD-999_TEST",
+                "product_weight": 7.5,
+                "unit": "kg",
+                "product_image": encoded,
+                "production_order": "LSX-999",
+                "work_date": "2026-09-22",
+                "shift": "12C1",
+                "machine": "MÁY BAO BÌ 11",
+            }
+        ).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req) as resp:
+        res = json.loads(resp.read().decode("utf-8"))
+        assert res["ok"] is True
+        assert res["weight"] == 0.0
+
+    # Verify that GET /api/measurements immediately returns this local record
+    list_req = urllib.request.Request(f"http://{host}:{port}/api/measurements?limit=50&work_date=2026-09-22")
+    with urllib.request.urlopen(list_req) as resp:
+        list_res = json.loads(resp.read().decode("utf-8"))
+        assert list_res["ok"] is True
+        assert len(list_res["items"]) >= 1
+        item = next(i for i in list_res["items"] if i["qr_code"] == "PROD-999_TEST")
+        assert item["core_weight"] is None
+        assert item["product_weight"] == 7.5
+        assert item["has_core_image"] is False
+        assert item["has_product_image"] is True
+
+    local_req = urllib.request.Request(
+        f"http://{host}:{port}/api/measurements?limit=50&work_date=2026-09-22&local_only=1"
+    )
+    with urllib.request.urlopen(local_req) as resp:
+        local_res = json.loads(resp.read().decode("utf-8"))
+        assert local_res["source"] == "local"
+        assert any(i["qr_code"] == "PROD-999_TEST" for i in local_res["items"])
+
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=2.0)
+    service.close()

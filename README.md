@@ -7,10 +7,11 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
+>    Bản `0.2.0-rc12`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc12/TramCanQR-Setup-0.2.0-rc12.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Bất cứ khi nào GitHub có bản mới, chỉ cần ấn đúp chuột là máy tự tải bản mới nhất về cài đè, không mất cấu hình và dữ liệu.*
 
-Một gateway có thể vận hành 1–3 trạm camera logic trong cùng giao diện web. Mỗi trạm giữ preview, ảnh đang kiểm tra và danh tính riêng; tác vụ QR/OCR của các trạm đi qua một hàng đợi FIFO dùng chung để các thư viện nhận dạng không chạy chồng nhau. `Space` chụp cân lõi; sau đó `P` chụp cân sản phẩm và đọc mã SP trong cùng ảnh thứ hai. `Enter` commit mã SP + hai số cân + hai ảnh vào cùng một event SQLite/outbox.
+Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Cân lõi là tùy chọn; lượt chỉ có thành phẩm và mã SP vẫn lưu được. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý.
 
 Mã nguồn được tách theo ranh giới triển khai:
 
@@ -85,7 +86,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc11.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc12.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 

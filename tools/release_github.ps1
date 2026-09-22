@@ -40,6 +40,8 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 ### Các cập nhật chính:
 - Luồng cân 4 lượt cho 2 cặp lõi - thành phẩm (cân 2 lõi trước, thành phẩm cân sau).
 - Hỗ trợ nút lưu riêng từng cặp (Lưu riêng cặp 1, Lưu riêng cặp 2).
+- Có thể lưu thành phẩm khi chưa cân lõi; lượt cân lõi còn thiếu được hiển thị rõ.
+- Danh sách hiện bản ghi local ngay sau khi lưu, kể cả lúc đồng bộ cloud chậm.
 - Bỏ cảnh báo và chặn lưu khi cân lõi quá 1.2 kg.
 - Ô chọn Máy dạng danh sách gợi ý 5 máy xưởng và cho gõ tay tự do.
 - Dữ liệu cũ và config.env được giữ nguyên khi cài đè.
