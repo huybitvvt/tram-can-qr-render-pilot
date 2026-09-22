@@ -45,14 +45,19 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 - Dữ liệu cũ và config.env được giữ nguyên khi cài đè.
 
 ### Tải nhanh:
-- File cài đặt chuẩn: [TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
+- File cài đặt chuẩn (.exe): [TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
+- File cập nhật 1-click cho máy trạm: [CAP-NHAT-BAN-MOI.cmd](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 "@
 
 $handoffDir = Join-Path $projectRoot "dist\handoff-$version"
 $shaFile = Join-Path $handoffDir "SHA256SUMS.txt"
+$updateScript = Join-Path $projectRoot "packaging\CAP-NHAT-BAN-MOI.cmd"
 $assets = @($versionedInstaller, $genericInstaller)
 if (Test-Path -LiteralPath $shaFile) {
     $assets += $shaFile
+}
+if (Test-Path -LiteralPath $updateScript) {
+    $assets += $updateScript
 }
 
 $releaseExists = $false

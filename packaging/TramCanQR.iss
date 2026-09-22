@@ -23,10 +23,12 @@ Source: "..\packaging\customer-config.env.example"; DestDir: "{app}"; Flags: ign
 Source: "..\packaging\gemini-pilot-config.env.example"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\packaging\HUONG-DAN-KHACH-HANG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\GEMINI-COST.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\packaging\CAP-NHAT-BAN-MOI.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{autodesktop}\Cập nhật Trạm Cân QR"; Filename: "{app}\CAP-NHAT-BAN-MOI.cmd"; Tasks: desktopicon
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon
 
 [Tasks]

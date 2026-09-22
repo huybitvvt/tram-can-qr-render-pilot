@@ -1,11 +1,14 @@
 # Hệ thống offline ghép QR với số cân
 
 [![Tải bản mới nhất (Windows Setup)](https://img.shields.io/badge/⬇_Tải_bản_mới_nhất-Windows_Setup_(.exe)-2ea44f?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
+[![Tải File Cập Nhật Cho Máy Trạm](https://img.shields.io/badge/⚡_Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge&logo=windows-terminal)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 [![GitHub Release](https://img.shields.io/github/v/release/huybitvvt/tram-can-qr-render-pilot?style=for-the-badge&label=Phiên_bản)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest)
 
-> 🚀 **Link tải trực tiếp bản cài đặt mới nhất (không đổi theo phiên bản):**  
-> 👉 [https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)  
-> *(Trên máy trạm: chỉ cần tải về và chạy cài đè trực tiếp, dữ liệu và config.env cũ được giữ nguyên).*
+> 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
+> 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
+>    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
+> 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
+>    *Tải về để ở Desktop máy trạm. Bất cứ khi nào GitHub có bản mới, chỉ cần ấn đúp chuột là máy tự tải bản mới nhất về cài đè, không mất cấu hình và dữ liệu.*
 
 Một gateway có thể vận hành 1–3 trạm camera logic trong cùng giao diện web. Mỗi trạm giữ preview, ảnh đang kiểm tra và danh tính riêng; tác vụ QR/OCR của các trạm đi qua một hàng đợi FIFO dùng chung để các thư viện nhận dạng không chạy chồng nhau. `Space` chụp cân lõi; sau đó `P` chụp cân sản phẩm và đọc mã SP trong cùng ảnh thứ hai. `Enter` commit mã SP + hai số cân + hai ảnh vào cùng một event SQLite/outbox.
 
