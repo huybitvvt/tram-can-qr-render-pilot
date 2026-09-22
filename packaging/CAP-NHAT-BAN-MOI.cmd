@@ -17,14 +17,22 @@ echo [2/3] Đang tải bản cài mới nhất từ GitHub...
 set "SETUP_URL=https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe"
 set "TEMP_SETUP=%TEMP%\TramCanQR-Setup.exe"
 
-if exist "%TEMP_SETUP%" del /f /q "%TEMP_SETUP%" >nul 2>&1
+where curl.exe >nul 2>&1
+if %errorlevel% equ 0 (
+    curl.exe -fSL --progress-bar -o "%TEMP_SETUP%" "%SETUP_URL%"
+)
 
-curl.exe -fSL --progress-bar -o "%TEMP_SETUP%" "%SETUP_URL%"
-if errorlevel 1 (
+if not exist "%TEMP_SETUP%" (
+    echo Đang dùng PowerShell tải dữ liệu...
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $wc = New-Object Net.WebClient; $wc.DownloadFile('%SETUP_URL%', '%TEMP_SETUP%')" >nul 2>&1
+)
+
+if not exist "%TEMP_SETUP%" (
     echo.
     echo [LỖI] Không tải được bản mới từ GitHub.
-    echo Vui lòng kiểm tra lại kết nối mạng Internet hoặc truy cập link sau:
+    echo Vui lòng kiểm tra lại kết nối mạng Internet hoặc mở link sau trên trình duyệt:
     echo %SETUP_URL%
+    echo.
     pause
     exit /b 1
 )
