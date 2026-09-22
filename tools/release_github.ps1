@@ -55,8 +55,21 @@ if (Test-Path -LiteralPath $shaFile) {
     $assets += $shaFile
 }
 
-$null = & gh release view $tag 2>$null
-if ($LASTEXITCODE -eq 0) {
+$releaseExists = $false
+$prevPref = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "SilentlyContinue"
+    $null = & gh release view $tag --json tagName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $releaseExists = $true
+    }
+} catch {
+    $releaseExists = $false
+} finally {
+    $ErrorActionPreference = $prevPref
+}
+
+if ($releaseExists) {
     Write-Host ">>> Release $tag da ton tai, dang cap nhat file dinh kem..." -ForegroundColor Yellow
     & gh release upload $tag $assets --clobber
 } else {
