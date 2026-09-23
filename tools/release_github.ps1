@@ -44,6 +44,7 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 - Danh sách hiện bản ghi local ngay sau khi lưu, kể cả lúc đồng bộ cloud chậm.
 - Bỏ cảnh báo và chặn lưu khi cân lõi quá 1.2 kg.
 - Ô chọn Máy dạng danh sách gợi ý 5 máy xưởng và cho gõ tay tự do.
+- Khi bấm Bỏ ảnh/lượt lỗi, cặp tự chuyển về Không lỗi và xóa lý do lỗi cũ.
 - Dữ liệu cũ và config.env được giữ nguyên khi cài đè.
 
 ### Tải nhanh:

@@ -14,11 +14,11 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'Viet Nhat IPT'),
         StringStruct('FileDescription', 'Tram Can QR - Viet Nhat IPT'),
-        StringStruct('FileVersion', '0.2.0-rc12'),
+        StringStruct('FileVersion', '0.2.0-rc13'),
         StringStruct('InternalName', 'TramCanQR'),
         StringStruct('OriginalFilename', 'TramCanQR.exe'),
         StringStruct('ProductName', 'Tram Can QR'),
-        StringStruct('ProductVersion', '0.2.0-rc12'),
+        StringStruct('ProductVersion', '0.2.0-rc13'),
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])

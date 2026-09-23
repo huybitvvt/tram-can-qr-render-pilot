@@ -82,14 +82,16 @@ test('discarding a failed image preserves the other image and selects the discar
   api:async(path)=>{requests.push(path)},selectCaptureSlot(){},confirm:()=>true});
  for(const name of ['roundHasData','slotHasData','discardSlot'])vm.runInContext(script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'(')),ctx);
  session.setState=(state)=>{session.state=state};session.eventId='current';
- round.weight='';round.coreAnalysis=null;round.corePhotoCaptureId='failed-core';
+ round.weight='';round.coreAnalysis=null;round.corePhotoCaptureId='failed-core';round.errorStatus='error';round.errorReason='Cân lõi lỗi';
  await ctx.discardSlot('core',0);
  assert.equal(round.coreImage,'');assert.equal(round.corePhotoCaptureId,'');
  assert.equal(round.productImage,'product');assert.equal(round.productWeight,'12.96');
+ assert.equal(round.errorStatus,'ok');assert.equal(round.errorReason,'');
  assert.equal(session.selectedSlot.kind,'core');assert.equal(session.selectedSlot.round,0);
  assert.equal(session.eventId,null);assert.equal(session._discardLock,false);
  assert.deepEqual(requests,['/api/session/discard']);
- round.productPhotoCaptureId='failed-product';await ctx.discardSlot('product',0);
+ round.errorStatus='error';round.errorReason='Cân sản phẩm lỗi';round.productPhotoCaptureId='failed-product';await ctx.discardSlot('product',0);
  assert.equal(round.productImage,'');assert.equal(round.productPhotoCaptureId,'');
+ assert.equal(round.errorStatus,'ok');assert.equal(round.errorReason,'');
  assert.equal(session.selectedSlot.kind,'product');
 });
