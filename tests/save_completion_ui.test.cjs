@@ -38,6 +38,20 @@ test('captured images and QR enable save when AI cannot read either weight',()=>
  assert.equal(nodes.saveBtn.disabled,false);
  assert.equal(messages.at(-1).tone,'ok');
 });
+test('four captured images and defect reasons enable saving both unreadable rounds',()=>{
+ const {ctx,session,nodes,messages}=setup();
+ session.roundCount=2;
+ session.rounds.push({...session.rounds[0],eventId:'second',coreImage:'core-2',productImage:'product-2',qr:'MT-TCN0013_SECOND'});
+ for(const round of session.rounds){
+  round.weight='';round.productWeight='';round.coreAnalysis=null;round.productAnalysis=null;
+  round.errorStatus='error';round.errorReason='AI không đọc được số cân';
+ }
+ assert.equal(session.rounds.filter(round=>round.coreImage&&round.productImage).length,2);
+ ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,false);
+ assert.deepEqual(Array.from(ctx.savableRoundIndexes(session)),[0,1]);
+ assert.equal(messages.at(-1).tone,'ok');
+});
 test('a completed measurement still blocks duplicate QR and explains why',()=>{
  const {ctx,session,nodes,messages}=setup();
  ctx.rebuildProductionQrIndex([{event_id:'saved',qr_code:session.rounds[0].qr}]);ctx.refreshCompletionState(session);

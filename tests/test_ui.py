@@ -163,6 +163,57 @@ def test_ui_capture_accepts_event_id_alone_and_retries_idempotently(tmp_path) ->
     assert saved is not None and saved.product_weight == pytest.approx(13.04)
 
 
+def test_ui_capture_saves_two_error_rounds_with_four_images_and_unreadable_weights(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    frame = np.zeros((600, 800, 3), dtype=np.uint8)
+    event_ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    try:
+        for index, event_id in enumerate(event_ids, start=1):
+            result = service.capture(
+                f"ROLL-ERROR-{index}",
+                0.0,
+                "kg",
+                frame,
+                weight_raw=(
+                    "CORE_MISSING=1; PRODUCT_WEIGHT=unread; "
+                    "ERROR_STATUS=error; ERROR_REASON=AI không đọc được số cân"
+                ),
+                event_id=event_id,
+                product_frame=frame,
+            )
+            assert result["event_id"] == event_id
+            saved = store.get(event_id)
+            assert saved is not None
+            assert Path(saved.image_path).is_file()
+            assert Path(saved.product_image_path).is_file()
+            assert "PHOTO_QUALITY_OVERRIDE=1" in saved.weight_raw
+            assert "ERROR_STATUS=error" in saved.weight_raw
+            assert "ERROR_REASON=AI không đọc được số cân" in saved.weight_raw
+        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 2
+    finally:
+        service.close()
+        store.close()
+
+
+def test_ui_capture_rejects_unreadable_photo_without_documented_error(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    frame = np.zeros((600, 800, 3), dtype=np.uint8)
+    try:
+        with pytest.raises(ValueError, match="Ảnh chưa đạt chất lượng"):
+            service.capture("ROLL-ERROR", 0.0, "kg", frame, product_frame=frame)
+        with pytest.raises(ValueError, match="Ảnh chưa đạt chất lượng"):
+            service.capture(
+                "ROLL-ERROR", 0.0, "kg", frame,
+                weight_raw="ERROR_STATUS=error", product_frame=frame,
+            )
+        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 0
+    finally:
+        service.close()
+        store.close()
+
+
 def test_frontend_saves_only_complete_unsaved_rounds_in_separate_requests() -> None:
     assert "Lưu phần đã đủ" in TEST_UI_HTML
     assert "function savableRoundIndexes(session)" in TEST_UI_HTML

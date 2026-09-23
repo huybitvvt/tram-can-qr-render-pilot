@@ -57,6 +57,7 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 - File cài đặt chuẩn (.exe): [TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
 - File cập nhật 1-click cho máy trạm: [CAP-NHAT-BAN-MOI.cmd](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 "@
+$releaseNotesFile = Join-Path $projectRoot "docs\release-notes-$version.md"
 
 $handoffDir = Join-Path $projectRoot "dist\handoff-$version"
 $shaFile = Join-Path $handoffDir "SHA256SUMS.txt"
@@ -93,7 +94,11 @@ if ($releaseExists) {
     & gh release upload $tag $assets --clobber
 } else {
     Write-Host ">>> Dang tao moi Release $tag..." -ForegroundColor Green
-    & gh release create $tag $assets --title "Bản phát hành $tag" --notes $releaseNotes --latest
+    if (Test-Path -LiteralPath $releaseNotesFile) {
+        & gh release create $tag $assets --title "Bản phát hành $tag" --notes-file $releaseNotesFile --latest
+    } else {
+        & gh release create $tag $assets --title "Bản phát hành $tag" --notes $releaseNotes --latest
+    }
 }
 
 if ($LASTEXITCODE -eq 0) {

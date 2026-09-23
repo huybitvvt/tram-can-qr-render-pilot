@@ -3658,10 +3658,19 @@ class StationUIService:
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
         if not quality_pass:
-            raise ValueError(
-                "Ảnh chưa đạt chất lượng: "
-                + "; ".join(str(issue) for issue in quality_payload["issues"])
+            documented_error = (
+                product_frame is not None
+                and _raw_tag(weight_raw, "ERROR_STATUS").lower() == "error"
+                and bool(_raw_tag(weight_raw, "ERROR_REASON").strip())
             )
+            if not documented_error:
+                raise ValueError(
+                    "Ảnh chưa đạt chất lượng: "
+                    + "; ".join(str(issue) for issue in quality_payload["issues"])
+                )
+            # Keep the operator's four photos even if AI cannot read the scale.
+            # Record that the normal image-quality gate was bypassed for audit.
+            weight_raw = "PHOTO_QUALITY_OVERRIDE=1; " + weight_raw
 
         # ``event_id`` is also the idempotency key used by unbound, per-round
         # saves.  It must be accepted on its own so a browser retry cannot
