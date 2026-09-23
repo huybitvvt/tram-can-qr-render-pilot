@@ -2067,7 +2067,7 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert 'id="sourceMachine" list="sourceMachineList"' in TEST_UI_HTML
     assert "MÁY CÁCH NHIỆT 11" in TEST_UI_HTML
     assert "MÁY BAO BÌ 16" in TEST_UI_HTML
-    assert "Lưu riêng cặp " in TEST_UI_HTML
+    assert "Lưu riêng cặp " not in TEST_UI_HTML
     assert "function qrDuplicateMessage" in TEST_UI_HTML
     assert "function rejectDuplicateQr" in TEST_UI_HTML
     assert "function verifyQrAgainstServer" in TEST_UI_HTML
@@ -2665,7 +2665,8 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert 'id="weight2"' in TEST_UI_HTML
     assert 'id="productWeight2"' in TEST_UI_HTML
     assert "DEFAULT_WEIGH_ROUNDS=2" in TEST_UI_HTML
-    assert "MAX_WEIGH_ROUNDS=3" in TEST_UI_HTML
+    assert "4 lần · 8 cân" in TEST_UI_HTML
+    assert "MAX_WEIGH_ROUNDS=4" in TEST_UI_HTML
     assert "function nextCaptureStep(" in TEST_UI_HTML
     assert "function extraRoundTags(" in TEST_UI_HTML
     assert "function discardSlot(" in TEST_UI_HTML

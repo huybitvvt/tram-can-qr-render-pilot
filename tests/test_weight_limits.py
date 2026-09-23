@@ -111,7 +111,7 @@ def test_two_cores_are_captured_before_products() -> None:
         "roundCoreReady", "roundProductReady", "nextCoreRound", "nextProductRound",
         "nextCaptureStep",
     ]
-    script = "const assert=require('node:assert/strict');function emptyWeighRound(){return {}};function $(x){return null};const MAX_WEIGH_ROUNDS=3,DEFAULT_WEIGH_ROUNDS=2;"
+    script = "const assert=require('node:assert/strict');function emptyWeighRound(){return {}};function $(x){return null};const MAX_WEIGH_ROUNDS=4,DEFAULT_WEIGH_ROUNDS=2;"
     script += "\n".join(
         next(line for line in html.splitlines() if line.startswith("function " + name + "("))
         for name in names

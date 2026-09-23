@@ -131,7 +131,7 @@ bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`
 - Chọn **2 lần · 4 cân**. Bấm ô cần chụp hoặc dùng `Space` để lần lượt cân lõi
   cặp 1, lõi cặp 2, thành phẩm cặp 1, thành phẩm cặp 2. Có thể bấm trực tiếp
   ô thành phẩm của cặp đã có lõi khi thành phẩm ra sớm.
-- Mỗi cặp có nút **Lưu riêng cặp**. Khi cặp 1 đã có ảnh thành phẩm, số cân
+- Khi cặp 1 đã có ảnh thành phẩm, số cân
   thành phẩm và mã QR, có thể lưu ngay; lõi cặp 2 vẫn chờ thành phẩm và không
   bị xóa. Nếu chưa cân lõi, vẫn lưu được thành phẩm; danh sách hiện ô lõi trống.
 - `Backspace`: bỏ ngay lần đang xem, không hỏi xác nhận. Khi đang đặt con trỏ
