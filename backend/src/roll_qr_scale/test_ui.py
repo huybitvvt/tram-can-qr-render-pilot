@@ -516,12 +516,12 @@ def _fetch_ingest_measurements_paged(
 ) -> tuple[list[dict[str, object]], int | None]:
     """Pull cloud rows in pages until the requested window is filled."""
 
-    wanted = max(1, min(int(limit), 2000))
-    page_size = min(200, wanted)
+    wanted = max(1, min(int(limit), 50000))
     items: list[dict[str, object]] = []
     next_offset = max(0, int(offset))
     total_count: int | None = None
-    for _ in range(25):
+    while len(items) < wanted:
+        page_size = min(200, wanted - len(items))
         batch, batch_total = fetch_remote_measurement_page(
             api_url,
             api_token,
@@ -544,6 +544,35 @@ def _fetch_ingest_measurements_paged(
             break
         next_offset += len(batch)
     return items[:wanted], total_count
+
+
+def _fetch_supabase_table_paged(
+    supabase_url: str,
+    publishable_key: str,
+    *,
+    limit: int,
+    offset: int = 0,
+    **filters: str,
+) -> list[dict[str, object]]:
+    """Read a table window larger than the 200-row per-request limit."""
+
+    wanted = max(1, min(int(limit), 50000))
+    items: list[dict[str, object]] = []
+    while len(items) < wanted:
+        page_size = min(200, wanted - len(items))
+        batch = fetch_supabase_table(
+            supabase_url,
+            publishable_key,
+            limit=page_size,
+            offset=offset + len(items),
+            **filters,
+        )
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < page_size:
+            break
+    return items[:wanted]
 
 
 def _looks_like_measurement_items(items: list[dict[str, object]]) -> bool:
@@ -1023,9 +1052,27 @@ def _local_measurement_items(
     machine: str = "",
     production_order: str = "",
     qr_code: str = "",
+    unsynced_only: bool = False,
 ) -> list[dict[str, object]]:
     items: list[dict[str, object]] = []
-    for item in store.recent(max(limit, 200)):
+    filters = {
+        "work_date": work_date,
+        "date_from": date_from,
+        "date_to": date_to,
+        "shift": shift,
+        "machine": machine,
+        "production_order": production_order,
+        "qr_code": qr_code,
+    }
+    # Apply filters to the full index first; recent(limit) hides older matches.
+    for source_row in store.measurement_source_rows():
+        if unsynced_only and str(source_row.get("sync_status") or "") == "synced":
+            continue
+        if not _matches_source_filters(source_row, **filters):
+            continue
+        item = store.get(str(source_row["event_id"]))
+        if item is None:
+            continue
         product_weight = item.product_weight
         if product_weight is None:
             match = re.search(
@@ -1089,17 +1136,7 @@ def _local_measurement_items(
             "has_core_image": bool(core_url),
             "has_product_image": bool(product_url),
         }
-        if _matches_source_filters(
-            payload,
-            work_date=work_date,
-            date_from=date_from,
-            date_to=date_to,
-            shift=shift,
-            machine=machine,
-            production_order=production_order,
-            qr_code=qr_code,
-        ):
-            items.append(payload)
+        items.append(payload)
         if len(items) >= limit:
             break
     return items
@@ -4923,6 +4960,77 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         count_error = "; ".join(
                             value for value in (count_error, str(exc)) if value
                         )
+                local_measurement_ids = _local_measurement_event_ids(
+                    store, **list_filters
+                )
+                local_unsynced_measurement_ids = _local_measurement_event_ids(
+                    store, **list_filters, unsynced_only=True
+                )
+                local_unsynced_error_ids = (
+                    _local_error_parent_ids(
+                        store, **list_filters, unsynced_only=True
+                    )
+                    - local_measurement_ids
+                )
+                error_parent_ids = (
+                    remote_error_parent_ids | local_unsynced_error_ids
+                    if remote_error_parent_ids is not None
+                    else _local_error_parent_ids(store, **list_filters)
+                    - local_measurement_ids
+                )
+                error_count = len(error_parent_ids)
+                error_items = [
+                    item
+                    for item in _photo_draft_display_items(
+                        (remote_error_rows or []) + store.photo_draft_source_rows(),
+                        **list_filters,
+                    )
+                    if str(item.get("event_id") or "").strip()
+                    not in local_measurement_ids
+                ]
+                local_unsynced_items = (
+                    _local_measurement_items(
+                        store,
+                        len(local_unsynced_measurement_ids),
+                        unsynced_only=True,
+                        **list_filters,
+                    )
+                    if local_unsynced_measurement_ids
+                    else []
+                )
+                # A page of cloud rows must be merged with local-only rows
+                # before slicing. Reusing the newest local rows on every page
+                # makes pages 2+ repeat page 1.
+                extra_count = len(local_unsynced_items) + len(error_items)
+                remote_window_start = max(0, offset - extra_count)
+                window_limit = offset + limit - remote_window_start
+                if remote_window_start != offset or window_limit != limit:
+                    try:
+                        if remote_source == "can_tu_dong":
+                            remote_items = _fetch_supabase_table_paged(
+                                supabase_url,
+                                publishable_key,
+                                limit=window_limit,
+                                offset=remote_window_start,
+                                **list_filters,
+                            )
+                        else:
+                            remote_items, remote_total_count = (
+                                _fetch_ingest_measurements_paged(
+                                    ingest_url,
+                                    ingest_token,
+                                    limit=window_limit,
+                                    offset=remote_window_start,
+                                    **list_filters,
+                                )
+                            )
+                    except Exception as exc:
+                        count_error = "; ".join(
+                            value for value in (count_error, str(exc)) if value
+                        )
+                        remote_window_start = offset
+                        local_unsynced_items = []
+                        error_items = []
                 items = []
                 for item in remote_items:
                     core_url = item.get("core_image_url") or item.get("image_url")
@@ -5007,53 +5115,39 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         **list_filters,
                     ):
                         items.append(payload)
-                filters = list_filters
-                local_measurement_ids = _local_measurement_event_ids(store, **filters)
-                local_unsynced_measurement_ids = _local_measurement_event_ids(
-                    store,
-                    **filters,
-                    unsynced_only=True,
-                )
-                local_unsynced_error_ids = (
-                    _local_error_parent_ids(store, **filters, unsynced_only=True)
-                    - local_measurement_ids
-                )
-                error_parent_ids = (
-                    remote_error_parent_ids | local_unsynced_error_ids
-                    if remote_error_parent_ids is not None
-                    else _local_error_parent_ids(store, **filters) - local_measurement_ids
-                )
-                error_count = len(error_parent_ids)
-                local_error_rows = store.photo_draft_source_rows()
-                error_items = _photo_draft_display_items(
-                    (remote_error_rows or []) + local_error_rows,
-                    **filters,
-                )
-                local_measurements = _local_measurement_items(
-                    store,
-                    max(limit, 200),
-                    **filters,
-                )
-                local_by_id = {
-                    str(item.get("event_id") or "").strip(): item
-                    for item in local_measurements
-                    if str(item.get("event_id") or "").strip()
-                }
                 for item in items:
                     eid = str(item.get("event_id") or "").strip()
-                    if eid in local_by_id:
-                        loc = local_by_id[eid]
-                        if not item.get("core_image_url") and loc.get("core_image_url"):
-                            item["core_image_url"] = loc["core_image_url"]
-                            item["has_core_image"] = True
-                        if not item.get("product_image_url") and loc.get("product_image_url"):
-                            item["product_image_url"] = loc["product_image_url"]
-                            item["has_product_image"] = True
+                    loc = store.get(eid) if eid else None
+                    if loc is None:
+                        continue
+                    if (
+                        not item.get("core_image_url")
+                        and item.get("core_weight") is not None
+                        and loc.image_path
+                        and Path(loc.image_path).is_file()
+                    ):
+                        item["core_image_url"] = (
+                            "/api/measurement-image?event_id="
+                            + urllib.parse.quote(eid)
+                            + "&kind=core"
+                        )
+                        item["has_core_image"] = True
+                    if (
+                        not item.get("product_image_url")
+                        and loc.product_image_path
+                        and Path(loc.product_image_path).is_file()
+                    ):
+                        item["product_image_url"] = (
+                            "/api/measurement-image?event_id="
+                            + urllib.parse.quote(eid)
+                            + "&kind=product"
+                        )
+                        item["has_product_image"] = True
 
                 measurement_item_ids = {
                     str(item.get("event_id") or "").strip() for item in items
                 }
-                for local_item in local_measurements:
+                for local_item in local_unsynced_items:
                     event_id = str(local_item.get("event_id") or "").strip()
                     if event_id and event_id not in measurement_item_ids:
                         items.append(local_item)
@@ -5069,7 +5163,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     key=lambda item: str(item.get("captured_at") or ""),
                     reverse=True,
                 )
-                items = items[:limit]
+                page_start = offset - remote_window_start
+                items = items[page_start : page_start + limit]
                 if remote_total_count is not None:
                     synced_measurement_count = remote_total_count
                     measurement_count = remote_total_count + len(

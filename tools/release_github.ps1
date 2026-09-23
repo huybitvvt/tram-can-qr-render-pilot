@@ -42,6 +42,7 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 - Hỗ trợ nút lưu riêng từng cặp (Lưu riêng cặp 1, Lưu riêng cặp 2).
 - Có thể lưu thành phẩm khi chưa cân lõi; lượt cân lõi còn thiếu được hiển thị rõ.
 - Danh sách hiện bản ghi local ngay sau khi lưu, kể cả lúc đồng bộ cloud chậm.
+- Sửa phân trang Danh sách: mỗi trang lấy đúng bản ghi cloud tương ứng, không lặp lại các bản ghi local đã đồng bộ; phiếu chưa đồng bộ vẫn xuất hiện đúng vị trí.
 - Bỏ cảnh báo và chặn lưu khi cân lõi quá 1.2 kg.
 - Ô chọn Máy dạng danh sách gợi ý 5 máy xưởng và cho gõ tay tự do.
 - Luôn có lựa chọn Ca chuẩn Đà Nẵng; ô Máy gõ tay không còn bị machine_id khóa hoặc ghi đè.

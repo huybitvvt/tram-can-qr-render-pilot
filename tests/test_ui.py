@@ -1907,6 +1907,63 @@ def test_local_measurement_count_uses_all_source_filters_without_display_limit()
     assert test_ui_module._local_production_counts(FakeStore(), **filters) == (209, 1)
 
 
+def test_local_measurement_items_find_older_filtered_rows_after_200_newer_rows(
+    tmp_path,
+) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    with store._lock:
+        for index in range(210):
+            old = index < 10
+            store.connection.execute(
+                """INSERT INTO measurements
+                   (event_id, qr_code, weight, unit, captured_at, image_path,
+                    weight_source, weight_raw, sync_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    f"event-{index}",
+                    f"{'OLD' if old else 'NEW'}-{index}",
+                    1.0,
+                    "kg",
+                    "2026-08-01T12:00:00+00:00"
+                    if old
+                    else "2026-09-23T12:00:00+00:00",
+                    "",
+                    "manual",
+                    "SOURCE_DATE=2026-08-01"
+                    if old
+                    else "SOURCE_DATE=2026-09-23",
+                    "synced",
+                ),
+            )
+        store.connection.commit()
+    try:
+        items = test_ui_module._local_measurement_items(
+            store, 50, work_date="2026-08-01", qr_code="OLD"
+        )
+        assert len(items) == 10
+        assert all(str(item["qr_code"]).startswith("OLD-") for item in items)
+        assert len(test_ui_module._local_measurement_event_ids(store, qr_code="OLD")) == 10
+    finally:
+        store.close()
+
+
+def test_supabase_table_window_fetches_more_than_one_remote_page(monkeypatch) -> None:
+    offsets = []
+
+    def fake_table(url, key, *, limit, offset, **filters):
+        offsets.append((offset, limit))
+        return [{"event_id": f"remote-{index}"} for index in range(offset, offset + limit)]
+
+    monkeypatch.setattr(test_ui_module, "fetch_supabase_table", fake_table)
+    items = test_ui_module._fetch_supabase_table_paged(
+        "https://example.invalid", "public-key", limit=230, offset=150
+    )
+    assert offsets == [(150, 200), (350, 30)]
+    assert [item["event_id"] for item in items] == [
+        f"remote-{index}" for index in range(150, 380)
+    ]
+
+
 def test_local_production_items_show_unread_photos_as_one_visible_row(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     parent_id = "31c3db88-2c7d-4a35-b5f0-3a83e9a6745a"
@@ -3144,6 +3201,127 @@ def test_service_rejects_duplicate_logical_camera_ids(tmp_path) -> None:
             camera_ids=["camera-same", "camera-same"],
         )
     store.close()
+
+
+def test_measurement_pages_do_not_repeat_synced_local_rows(tmp_path, monkeypatch) -> None:
+    import json
+    import urllib.request
+
+    server, service = test_ui_module.create_server(
+        test_ui_module.build_parser().parse_args(
+            [
+                "--db",
+                str(tmp_path / "measurements.db"),
+                "--captures",
+                str(tmp_path / "captures"),
+                "--yolo-model",
+                "",
+                "--port",
+                "0",
+            ]
+        )
+    )
+    remote = [
+        {
+            "event_id": f"remote-{index}",
+            "qr_code": f"ROLL-{index:03d}",
+            "weight": 1.0,
+            "product_weight": 12.0,
+            "unit": "kg",
+            "captured_at": f"2026-09-23T{23 - index // 60:02d}:{59 - index % 60:02d}:00+00:00",
+        }
+        for index in range(150)
+    ]
+    with service.store._lock:
+        for item in remote[:3]:
+            service.store.connection.execute(
+                """INSERT INTO measurements
+                   (event_id, qr_code, weight, unit, captured_at, image_path,
+                    weight_source, sync_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    item["event_id"],
+                    item["qr_code"],
+                    1.0,
+                    "kg",
+                    item["captured_at"],
+                    "",
+                    "manual",
+                    "synced",
+                ),
+            )
+        service.store.connection.commit()
+
+    calls = []
+
+    def fake_page(url, token, *, limit, offset, **filters):
+        calls.append((offset, limit))
+        return remote[offset : offset + limit], len(remote)
+
+    monkeypatch.setattr(test_ui_module, "_supabase_project_url", lambda: "")
+    monkeypatch.setattr(test_ui_module, "_supabase_read_key", lambda: "")
+    monkeypatch.setattr(test_ui_module, "_ingest_api_url", lambda: "https://example.invalid/ingest")
+    monkeypatch.setattr(test_ui_module, "_ingest_api_token", lambda: "device-token")
+    monkeypatch.setattr(test_ui_module, "fetch_remote_measurement_page", fake_page)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+
+    def page(offset):
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/api/measurements?limit=50&offset={offset}"
+        ) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    try:
+        first = page(0)
+        second = page(50)
+        third = page(100)
+        assert [item["event_id"] for item in first["items"]] == [
+            f"remote-{index}" for index in range(50)
+        ]
+        assert [item["event_id"] for item in second["items"]] == [
+            f"remote-{index}" for index in range(50, 100)
+        ]
+        assert [item["event_id"] for item in third["items"]] == [
+            f"remote-{index}" for index in range(100, 150)
+        ]
+        assert calls == [(0, 50), (50, 50), (100, 50)]
+
+        with service.store._lock:
+            for index in range(3):
+                service.store.connection.execute(
+                    """INSERT INTO measurements
+                       (event_id, qr_code, weight, unit, captured_at, image_path,
+                        weight_source, sync_status)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        f"pending-{index}",
+                        f"PENDING-{index}",
+                        1.0,
+                        "kg",
+                        f"2026-09-23T23:59:{59 - index:02d}+00:00",
+                        "",
+                        "manual",
+                        "pending",
+                    ),
+                )
+            service.store.connection.commit()
+        first = page(0)
+        second = page(50)
+        assert [item["event_id"] for item in first["items"][:3]] == [
+            "pending-0", "pending-1", "pending-2"
+        ]
+        assert [item["event_id"] for item in second["items"]] == [
+            f"remote-{index}" for index in range(47, 97)
+        ]
+        assert len({item["event_id"] for item in first["items"] + second["items"]}) == 100
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+        service.close()
+        service.store.close()
 
 
 def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path) -> None:

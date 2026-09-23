@@ -922,7 +922,7 @@ class MeasurementStore:
 
         with self._lock:
             rows = self.connection.execute(
-                "SELECT event_id, captured_at, weight_raw, sync_status "
+                "SELECT event_id, qr_code, captured_at, weight_raw, sync_status "
                 "FROM measurements ORDER BY id DESC"
             ).fetchall()
         return [dict(row) for row in rows]
