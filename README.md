@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc14`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc14/TramCanQR-Setup-0.2.0-rc14.exe).
+>    Bản `0.2.0-rc15`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc15/TramCanQR-Setup-0.2.0-rc15.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Bất cứ khi nào GitHub có bản mới, chỉ cần ấn đúp chuột là máy tự tải bản mới nhất về cài đè, không mất cấu hình và dữ liệu.*
 
@@ -20,7 +20,7 @@ Mã nguồn được tách theo ranh giới triển khai:
 - `backend/supabase/`: migration và Edge Functions.
 - `tests/`: kiểm thử tích hợp cho cả hai phần.
 
-Cloudinary + Supabase là lớp đồng bộ tùy chọn. Khi không cấu hình API, ứng dụng không gửi ảnh/dữ liệu lên Supabase. Nếu có cấu hình, hệ thống vẫn commit SQLite trước rồi mới đồng bộ; mất mạng không làm mất lần cân. Retry chỉ được coi là lặp an toàn khi danh tính, mã SP, số cân và hash của cả hai ảnh thuộc cùng `event_id` khớp chính xác. Ở chế độ Gemini primary, mỗi lần nhấn `Space` gửi đúng ảnh cân lõi lên Google để đọc số; ảnh thứ hai được QR decoder đọc và giữ làm bằng chứng mã SP.
+Cloudinary + Supabase là lớp đồng bộ tùy chọn. Khi không cấu hình API, ứng dụng không gửi ảnh/dữ liệu lên Supabase. Nếu có cấu hình, nút Lưu trả kết quả sau khi commit SQLite và ảnh local; outbox gửi cloud ở nền và tự gửi tiếp sau lỗi mạng hoặc khi khởi động lại. Retry chỉ được coi là lặp an toàn khi danh tính, mã SP, số cân và hash của cả hai ảnh thuộc cùng `event_id` khớp chính xác. Ở chế độ Gemini primary, mỗi lần nhấn `Space` gửi đúng ảnh cân lõi lên Google để đọc số; ảnh thứ hai được QR decoder đọc và giữ làm bằng chứng mã SP.
 
 ## Kiến trúc đã triển khai
 
@@ -86,7 +86,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc14.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc15.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 

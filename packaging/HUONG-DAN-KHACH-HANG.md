@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc14` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc15` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc14.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc15.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -140,9 +140,11 @@ bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`
 - Kiểm tra các số cân và ảnh đã chụp cùng mã SP trước khi lưu.
 - `Enter`: lưu các cặp đã đủ dữ liệu, mỗi cặp là một event riêng. Số cân vượt
   ngưỡng cũ không tạo cảnh báo chặn lưu; vẫn kiểm tra ảnh và số cân trước khi lưu.
-- Sau khi lưu, kiểm tra ngay dòng mới trong danh sách bên dưới. Danh sách lấy
-  bản ghi trên máy trước, kể cả lúc đồng bộ cloud còn chậm.
-- Không rút camera hoặc tắt máy khi còn bản ghi chưa đồng bộ.
+- Sau khi lưu, kiểm tra ngay dòng mới trong danh sách bên dưới. Trạng thái
+  **Đang chờ** nghĩa là phiếu và ảnh đã lưu trên máy, đang gửi cloud ở nền.
+  Bấm **Làm mới danh sách** để xem khi trạng thái chuyển thành **Đã đồng bộ**.
+  Nếu mạng lỗi, ứng dụng tự thử lại; khi mở lại ứng dụng, bản ghi còn chờ vẫn
+  được gửi tiếp. Giữ máy chạy và có mạng đến khi các dòng cần gửi đã đồng bộ.
 
 Dữ liệu local, ảnh, SQLite và log nằm tại:
 

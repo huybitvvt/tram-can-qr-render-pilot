@@ -8,6 +8,7 @@ from roll_qr_scale.api_client import (
     fetch_supabase_table,
     fetch_supabase_table_count,
     IngestResponseError,
+    post_measurement,
     post_remote_action,
     validate_ingest_response,
 )
@@ -332,3 +333,52 @@ def test_ingest_ack_rejects_image_less_response_without_local_evidence() -> None
         assert "remote or local persistent evidence" in str(exc)
     else:  # pragma: no cover - assertion branch is the test failure.
         raise AssertionError("image-less ack must carry local_backup_committed=true")
+
+
+def test_effective_sync_timeout_defaults_and_env(monkeypatch) -> None:
+    from roll_qr_scale.api_client import _effective_sync_timeout, DEFAULT_SYNC_TIMEOUT
+
+    assert _effective_sync_timeout() == DEFAULT_SYNC_TIMEOUT == 35.0
+    assert _effective_sync_timeout(15.0) == 15.0
+    monkeypatch.setenv("ROLL_SCALE_SYNC_TIMEOUT", "45")
+    assert _effective_sync_timeout() == 45.0
+    monkeypatch.setenv("ROLL_SCALE_SYNC_TIMEOUT", "invalid")
+    assert _effective_sync_timeout() == 35.0
+
+
+def test_post_measurement_passes_effective_timeout(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"ok": true, "id": 1, "image_public_id": "img1"}'
+
+    def fake_urlopen(request, timeout):
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    img = tmp_path / "test.jpg"
+    img.write_bytes(b"\xff\xd8\xff\xd9")
+
+    # Default timeout
+    post_measurement("http://localhost/test", {"event_id": "e1"}, img, "token")
+    assert captured["timeout"] == 35.0
+
+    # Custom timeout via env
+    monkeypatch.setenv("ROLL_SCALE_SYNC_TIMEOUT", "50")
+    post_measurement("http://localhost/test", {"event_id": "e1"}, img, "token")
+    assert captured["timeout"] == 50.0
+
+    # Explicit argument overrides env
+    post_measurement("http://localhost/test", {"event_id": "e1"}, img, "token", timeout=20.0)
+    assert captured["timeout"] == 20.0

@@ -1,6 +1,7 @@
 import base64
 import json
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -240,6 +241,50 @@ def test_outbox_keeps_failed_event_for_retry(tmp_path) -> None:
     assert saved.retry_count == 1
     assert store.pending_count() == 1
     store.close()
+
+
+def test_background_worker_sends_pending_event_after_restart(tmp_path) -> None:
+    db = tmp_path / "measurements.db"
+    captures = tmp_path / "captures"
+    store = MeasurementStore(db, captures)
+    measurement = store.save(
+        "ROLL-RESTART-001",
+        1.25,
+        "kg",
+        np.zeros((40, 40, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+    )
+    store.close()
+
+    reopened = MeasurementStore(db, captures)
+    sent = threading.Event()
+
+    def fake_send(url, payload, image_path, token):
+        sent.set()
+        return {
+            "ok": True,
+            "event_id": payload["event_id"],
+            "id": 503,
+            "image_url": "https://images.example/restarted.jpg",
+            "image_public_id": "roll-captures/restarted",
+        }
+
+    worker = OutboxSyncWorker(reopened, "https://example.test", "token", send=fake_send)
+    worker.start()
+    try:
+        assert sent.wait(3)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            saved = reopened.get(measurement.event_id)
+            if saved is not None and saved.sync_status == "synced":
+                break
+            time.sleep(0.01)
+        assert saved is not None and saved.sync_status == "synced"
+        assert saved.remote_id == 503
+    finally:
+        worker.stop()
+        reopened.close()
 
 
 def test_background_worker_includes_failed_events_for_scheduled_retry(tmp_path) -> None:

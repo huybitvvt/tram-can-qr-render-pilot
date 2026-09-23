@@ -1,4 +1,6 @@
 import base64
+import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -159,18 +161,25 @@ def test_frontend_saves_only_complete_unsaved_rounds_in_separate_requests() -> N
     assert "if(!weightsReady(session)){status(captureStatus,'Cần đủ" not in TEST_UI_HTML
 
 
-def test_ui_save_waits_for_same_event_code_weight_and_image_cloud_ack(tmp_path) -> None:
+def test_ui_save_returns_before_background_upload_of_complete_event(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     sent: list[tuple[dict[str, object], bytes]] = []
+    send_started = threading.Event()
+    release_send = threading.Event()
 
     def fake_send(url, payload, image_path, token):
         sent.append((dict(payload), Path(image_path).read_bytes()))
+        send_started.set()
+        if not release_send.wait(5):
+            raise TimeoutError("test upload was not released")
         return {
             "ok": True,
             "event_id": payload["event_id"],
             "id": 501,
             "image_url": "https://images.example/evidence.jpg",
             "image_public_id": "roll-captures/event",
+            "product_image_url": "https://images.example/product.jpg",
+            "product_image_public_id": "roll-captures/product",
         }
 
     worker = OutboxSyncWorker(
@@ -181,27 +190,44 @@ def test_ui_save_waits_for_same_event_code_weight_and_image_cloud_ack(tmp_path) 
         send=fake_send,
     )
     service = StationUIService(store, worker, None, None)
+    worker.start()
+    try:
+        frame = make_qr_frame("EVIDENCE-QR")
+        result = service.capture(
+            "PRODUCT-ENTRY-001",
+            7.08,
+            "kg",
+            frame,
+            product_frame=frame,
+            product_weight=8.12,
+        )
+        assert result["sync_status"] == "pending"
+        assert result["remote_id"] is None
+        assert send_started.wait(3)
+        assert store.get(str(result["event_id"])).sync_status == "pending"
+        release_send.set()
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            saved = store.get(str(result["event_id"]))
+            if saved is not None and saved.sync_status == "synced":
+                break
+            time.sleep(0.01)
+        assert saved is not None and saved.sync_status == "synced"
+        assert saved.remote_id == 501
+        assert len(sent) == 1
+        assert sent[0][0]["event_id"] == result["event_id"]
+        assert sent[0][0]["qr_code"] == "PRODUCT-ENTRY-001"
+        assert sent[0][0]["weight"] == pytest.approx(7.08)
+        assert sent[0][0]["product_image_base64"]
+        assert sent[0][1].startswith(b"\xff\xd8")
+    finally:
+        release_send.set()
+        worker.stop()
+        service.close()
+        store.close()
 
-    result = service.capture(
-        "PRODUCT-ENTRY-001",
-        7.08,
-        "kg",
-        make_qr_frame("EVIDENCE-QR"),
-    )
 
-    service.close()
-    store.close()
-    assert result["sync_status"] == "synced"
-    assert result["remote_id"] == 501
-    assert result["remote_image_url"] == "https://images.example/evidence.jpg"
-    assert len(sent) == 1
-    assert sent[0][0]["event_id"] == result["event_id"]
-    assert sent[0][0]["qr_code"] == "PRODUCT-ENTRY-001"
-    assert sent[0][0]["weight"] == pytest.approx(7.08)
-    assert sent[0][1].startswith(b"\xff\xd8")
-
-
-def test_ui_save_reports_cloud_failure_but_keeps_complete_local_event(tmp_path) -> None:
+def test_ui_save_retries_cloud_failure_from_durable_outbox(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
 
     def fail_send(*args):
@@ -223,16 +249,30 @@ def test_ui_save_reports_cloud_failure_but_keeps_complete_local_event(tmp_path) 
         make_qr_frame("EVIDENCE-OFFLINE"),
     )
     saved = store.get(str(result["event_id"]))
-
+    assert result["sync_status"] == "pending"
+    assert saved is not None and saved.sync_status == "pending"
+    assert worker.sync_once() == 0
+    failed = store.get(str(result["event_id"]))
+    assert failed is not None and failed.sync_status == "failed"
+    assert "network unavailable" in str(failed.sync_error)
+    worker.send = lambda url, payload, image_path, token: {
+        "ok": True,
+        "event_id": payload["event_id"],
+        "id": 502,
+        "image_url": "https://images.example/retried.jpg",
+        "image_public_id": "roll-captures/retried",
+    }
+    assert worker.sync_once(include_deferred=True) == 1
+    retried = store.get(str(result["event_id"]))
     service.close()
     store.close()
-    assert result["sync_status"] == "failed"
-    assert "network unavailable" in str(result["sync_error"])
     assert result["pending_count"] == 1
     assert saved is not None
     assert saved.qr_code == "PRODUCT-OFFLINE-001"
     assert saved.weight == pytest.approx(13.04)
     assert Path(saved.image_path).is_file()
+    assert retried is not None and retried.sync_status == "synced"
+    assert retried.remote_id == 502
 
 
 def test_ui_inventory_capture_uses_one_image_without_core_capture(tmp_path) -> None:
@@ -260,6 +300,40 @@ def test_ui_inventory_capture_uses_one_image_without_core_capture(tmp_path) -> N
     assert saved.tare_weight == pytest.approx(0.16)
     assert Path(saved.image_path).is_file()
     assert store.count() == 0
+    service.close()
+    store.close()
+
+
+def test_ui_inventory_capture_queues_cloud_upload(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    sent: list[dict[str, object]] = []
+
+    def fake_send(url, payload, image_path, token):
+        sent.append(dict(payload))
+        return {
+            "ok": True,
+            "event_id": payload["event_id"],
+            "id": 702,
+            "image_url": "https://images.example/inventory.jpg",
+            "image_public_id": "roll-captures/inventory",
+        }
+
+    worker = OutboxSyncWorker(store, "https://example.test", "token", send=fake_send)
+    service = StationUIService(store, worker, None, None)
+    result = service.capture_inventory(
+        "SP-KIEM-KHO-BACKGROUND",
+        12.75,
+        0.5,
+        0.16,
+        "kg",
+        make_qr_frame("INVENTORY-BACKGROUND"),
+    )
+    assert result["sync_status"] == "pending"
+    assert sent == []
+    assert worker.sync_once() == 1
+    saved = store.get_inventory_check(str(result["event_id"]))
+    assert saved is not None and saved.sync_status == "synced"
+    assert sent[0]["workflow"] == "inventory_check"
     service.close()
     store.close()
 
@@ -295,7 +369,7 @@ def test_ui_photo_capture_decodes_qr_without_calling_weight_ai(tmp_path) -> None
 
     assert result["ai_requested"] is False
     assert result["qr_code"] == "QR-PHOTO-ONLY-UI"
-    assert result["sync_status"] == "synced"
+    assert result["sync_status"] == "pending"
     assert result["event_id"] == parent_event_id
     assert result["capture_id"] == capture_id
     assert result["capture_kind"] == "product"
@@ -303,8 +377,10 @@ def test_ui_photo_capture_decodes_qr_without_calling_weight_ai(tmp_path) -> None
     assert saved is not None and saved.status == "awaiting_ai"
     assert saved.parent_event_id == parent_event_id
     assert store.count() == 0
+    assert worker.sync_once() == 1
     assert sent[0]["workflow"] == "photo_draft"
     assert sent[0]["parent_event_id"] == parent_event_id
+    assert store.get_photo_draft(capture_id).sync_status == "synced"
     service.close()
     store.close()
 

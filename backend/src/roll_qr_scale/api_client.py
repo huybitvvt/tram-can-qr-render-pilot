@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -550,13 +551,32 @@ def validate_ingest_response(
     return response
 
 
+DEFAULT_SYNC_TIMEOUT = 35.0
+
+
+def _effective_sync_timeout(timeout: float | None = None) -> float:
+    if timeout is not None:
+        try:
+            return max(5.0, float(timeout))
+        except (ValueError, TypeError):
+            pass
+    raw = os.environ.get("ROLL_SCALE_SYNC_TIMEOUT")
+    if raw:
+        try:
+            return max(5.0, float(raw))
+        except (ValueError, TypeError):
+            pass
+    return DEFAULT_SYNC_TIMEOUT
+
+
 def post_measurement(
     url: str,
     payload: dict[str, object],
     image_path: str | Path,
     token: str,
-    timeout: float = 10.0,
+    timeout: float | None = None,
 ) -> dict[str, object]:
+    effective_timeout = _effective_sync_timeout(timeout)
     body = dict(payload)
     body["image_base64"] = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
     # The shared ingest endpoint routes one-photo inventory checks separately
@@ -580,7 +600,7 @@ def post_measurement(
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urllib.request.urlopen(request, timeout=effective_timeout) as response:
         response_body = response.read()
         if not 200 <= response.status < 300:
             raise RuntimeError(f"API returned HTTP {response.status}")

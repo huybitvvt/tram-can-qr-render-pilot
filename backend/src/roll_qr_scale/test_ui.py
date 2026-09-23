@@ -2916,7 +2916,7 @@ class StationUIService:
             camera_id=camera_id,
         )
         if self.sync_worker is not None:
-            self.sync_worker.sync_photo_draft_event(draft.event_id)
+            self.sync_worker.notify()
         current = self.store.get_photo_draft(draft.event_id) or draft
         return {
             "ok": True,
@@ -3713,11 +3713,10 @@ class StationUIService:
             measurement = self.store.get(measurement.event_id) or measurement
         if bound_capture and station_id:
             self._cleanup_evidence_steps(station_id, measurement.event_id)
-        # Commit locally first, then synchronously confirm this exact event so
-        # one operator click sends the product code, core weight and evidence
-        # image together. A failed cloud attempt remains durable in the outbox.
+        # The local event and both images are durable before the response.
+        # Wake the outbox without making the operator wait for cloud upload.
         if self.sync_worker is not None:
-            self.sync_worker.sync_event(measurement.event_id)
+            self.sync_worker.notify()
         saved = self.store.get(measurement.event_id)
         current = saved or measurement
         return {
@@ -3884,7 +3883,7 @@ class StationUIService:
         if bound_capture and station_id:
             self._cleanup_evidence_steps(station_id, check.event_id)
         if self.sync_worker is not None:
-            self.sync_worker.sync_inventory_event(check.event_id)
+            self.sync_worker.notify()
         current = self.store.get_inventory_check(check.event_id) or check
         return {
             "ok": True,
