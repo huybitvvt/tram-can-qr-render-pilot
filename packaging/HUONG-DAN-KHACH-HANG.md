@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc13` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc14` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc13.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc14.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -125,8 +125,9 @@ bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`
 ## 3. Vận hành
 
 - Máy local chỉ có một trạm nên không cần chuyển trạm bằng phím số.
-- Ô **Máy** cho chọn trong danh sách hoặc gõ tên máy mới. Nhập **LSX** rồi
-  bấm **Áp dụng** trước khi cân.
+- Ô **Ca** luôn có lựa chọn **Ca chuẩn Đà Nẵng**. Ô **Máy** cho chọn trong
+  danh sách hoặc gõ tên máy mới, kể cả khi trạm đã có tên máy mặc định trong
+  cấu hình. Nhập **LSX** rồi bấm **Áp dụng** trước khi cân.
 - Chọn **2 lần · 4 cân**. Bấm ô cần chụp hoặc dùng `Space` để lần lượt cân lõi
   cặp 1, lõi cặp 2, thành phẩm cặp 1, thành phẩm cặp 2. Có thể bấm trực tiếp
   ô thành phẩm của cặp đã có lõi khi thành phẩm ra sớm.

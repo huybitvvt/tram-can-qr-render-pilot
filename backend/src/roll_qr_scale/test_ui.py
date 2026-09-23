@@ -2475,11 +2475,11 @@ class StationUIService:
         *,
         require_machine: bool = False,
     ) -> dict[str, object]:
-        """Resolve the authoritative machine for a logical station/camera.
+        """Validate station/camera identity and resolve the selected machine.
 
-        Browsers can remain open across a deploy and submit a stale machine
-        label. The station/camera identity is server-configured, so it must be
-        the source of truth instead of rejecting an otherwise valid weighing.
+        A configured machine is the initial fallback. Operators may select or
+        type another production machine while keeping the station and camera
+        identity fixed.
         """
 
         station = next(
@@ -2495,7 +2495,7 @@ class StationUIService:
         configured_machine = str(station.get("machine_id") or "").strip()
         supplied_machine = str(machine or "").strip()
         resolved = dict(station)
-        resolved["machine_id"] = configured_machine or supplied_machine
+        resolved["machine_id"] = supplied_machine or configured_machine
         resolved["machine_configured"] = bool(configured_machine)
         resolved["machine_overridden"] = bool(
             configured_machine

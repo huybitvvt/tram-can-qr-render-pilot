@@ -332,7 +332,7 @@ def test_ui_inventory_ai_miss_photo_is_saved_without_weight(tmp_path) -> None:
     store.close()
 
 
-def test_each_camera_resolves_to_its_configured_machine(tmp_path) -> None:
+def test_each_camera_keeps_identity_while_allowing_operator_machine(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(
         store,
@@ -351,11 +351,14 @@ def test_each_camera_resolves_to_its_configured_machine(tmp_path) -> None:
     stale = service.validate_station_source(
         "station-01", "camera-01", "Máy cách nhiệt"
     )
-    assert stale["machine_id"] == "Máy tái chế"
+    assert stale["machine_id"] == "Máy cách nhiệt"
     assert stale["machine_overridden"] is True
     with pytest.raises(ValueError, match="Trạm hoặc camera không hợp lệ"):
         service.validate_station_source("station-01", "camera-02", "Máy tái chế")
-    assert "input.disabled=Boolean(locked)" in TEST_UI_HTML
+    assert "input.disabled=Boolean(locked)" not in TEST_UI_HTML
+    assert "input.disabled=false;return SOURCE_MACHINES" in TEST_UI_HTML
+    assert "machine:sanitizeMachine($('sourceMachine').value)" in TEST_UI_HTML
+    assert "machine:session.machineId||sourceContext.machine" not in TEST_UI_HTML
     assert "Camera vật lý này đã gắn với máy khác" in TEST_UI_HTML
     assert "Hệ thống không tự đổi sang camera khác" in TEST_UI_HTML
     assert "const machineChanged=lockSourceMachine(session)" in TEST_UI_HTML
@@ -405,7 +408,7 @@ def test_capture_accepts_machine_from_save_endpoint_and_persists_source(tmp_path
     store.close()
 
 
-def test_capture_canonicalizes_stale_browser_machine_before_save(tmp_path) -> None:
+def test_capture_canonicalizes_to_operator_selected_machine_before_save(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(
         store,
@@ -423,7 +426,7 @@ def test_capture_canonicalizes_stale_browser_machine_before_save(tmp_path) -> No
         1.02,
         "kg",
         make_qr_frame("MT-MN005_STALE"),
-        weight_raw="SOURCE_MACHINE=Máy cách nhiệt; HUMAN_CONFIRMED=1.02",
+        weight_raw="SOURCE_MACHINE=Máy tái chế; HUMAN_CONFIRMED=1.02",
         station_id="station-01",
         camera_id="camera-01",
         machine="Máy cách nhiệt",
@@ -432,13 +435,13 @@ def test_capture_canonicalizes_stale_browser_machine_before_save(tmp_path) -> No
 
     assert result["ok"] is True
     assert saved is not None
-    assert "SOURCE_MACHINE=Máy tái chế" in saved.weight_raw
-    assert "SOURCE_MACHINE=Máy cách nhiệt" not in saved.weight_raw
+    assert "SOURCE_MACHINE=Máy cách nhiệt" in saved.weight_raw
+    assert "SOURCE_MACHINE=Máy tái chế" not in saved.weight_raw
     service.close()
     store.close()
 
 
-def test_photo_draft_canonicalizes_stale_browser_machine(tmp_path) -> None:
+def test_photo_draft_keeps_operator_selected_machine(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(
         store,
@@ -462,12 +465,12 @@ def test_photo_draft_canonicalizes_stale_browser_machine(tmp_path) -> None:
     saved = store.get_photo_draft(capture_id)
 
     assert saved is not None
-    assert saved.machine == "Máy tái chế"
+    assert saved.machine == "Máy cách nhiệt"
     service.close()
     store.close()
 
 
-def test_inventory_canonicalizes_stale_browser_machine(tmp_path) -> None:
+def test_inventory_canonicalizes_to_operator_selected_machine(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(
         store,
@@ -497,7 +500,7 @@ def test_inventory_canonicalizes_stale_browser_machine(tmp_path) -> None:
         0.16,
         "kg",
         frame,
-        weight_raw="SOURCE_MACHINE=Máy cách nhiệt",
+        weight_raw="SOURCE_MACHINE=Máy tái chế",
         event_id=event_id,
         analysis_id=binding.analysis_id,
         station_id="station-01",
@@ -508,8 +511,8 @@ def test_inventory_canonicalizes_stale_browser_machine(tmp_path) -> None:
     saved = store.get_inventory_check(str(result["event_id"]))
 
     assert saved is not None
-    assert "SOURCE_MACHINE=Máy tái chế" in saved.weight_raw
-    assert "SOURCE_MACHINE=Máy cách nhiệt" not in saved.weight_raw
+    assert "SOURCE_MACHINE=Máy cách nhiệt" in saved.weight_raw
+    assert "SOURCE_MACHINE=Máy tái chế" not in saved.weight_raw
     service.close()
     store.close()
 
