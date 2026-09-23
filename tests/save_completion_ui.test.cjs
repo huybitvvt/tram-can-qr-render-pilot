@@ -11,6 +11,7 @@ function setup(items=[]){
   selectedRoundCount:()=>1,coreWeightOverLimit:()=>false,productWeightOverLimit:()=>false,
   $:id=>nodes[id]??=( {classList:{toggle(){}},setAttribute(){}} ),
   status:(_,message,tone)=>messages.push({message,tone}),captureStatus:{},
+  syncCameraStatusPill:()=>{},
   sourceQuery:()=>'',api:async()=>({items}),syncCaptureProductCodes:()=>{},
   statusForPartialWeights:()=> 'Continue capturing',
  });

@@ -37,6 +37,22 @@ test('an AI weight remains visible when image quality fails',async()=>{
 });
 
 test('an unreadable AI response leaves the weight empty',async()=>{
- const {round}=await analyzeWith({weight_found:false,weight:null,quality_pass:true,step_saved:false,quality:{issues:[]},unit:'kg'});
+ const {round,messages}=await analyzeWith({weight_found:false,weight:null,quality_pass:true,step_saved:false,quality:{issues:['màn hình cân mờ']},unit:'kg'});
  assert.equal(round.weight,'');
+ assert.match(messages.at(-1),/AI CHƯA ĐỌC ĐƯỢC CÂN LÕI/);
+ assert.match(messages.at(-1),/màn hình cân mờ/);
+});
+
+test('camera status stops saying analyzing after image analysis completes',()=>{
+ const pill={textContent:'',style:{color:''}},session={state:'analyzing',stream:null,panelStream:null};
+ const ctx=vm.createContext({current:()=>session,$:()=>pill});
+ const line=script.split('\n').find(line=>line.startsWith('function syncCameraStatusPill('));
+ assert.ok(line);
+ vm.runInContext(line,ctx);
+ ctx.syncCameraStatusPill(session);
+ assert.equal(pill.textContent,'Đang phân tích');
+ session.state='awaiting-weight';ctx.syncCameraStatusPill(session);
+ assert.equal(pill.textContent,'Đang chờ ảnh/camera');
+ session.stream={};ctx.syncCameraStatusPill(session);
+ assert.equal(pill.textContent,'Đang hoạt động');
 });
