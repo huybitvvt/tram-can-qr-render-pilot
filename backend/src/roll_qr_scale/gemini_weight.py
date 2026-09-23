@@ -27,7 +27,7 @@ DEFAULT_GEMINI_MEDIA_RESOLUTION = "medium"
 DEFAULT_GEMINI_RPM_LIMIT = 15
 DEFAULT_GEMINI_TPM_LIMIT = 250_000
 DEFAULT_GEMINI_RPD_LIMIT = 500
-_FIXED_WEIGHT = re.compile(r"^(?:0|[1-9]\d{0,3})\.\d{2}$")
+_DISPLAY_WEIGHT = re.compile(r"^(?:0|[1-9]\d{0,3})\.\d{1,3}$")
 
 
 class _GeminiScalePayload(BaseModel):
@@ -459,10 +459,10 @@ class GeminiWeightReader:
                 f"These are {image_description}. Inspect the entire supplied image. "
                 "Find the electronic scale display and read "
                 "only the illuminated digit glyphs in its top gross-weight row, left to "
-                "right. Return weight_digits without a decimal point. A small round "
-                "decimal LED is punctuation, never a zero digit. The scale always has "
-                "two decimal places: 7.02 means weight_digits=\"702\" and 13.04 means "
-                "weight_digits=\"1304\". "
+                "right. Return weight_digits exactly as displayed, including the decimal "
+                "point when it is visible. A small round decimal LED is punctuation, never "
+                "a zero digit. Preserve the displayed precision: 10.8 means "
+                "weight_digits=\"10.8\" and 13.04 means weight_digits=\"13.04\". "
                 + qr_instruction
                 + "Treat the lower tare/net rows, keypad, labels, dates and other "
                 "numbers as irrelevant. If an item cannot be read exactly, set its "
@@ -508,8 +508,8 @@ class GeminiWeightReader:
                 thinking_tokens,
                 total_tokens,
             )
-            digits = (payload.weight_digits or "").strip()
-            reading = (
+            digits = (payload.weight_digits or "").strip().replace(",", ".")
+            reading = digits if _DISPLAY_WEIGHT.fullmatch(digits) else (
                 f"{digits[:-2]}.{digits[-2:]}"
                 if digits.isdigit() and 3 <= len(digits) <= 6
                 else ""
@@ -518,7 +518,7 @@ class GeminiWeightReader:
             valid = (
                 payload.weight_readable
                 and agreement
-                and _FIXED_WEIGHT.fullmatch(reading) is not None
+                and _DISPLAY_WEIGHT.fullmatch(reading) is not None
             )
             value = float(reading) if valid else None
             if value is not None and (not math.isfinite(value) or value < 0):

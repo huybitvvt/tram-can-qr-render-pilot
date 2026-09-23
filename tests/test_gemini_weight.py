@@ -122,6 +122,24 @@ def test_gemini_reader_accepts_one_full_still_image() -> None:
     assert len(client.models.calls[0]["contents"]) == 2  # prompt + full still image
 
 
+@pytest.mark.parametrize(("display", "expected"), (("10.8", 10.8), ("13,04", 13.04)))
+def test_gemini_reader_accepts_visible_decimal_precision(display, expected) -> None:
+    client = FakeClient({
+        "weight_readable": True,
+        "weight_digits": display,
+        "qr_readable": False,
+        "qr_code": None,
+        "all_frames_agree": True,
+    })
+    reader = GeminiWeightReader("secret-key", client=client)
+
+    result = reader.read([np.zeros((480, 640, 3), dtype=np.uint8)])
+
+    assert result.value == pytest.approx(expected)
+    assert result.readable
+    assert "including the decimal point" in client.models.calls[0]["contents"][0]
+
+
 def test_gemini_reader_redacts_api_key_from_errors() -> None:
     class FailingModels:
         def generate_content(self, **kwargs):
