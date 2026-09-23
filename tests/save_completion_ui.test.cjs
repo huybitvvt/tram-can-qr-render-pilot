@@ -72,6 +72,15 @@ test('missing QR and missing defect reason explain disabled save and recover aft
  assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/Lý do lỗi/);
  round.errorReason='Damaged';ctx.refreshCompletionState(session);assert.equal(nodes.saveBtn.disabled,false);
 });
+test('an AI reading from a poor image needs a documented error before save',()=>{
+ const {ctx,session,nodes,messages}=setup();const round=session.rounds[0];
+ round.coreAnalysis={weight_found:true,weight:7.03,quality_pass:false};
+ round.weight='7.03';ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);
+ assert.match(messages.at(-1).message,/ảnh chưa đạt chất lượng/);
+ round.errorStatus='error';round.errorReason='Màn hình cân bị lóa';ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,false);
+});
 test('only one station is selected even with legacy multi-station configuration',()=>{
  const ctx=vm.createContext({assignedStationId:'',localStorage:{removeItem(){}},STATION_ASSIGNMENT_KEY:'station'});
  vm.runInContext(script.split('\n').find(line=>line.trim().startsWith('function assignedStationConfigs(')),ctx);
