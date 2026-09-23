@@ -13,6 +13,12 @@ const MAX_LOCAL_EVIDENCE_ITEMS = 500;
 const MAX_LOCAL_EVIDENCE_ROLES = 3;
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
+function maxWeighBatchSize(shift: string, machine: string): number {
+  if (shift === "Ca chuẩn Đà Nẵng") return 10;
+  const normalized = machine.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  return /CACH\W*NHIET/.test(normalized) ? 30 : 16;
+}
+
 function normalizeEventId(value: unknown): string {
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(Math.trunc(value));
@@ -1026,11 +1032,17 @@ Deno.serve(async (request: Request) => {
     if (!shift || !productionOrder) {
       return json(422, { ok: false, error: "missing_weighing_source" });
     }
-    if (!Number.isInteger(milestone) || milestone < 10 || milestone % 10 !== 0) {
-      return json(422, { ok: false, error: "invalid_weighing_milestone" });
+    const batchSize = Number(body.batch_size ?? 10);
+    const maxBatchSize = maxWeighBatchSize(shift, machine);
+    if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > maxBatchSize ||
+      !Number.isInteger(milestone) || milestone < batchSize) {
+      return json(422, {
+        ok: false,
+        error: "invalid_weighing_milestone",
+        message: `Số cuộn xác nhận phải từ 1 đến ${maxBatchSize} cho máy này`,
+        max_batch_size: maxBatchSize,
+      });
     }
-    const batchNumber = milestone / 10;
-    const batchKey = [workDate, shift, machine, productionOrder, batchNumber].join("|");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceKey = getSupabaseAdminKey();
     if (!supabaseUrl || !serviceKey) {
@@ -1042,7 +1054,11 @@ Deno.serve(async (request: Request) => {
     const { data: existingBatch, error: existingError } = await supabase
       .from(WEIGH_BATCH_TABLE)
       .select("*")
-      .eq("batch_key", batchKey)
+      .eq("ngay_can", workDate)
+      .eq("ca", shift)
+      .eq("may", machine)
+      .eq("lenh_san_xuat", productionOrder)
+      .eq("moc_so_luong", milestone)
       .maybeSingle();
     if (existingError) {
       return json(500, {
@@ -1052,39 +1068,40 @@ Deno.serve(async (request: Request) => {
       });
     }
     if (existingBatch) {
+      if (Number(existingBatch.so_luong) !== batchSize) {
+        return json(409, { ok: false, error: "weighing_batch_size_conflict" });
+      }
       return json(200, { ok: true, duplicate: true, item: existingBatch });
     }
-    if (batchNumber > 1) {
-      const previousBatchKey = [
-        workDate,
-        shift,
-        machine,
-        productionOrder,
-        batchNumber - 1,
-      ].join("|");
-      const { data: previousBatch, error: previousBatchError } = await supabase
-        .from(WEIGH_BATCH_TABLE)
-        .select("id")
-        .eq("batch_key", previousBatchKey)
-        .eq("trang_thai", "confirmed")
-        .maybeSingle();
-      if (previousBatchError) {
-        return json(500, {
-          ok: false,
-          error: "previous_weighing_batch_lookup_failed",
-          detail: previousBatchError.message,
-        });
-      }
-      if (!previousBatch) {
-        return json(409, {
-          ok: false,
-          error: "previous_weighing_batch_not_confirmed",
-          message: `Phải xác nhận đợt ${batchNumber - 1} trước`,
-        });
-      }
+    const { data: previousBatch, error: previousBatchError } = await supabase
+      .from(WEIGH_BATCH_TABLE)
+      .select("dot_can,moc_so_luong")
+      .eq("ngay_can", workDate)
+      .eq("ca", shift)
+      .eq("may", machine)
+      .eq("lenh_san_xuat", productionOrder)
+      .eq("trang_thai", "confirmed")
+      .order("dot_can", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (previousBatchError) {
+      return json(500, {
+        ok: false,
+        error: "previous_weighing_batch_lookup_failed",
+        detail: previousBatchError.message,
+      });
     }
-
-    const offset = (batchNumber - 1) * 10;
+    const offset = Number(previousBatch?.moc_so_luong ?? 0);
+    const batchNumber = Number(previousBatch?.dot_can ?? 0) + 1;
+    if (milestone !== offset + batchSize) {
+      return json(409, {
+        ok: false,
+        error: "previous_weighing_batch_not_confirmed",
+        message: `Mốc xác nhận tiếp theo là ${offset + batchSize} cuộn (đợt ${batchNumber})`,
+        expected: offset + batchSize,
+      });
+    }
+    const batchKey = [workDate, shift, machine, productionOrder, batchNumber].join("|");
     let rowsQuery = supabase
       .from(MEASUREMENT_TABLE)
       .select(
@@ -1094,7 +1111,7 @@ Deno.serve(async (request: Request) => {
       .eq("metadata->>shift", shift)
       .eq("metadata->>production_order", productionOrder)
       .order("captured_at", { ascending: true })
-      .range(offset, offset + 9);
+      .range(offset, offset + batchSize - 1);
     if (machine) rowsQuery = rowsQuery.eq("metadata->>machine", machine);
     const { data: batchRows, error: rowsError } = await rowsQuery;
     if (rowsError) {
@@ -1104,12 +1121,12 @@ Deno.serve(async (request: Request) => {
         detail: rowsError.message,
       });
     }
-    if (!Array.isArray(batchRows) || batchRows.length !== 10) {
+    if (!Array.isArray(batchRows) || batchRows.length !== batchSize) {
       return json(409, {
         ok: false,
         error: "weighing_batch_not_synced",
-        message: "Chưa đủ 10 cuộn đã đồng bộ Supabase cho đợt này",
-        expected: 10,
+        message: `Chưa đủ ${batchSize} cuộn đã đồng bộ Supabase cho đợt này`,
+        expected: batchSize,
         found: Array.isArray(batchRows) ? batchRows.length : 0,
       });
     }
@@ -1145,7 +1162,7 @@ Deno.serve(async (request: Request) => {
       dot_can: batchNumber,
       moc_so_luong: milestone,
       ma_san_pham: productCodes.join(", ") || "--",
-      so_luong: 10,
+      so_luong: batchSize,
       ngay_can: workDate,
       gio_bat_dau: products[0].can_luc,
       gio_ket_thuc: products[products.length - 1].can_luc,
@@ -1169,7 +1186,7 @@ Deno.serve(async (request: Request) => {
           .select("*")
           .eq("batch_key", batchKey)
           .maybeSingle();
-        if (racedBatch) {
+        if (racedBatch && Number(racedBatch.moc_so_luong) === milestone) {
           return json(200, { ok: true, duplicate: true, item: racedBatch });
         }
       }

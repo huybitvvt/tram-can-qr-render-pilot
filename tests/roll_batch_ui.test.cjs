@@ -11,13 +11,13 @@ function setup(api){
  const ctx=vm.createContext({sourceContext:context,workflowMode:'production',api,
   $:id=>nodes[id]??={},status:(_,text)=>messages.push(text),
   rollBatchSourceKey:(c=context)=>JSON.stringify(c),sourceQuery:()=>'',
-  loadWeighBatches:async()=>{},nextRollBatchMilestone:n=>Math.floor(n/10)*10,
+  loadWeighBatches:async()=>{},nextRollBatchMilestone:n=>Math.min(Math.max(0,Math.trunc(n)),16),
   openRollBatchModal:()=>{ctx.opened=true},
   closeRollBatchModal:()=>{ctx.closed=true},syncRollBatchConfirmButton:()=>{},
   writeRollBatchConfirmed:(...args)=>saved.push(args),
   printWeighBatch:()=>{throw Error('Unexpected automatic print')},
  });
- vm.runInContext('let rollBatchPendingMilestone=10,rollBatchSaving=false;',ctx);
+ vm.runInContext('let rollBatchPendingMilestone=10,rollBatchPendingSize=10,rollBatchSaving=false;',ctx);
  const start=script.indexOf('async function requestRollBatchConfirm(');
  vm.runInContext(script.slice(start,script.indexOf('\nlet weighBatchRows',start)),ctx);
  const confirm=script.indexOf('async function confirmRollBatchCount(');
@@ -41,10 +41,63 @@ test('backend failure leaves confirmation closed and permits retry without recor
  assert.equal(calls,2);assert.equal(saved.length,0);
  assert.match(messages.at(-1),/Backend unavailable/);
 });
-test('only a manual request opens confirmation for synchronized rolls',async()=>{
+test('manual request can confirm synchronized rolls before the configured maximum',async()=>{
  const {ctx}=setup(async()=>({synced_measurement_count:10}));
  assert.equal(ctx.opened,undefined);await ctx.requestRollBatchConfirm();assert.equal(ctx.opened,true);
- const fewer=setup(async()=>({synced_measurement_count:9}));
+ const early=setup(async()=>({synced_measurement_count:9}));
+ await early.ctx.requestRollBatchConfirm();assert.equal(early.ctx.opened,true);
+ const fewer=setup(async()=>({synced_measurement_count:0}));
  await fewer.ctx.requestRollBatchConfirm();assert.equal(fewer.ctx.opened,undefined);
  assert.doesNotMatch(script.slice(script.indexOf('async function loadRecords('),script.indexOf('let inventoryRecordsLoading')),/openRollBatchModal|requestRollBatchConfirm|maybePromptRollBatchConfirm/);
+});
+
+test('confirmation sends the actual roll count for an early batch',async()=>{
+ let sent;
+ const {ctx}=setup(async(_url,options)=>{sent=JSON.parse(options.body);return{item:{dot_can:2,so_luong:7}}});
+ vm.runInContext('rollBatchPendingMilestone=17;rollBatchPendingSize=7;',ctx);
+ await ctx.confirmRollBatchCount();
+ assert.equal(sent.milestone,17);
+ assert.equal(sent.batch_size,7);
+});
+
+test('machine limits default to thermal 30, packaging 16, Da Nang 10 and can be changed separately',()=>{
+ const saved=new Map(),nodes={sourceShift:{value:'HC1'},sourceMachine:{value:'MÁY CÁCH NHIỆT 11'},rollBatchSize:{value:'24'}},context={shift:'HC1',machine:'MÁY CÁCH NHIỆT 11'};
+ const ctx=vm.createContext({sourceContext:context,sanitizeMachine:value=>String(value||'').trim(),
+  localStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value)},
+  $:id=>nodes[id],status:()=>{},captureStatus:{},readRollBatchConfirmed:()=>ctx.confirmed});
+ ctx.confirmed=0;
+ vm.runInContext(script.split('\n').find(line=>line.startsWith('const ROLL_BATCH_SIZE_PREFIX=')),ctx);
+ for(const name of ['function rollBatchSizeKey(','function rollBatchMachineLimit(','function rollBatchSize(','function saveRollBatchSize(','function nextRollBatchMilestone(']){
+  vm.runInContext(script.split('\n').find(line=>line.startsWith(name)),ctx);
+ }
+ assert.equal(ctx.rollBatchSize(),30);
+ assert.equal(ctx.rollBatchMachineLimit({shift:'HC1',machine:'May cach-nhiet 11'}),30);
+ assert.equal(ctx.nextRollBatchMilestone(7),7);
+ assert.equal(ctx.nextRollBatchMilestone(45),30);
+ ctx.saveRollBatchSize();
+ assert.equal(ctx.rollBatchSize(),24);
+ context.machine='MÁY BAO BÌ 16';nodes.sourceMachine.value=context.machine;
+ assert.equal(ctx.rollBatchSize(),16);
+ saved.set(ctx.rollBatchSizeKey(context),'30');
+ assert.equal(ctx.rollBatchSize(),16);
+ ctx.saveRollBatchSize();
+ assert.equal(nodes.rollBatchSize.value,'16');
+ assert.equal(nodes.rollBatchSize.max,'16');
+ context.shift='Ca chuẩn Đà Nẵng';
+ assert.equal(ctx.rollBatchSize(),10);
+ context.machine='MÁY CÁCH NHIỆT 11';
+ assert.equal(ctx.rollBatchSize(),10);
+ ctx.confirmed=7;
+ assert.equal(ctx.nextRollBatchMilestone(40),17);
+});
+
+test('cloud batch limit agrees with the station limit',()=>{
+ const edge=fs.readFileSync('backend/supabase/functions/ingest-measurement/index.ts','utf8');
+ const match=edge.match(/function maxWeighBatchSize\([^\n]+\n[\s\S]*?\n}/);
+ assert.ok(match);
+ const ctx=vm.createContext({});
+ vm.runInContext(match[0].replace(/: string|: number/g,''),ctx);
+ assert.equal(ctx.maxWeighBatchSize('HC1','MÁY BAO BÌ 16'),16);
+ assert.equal(ctx.maxWeighBatchSize('HC1','Máy cách nhiệt 11'),30);
+ assert.equal(ctx.maxWeighBatchSize('Ca chuẩn Đà Nẵng','Máy cách nhiệt 11'),10);
 });

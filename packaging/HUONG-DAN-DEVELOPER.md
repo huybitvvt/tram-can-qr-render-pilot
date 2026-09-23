@@ -43,7 +43,7 @@ Script tự chạy test rồi tạo:
 
 ```text
 dist\TramCanQR\TramCanQR.exe
-dist\installer\TramCanQR-Setup-0.2.0-rc16.exe
+dist\installer\TramCanQR-Setup-0.2.0-rc17.exe
 ```
 
 Nếu test hoặc build lỗi, không gửi lại file EXE/installer cũ. Trước mỗi đợt
@@ -53,9 +53,16 @@ trong `tools\build_windows.ps1`.
 
 ## 4. Cập nhật máy khách
 
-1. End task `TramCanQR.exe`.
-2. Chạy installer mới và cài đè, không gỡ bản cũ.
-3. Mở lại ứng dụng và nhấn `Ctrl+F5`.
+Sau khi build và kiểm tra installer, phát hành bằng `tools\release_github.ps1`.
+Release phải chứa installer có số phiên bản và `SHA256SUMS.txt` khớp với file
+đó. Nút **Cập nhật Trạm Cân QR** trong bản đã cài lấy bản mới nhất từ GitHub
+Release, kiểm tra hash rồi cài đè im lặng và mở lại ứng dụng. Nếu người dùng
+có nút cũ bị lỗi, gửi riêng `packaging\CAP-NHAT-BAN-MOI.cmd` để thay file cùng
+tên trong thư mục cài đặt một lần.
+
+`git pull` chỉ cập nhật source trên máy phát triển; nó không thay đổi EXE đã
+đóng gói trên máy khách. Sau khi cập nhật, mở lại trình duyệt hoặc nhấn
+`Ctrl+F5` để tải giao diện mới.
 
 Installer giữ nguyên `%LOCALAPPDATA%\TramCanQR\config.env`, SQLite, ảnh và cấu
 hình Supabase. Không chép riêng file `.py` vào thư mục đã cài vì PyInstaller đã

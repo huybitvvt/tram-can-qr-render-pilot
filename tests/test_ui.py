@@ -25,6 +25,19 @@ from roll_qr_scale.test_ui import (
 from roll_qr_scale.weight_ocr import NormalizedROI
 
 
+@pytest.mark.parametrize(
+    ("shift", "machine", "expected"),
+    [
+        ("HC1", "MÁY BAO BÌ 16", 16),
+        ("HC1", "Máy cách nhiệt 11", 30),
+        ("HC1", "May cach-nhiet 11", 30),
+        ("Ca chuẩn Đà Nẵng", "Máy cách nhiệt 11", 10),
+    ],
+)
+def test_weigh_batch_limit_per_machine(shift: str, machine: str, expected: int) -> None:
+    assert test_ui_module._max_weigh_batch_size(shift, machine) == expected
+
+
 def make_qr_frame(value: str) -> np.ndarray:
     qr = qrcode.make(value).convert("RGB").resize((360, 360))
     frame = np.full((600, 800, 3), 245, dtype=np.uint8)
@@ -1491,6 +1504,59 @@ def test_gemini_full_frame_does_not_retry_network_error(tmp_path, monkeypatch) -
     assert result["gemini_fallback_used"] is False
 
 
+def test_gemini_crop_retry_stays_on_healthy_fallback_key(tmp_path, monkeypatch) -> None:
+    class FakeGeminiReader:
+        def __init__(self, responses):
+            self.responses = responses
+            self.calls = 0
+
+        def read(self, frames, *, unit):
+            result = self.responses[self.calls]
+            self.calls += 1
+            return GeminiWeightSuggestion(
+                result,
+                unit,
+                result is not None,
+                not isinstance(result, str),
+                result if isinstance(result, str) else "GEMINI_FULL:weight-unreadable",
+                0.2,
+            )
+
+        def status(self):
+            return {"enabled": True}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        test_ui_module,
+        "detect_weight_roi",
+        lambda frame: (NormalizedROI(0.4, 0.7, 0.6, 0.8), "red-led"),
+    )
+    failed = FakeGeminiReader(["GEMINI ERROR: timeout"])
+    healthy = FakeGeminiReader([None, 13.04])
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(
+        store, None, None, None,
+        gemini_reader=failed,
+        gemini_night_readers=(healthy, None, None, None),
+        weight_engine="gemini",
+    )
+
+    result = service.analyze(
+        np.full((600, 800, 3), 180, dtype=np.uint8),
+        "auto", "kg", capture_kind="core",
+    )
+
+    service.close()
+    store.close()
+    assert failed.calls == 1
+    assert healthy.calls == 2
+    assert result["weight"] == pytest.approx(13.04)
+    assert result["gemini_attempts"] == 3
+    assert result["gemini_fallback_used"] is True
+
+
 def test_browser_qr_is_accepted_but_decoder_conflict_requires_manual_code(tmp_path) -> None:
     class FakeGeminiReader:
         def read(self, frames, *, unit):
@@ -2054,7 +2120,8 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "await loadProductionOrders(fields.date,'');await loadRecords()" in TEST_UI_HTML
     assert "persistSourceFromFields();renderControls();loadRecords()" in TEST_UI_HTML
     assert 'id="rollBatchModal"' in TEST_UI_HTML
-    assert "ROLL_BATCH_SIZE=10" in TEST_UI_HTML
+    assert 'id="rollBatchSize"' in TEST_UI_HTML
+    assert "function saveRollBatchSize()" in TEST_UI_HTML
     assert "function requestRollBatchConfirm" in TEST_UI_HTML
     assert "function confirmRollBatchCount" in TEST_UI_HTML
     assert "rollBatchConfirmActive()" in TEST_UI_HTML
@@ -2518,6 +2585,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "'/api/measurements?limit=50&'" in TEST_UI_HTML
     assert "'/api/inventory-checks?limit=50'" in TEST_UI_HTML
     assert "function startAiCountdown(" in TEST_UI_HTML
+    assert "async function waitBeforeCameraCapture(" in TEST_UI_HTML
     assert "function stopAiCountdown(" in TEST_UI_HTML
     assert "startAiCountdown(session.box," in TEST_UI_HTML
     assert "stopAiCountdown()" in TEST_UI_HTML
@@ -2712,7 +2780,7 @@ def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> Non
     assert "/api/weighing-batches/confirm" in TEST_UI_HTML
     assert "Đang tạo đợt cân trong bảng ca_can" in TEST_UI_HTML
     assert "writeRollBatchConfirmed(0)" in TEST_UI_HTML
-    assert "confirmed+ROLL_BATCH_SIZE" in TEST_UI_HTML
+    assert "Math.min(available,rollBatchSize())" in TEST_UI_HTML
 
 
 def test_ui_buttons_start_once_and_show_immediate_press_feedback() -> None:
@@ -3321,6 +3389,8 @@ def test_measurement_pages_do_not_repeat_synced_local_rows(tmp_path, monkeypatch
         server.shutdown()
         server.server_close()
         thread.join(timeout=2.0)
+        if service.sync_worker is not None:
+            service.sync_worker.stop()
         service.close()
         service.store.close()
 
@@ -3396,4 +3466,6 @@ def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path)
     server.shutdown()
     server.server_close()
     thread.join(timeout=2.0)
+    if service.sync_worker is not None:
+        service.sync_worker.stop()
     service.close()

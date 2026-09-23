@@ -26,6 +26,10 @@ WEIGH_BATCH_MIGRATION = (
     / "migrations"
     / "20260907010000_ca_can_and_measurement_errors.sql"
 ).read_text(encoding="utf-8")
+VARIABLE_WEIGH_BATCH_MIGRATION = (
+    ROOT / "backend" / "supabase" / "migrations"
+    / "20260923010000_variable_weighing_batch_size.sql"
+).read_text(encoding="utf-8")
 
 
 def test_photo_draft_table_keeps_weight_data_truly_empty() -> None:
@@ -76,16 +80,19 @@ def test_photo_draft_is_linked_to_weigh_event_and_slot() -> None:
     assert "parent_event_id: parenteventid" in FUNCTION.lower()
 
 
-def test_every_ten_roll_batch_is_persisted_and_must_be_confirmed_in_order() -> None:
+def test_variable_roll_batches_preserve_old_rows_and_are_confirmed_in_order() -> None:
     lowered = WEIGH_BATCH_MIGRATION.lower()
     assert "create table if not exists public.ca_can" in lowered
     assert "moc_so_luong = dot_can * 10" in lowered
     assert "so_luong = 10" in lowered
+    assert "ca_can_moc_so_luong_check" in VARIABLE_WEIGH_BATCH_MIGRATION
+    assert "so_luong between 1 and 30" in VARIABLE_WEIGH_BATCH_MIGRATION
     assert "danh_sach_san_pham jsonb" in lowered
     assert 'if (body.action === "confirm_weighing_batch")' in FUNCTION
     assert 'error: "previous_weighing_batch_not_confirmed"' in FUNCTION
     confirm_block = FUNCTION.split('if (body.action === "confirm_weighing_batch")', 1)[1].split(
         'if (body.action === "delete_measurement")', 1
     )[0]
-    assert ".range(offset, offset + 9)" in confirm_block
+    assert ".range(offset, offset + batchSize - 1)" in confirm_block
+    assert "milestone !== offset + batchSize" in confirm_block
     assert ".from(PHOTO_DRAFT_TABLE)" not in confirm_block

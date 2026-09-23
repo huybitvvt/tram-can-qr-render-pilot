@@ -42,6 +42,8 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 - Hỗ trợ nút lưu riêng từng cặp (Lưu riêng cặp 1, Lưu riêng cặp 2).
 - Có thể lưu thành phẩm khi chưa cân lõi; lượt cân lõi còn thiếu được hiển thị rõ.
 - Danh sách hiện bản ghi local ngay sau khi lưu, kể cả lúc đồng bộ cloud chậm.
+- Cài mức tối đa cuộn/đợt riêng theo máy: cách nhiệt 30, bao bì 16, ca chuẩn Đà Nẵng 10; cho xác nhận sớm theo số cuộn đã đồng bộ.
+- Space hoặc nút chụp đếm ngược 3 giây trước khi lấy ảnh camera.
 - Sửa phân trang Danh sách: mỗi trang lấy đúng bản ghi cloud tương ứng, không lặp lại các bản ghi local đã đồng bộ; phiếu chưa đồng bộ vẫn xuất hiện đúng vị trí.
 - Bỏ cảnh báo và chặn lưu khi cân lõi quá 1.2 kg.
 - Ô chọn Máy dạng danh sách gợi ý 5 máy xưởng và cho gõ tay tự do.
@@ -59,10 +61,15 @@ Phiên bản $version của Trạm Cân QR Việt Nhật IPT.
 $handoffDir = Join-Path $projectRoot "dist\handoff-$version"
 $shaFile = Join-Path $handoffDir "SHA256SUMS.txt"
 $updateScript = Join-Path $projectRoot "packaging\CAP-NHAT-BAN-MOI.cmd"
-$assets = @($versionedInstaller, $genericInstaller)
-if (Test-Path -LiteralPath $shaFile) {
-    $assets += $shaFile
+if (-not (Test-Path -LiteralPath $shaFile)) {
+    throw "Thieu $shaFile; updater can checksum de xac minh bo cai"
 }
+$expectedHash = (Get-Content -LiteralPath $shaFile | Where-Object { $_ -match "^[A-Fa-f0-9]{64}  TramCanQR-Setup-$([regex]::Escape($version))\.exe$" } | Select-Object -First 1) -split '  ', 2 | Select-Object -First 1
+$actualHash = (Get-FileHash -LiteralPath $versionedInstaller -Algorithm SHA256).Hash
+if (-not $expectedHash -or $expectedHash -ne $actualHash) {
+    throw "SHA256SUMS.txt khong khop bo cai $versionedInstaller; hay build lai truoc khi release"
+}
+$assets = @($versionedInstaller, $genericInstaller, $shaFile)
 if (Test-Path -LiteralPath $updateScript) {
     $assets += $updateScript
 }

@@ -6,6 +6,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import logging
 import math
 import os
 import re
@@ -90,6 +91,15 @@ from .weight_ocr import (
 
 
 MAX_REQUEST_BYTES = 24 * 1024 * 1024
+
+
+def _max_weigh_batch_size(shift: str, machine: str) -> int:
+    if shift == "Ca chuẩn Đà Nẵng":
+        return 10
+    normalized = unicodedata.normalize("NFKD", machine).encode("ascii", "ignore").decode("ascii")
+    return 30 if re.search(r"cach\W*nhiet", normalized, re.IGNORECASE) else 16
+
+
 SESSION_COOKIE_NAME = "tram_can_session"
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 LOGIN_HTML = """<!doctype html>
@@ -3230,6 +3240,7 @@ class StationUIService:
                             f"FALLBACK KEY ({fallback_slot}): {fallback_suggestion.raw}"
                         )
                         suggestion = fallback_suggestion
+                        selected_ai_reader = fallback_reader
                 crop_is_available = bool(
                     capture_kind in {"core", "product", "inventory"} and roi is not None
                 )
@@ -3246,7 +3257,7 @@ class StationUIService:
                     cropped_frames = [self._gemini_crop(item, roi) for item in ai_frames]
                     fallback = selected_ai_reader.read(cropped_frames, unit=unit)
                     suggestions.append(fallback)
-                    gemini_attempts = 2
+                    gemini_attempts = len(suggestions)
                     gemini_fallback_used = True
                     ai_crop_applied = True
                     suggestion_raw = (
@@ -5385,14 +5396,21 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         milestone = int(payload.get("milestone"))
                     except (TypeError, ValueError) as exc:
                         raise ValueError("Mốc xác nhận không hợp lệ") from exc
+                    try:
+                        batch_size = int(payload.get("batch_size", 10))
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("Số cuộn xác nhận không hợp lệ") from exc
                     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
                         raise ValueError("Ngày cân không hợp lệ")
                     if not shift:
                         raise ValueError("Thiếu ca cân")
                     if not production_order:
                         raise ValueError("Thiếu Lệnh sản xuất")
-                    if milestone < 10 or milestone % 10:
-                        raise ValueError("Chỉ xác nhận theo từng nhóm đủ 10 cuộn")
+                    max_batch_size = _max_weigh_batch_size(shift, machine)
+                    if not 1 <= batch_size <= max_batch_size or milestone < batch_size:
+                        raise ValueError(
+                            f"Số cuộn xác nhận phải từ 1 đến {max_batch_size} cho máy này"
+                        )
                     ingest_url = _ingest_api_url()
                     ingest_token = _ingest_api_token()
                     if not ingest_url or not ingest_token:
@@ -5407,6 +5425,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "machine": machine[:80],
                             "production_order": production_order[:80],
                             "milestone": milestone,
+                            "batch_size": batch_size,
                             "confirmed_by": (web_username or "operator")[:120],
                         },
                     )
@@ -5901,22 +5920,41 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if not 0 <= capture_round <= 2:
                         raise ValueError("Lần cân phải từ 1 đến 3")
                     bind_core = capture_kind != "product" and capture_round == 0
-                    result = service.analyze(
-                        frame,
-                        str(payload.get("roi", "")),
-                        str(payload.get("unit", "kg")),
-                        event_id=str(payload["event_id"]) if bind_core and payload.get("event_id") else None,
-                        station_id=str(payload["station_id"]) if bind_core and payload.get("station_id") else None,
-                        camera_id=str(payload["camera_id"]) if bind_core and payload.get("camera_id") else None,
-                        weight_frames=weight_frames,
-                        require_temporal=bool(payload.get("camera_capture", False)),
-                        recognition_profile=str(payload.get("recognition_profile", "fast")),
-                        recognition_provider=str(payload.get("recognition_provider", "gemini")),
-                        capture_kind=capture_kind,
-                        client_qr_code=str(payload.get("client_qr_code", "")),
-                        context_station_id=str(payload.get("station_id", "")) or None,
-                        context_camera_id=str(payload.get("camera_id", "")) or None,
-                        context_shift=str(payload.get("shift", "")),
+                    provider = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("recognition_provider", "gemini")))[:32]
+                    profile = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("recognition_profile", "fast")))[:32]
+                    analyze_started = time.monotonic()
+                    logging.info(
+                        "AI analysis started kind=%s provider=%s profile=%s burst_frames=%s",
+                        capture_kind or "unspecified", provider, profile, len(weight_frames) + 1,
+                    )
+                    try:
+                        result = service.analyze(
+                            frame,
+                            str(payload.get("roi", "")),
+                            str(payload.get("unit", "kg")),
+                            event_id=str(payload["event_id"]) if bind_core and payload.get("event_id") else None,
+                            station_id=str(payload["station_id"]) if bind_core and payload.get("station_id") else None,
+                            camera_id=str(payload["camera_id"]) if bind_core and payload.get("camera_id") else None,
+                            weight_frames=weight_frames,
+                            require_temporal=bool(payload.get("camera_capture", False)),
+                            recognition_profile=str(payload.get("recognition_profile", "fast")),
+                            recognition_provider=str(payload.get("recognition_provider", "gemini")),
+                            capture_kind=capture_kind,
+                            client_qr_code=str(payload.get("client_qr_code", "")),
+                            context_station_id=str(payload.get("station_id", "")) or None,
+                            context_camera_id=str(payload.get("camera_id", "")) or None,
+                            context_shift=str(payload.get("shift", "")),
+                        )
+                    except Exception as exc:
+                        logging.warning(
+                            "AI analysis failed after %.2fs error_type=%s",
+                            time.monotonic() - analyze_started, type(exc).__name__,
+                        )
+                        raise
+                    logging.info(
+                        "AI analysis finished in %.2fs weight_found=%s quality_pass=%s",
+                        time.monotonic() - analyze_started,
+                        bool(result.get("weight_found")), bool(result.get("quality_pass")),
                     )
                     if (
                         capture_kind

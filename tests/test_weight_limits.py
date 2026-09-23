@@ -69,7 +69,7 @@ round.saved=true;assert.equal(sessionOverWeightLimit(session),false);
     assert result.returncode == 0, result.stderr
 
 
-def test_frontend_does_not_save_images_when_ai_weight_is_unreadable():
+def test_frontend_can_save_unreadable_weights_when_product_image_and_qr_exist():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = [
         "validWeightValue",
@@ -94,8 +94,13 @@ def test_frontend_does_not_save_images_when_ai_weight_is_unreadable():
     script += """
 const round={saved:false,coreImage:'core',productImage:'product',coreAnalysis:{},productAnalysis:{},weight:'',productWeight:'',qr:'ROLL-001',errorStatus:'ok'};
 const session={unit:'kg',rounds:[round]};
-assert.equal(roundReadyToSave(session,0),false);
+assert.equal(roundReadyToSave(session,0),true);
+assert.equal(roundCanSave(session,0),true);
+round.productImage='';
 assert.equal(roundCanSave(session,0),false);
+round.productImage='product';round.qr='';
+assert.equal(roundCanSave(session,0),false);
+round.qr='ROLL-001';
 round.weight='0.16';round.productWeight='1.25';
 assert.equal(roundReadyToSave(session,0),true);
 assert.equal(roundCanSave(session,0),true);
