@@ -31,6 +31,13 @@ test('complete weights and QR enable save despite an unreadable photo draft',asy
  assert.equal(await ctx.verifyQrAgainstServer(draft.qr_code,session,0),false);
  assert.equal(session.rounds[0].qr,draft.qr_code);
 });
+test('captured images and QR enable save when AI cannot read either weight',()=>{
+ const {ctx,session,nodes,messages}=setup();const round=session.rounds[0];
+ round.weight='';round.productWeight='';round.coreAnalysis=null;round.productAnalysis=null;
+ ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,false);
+ assert.equal(messages.at(-1).tone,'ok');
+});
 test('a completed measurement still blocks duplicate QR and explains why',()=>{
  const {ctx,session,nodes,messages}=setup();
  ctx.rebuildProductionQrIndex([{event_id:'saved',qr_code:session.rounds[0].qr}]);ctx.refreshCompletionState(session);
