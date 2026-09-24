@@ -2813,6 +2813,8 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "Đã nhận QR " in TEST_UI_HTML
     assert "persistEditor(session);refreshCompletionState(session)}" in TEST_UI_HTML
     assert "function attachRoundParams(" in TEST_UI_HTML
+    assert 'className=\'save round-save-btn\'' in TEST_UI_HTML
+    assert "saveValidatedCapture(i)" in TEST_UI_HTML
     assert 'id="paramsPark"' in TEST_UI_HTML
     assert "function selectCaptureSlot(" in TEST_UI_HTML
     assert "function captureSlot(" in TEST_UI_HTML
