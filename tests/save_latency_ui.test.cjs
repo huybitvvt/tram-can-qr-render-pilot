@@ -41,15 +41,15 @@ test('a duplicate QR stops all writes and releases save lock',async()=>{
  checks[0].resolve(true);checks[1].resolve(false);await pending;
  assert.deepEqual(calls,['verify0','verify1']);assert.equal(session._saveLock,false);
 });
-test('saving one completed pair keeps the other pair pending',async()=>{
+test('saving one completed pair clears the screen for the next roll',async()=>{
  const {ctx,session,calls,checks}=setup();
  const pending=ctx.saveValidatedCapture(0);
  assert.deepEqual(calls,['verify0']);
  checks[0].resolve(false);await pending;
- assert.deepEqual(calls,['verify0','saveone','history']);
+ assert.deepEqual(calls,['verify0','saveone','history','reset']);
  assert.equal(session.rounds[0].saved,true);
  assert.equal(session.rounds[1].saved,undefined);
- assert.equal(session.state,'awaiting-weight');
+ assert.equal(session.state,'saved');
  assert.equal(session._saveLock,false);
 });
 test('partial save failure retains the remaining round and releases save lock',async()=>{
