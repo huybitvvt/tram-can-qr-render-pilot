@@ -23,7 +23,7 @@ services:
       - key: ROLL_SCALE_GEMINI_31_MODEL
         value: gemini-3.1-flash-lite
       - key: ROLL_SCALE_GEMINI_31_TIMEOUT
-        value: "15.0"
+        value: "30.0"
       - key: ROLL_SCALE_GEMINI_37_MODEL
         value: gemini-3.7-flash
       - key: ROLL_SCALE_GEMINI_37_TIMEOUT
@@ -90,7 +90,7 @@ services:
       - key: ROLL_SCALE_GEMINI_31_MODEL
         value: gemini-3.1-flash-lite
       - key: ROLL_SCALE_GEMINI_31_TIMEOUT
-        value: "15.0"
+        value: "30.0"
       - key: ROLL_SCALE_GEMINI_37_MODEL
         value: gemini-3.7-flash
       - key: ROLL_SCALE_GEMINI_37_TIMEOUT
@@ -157,7 +157,7 @@ services:
       - key: ROLL_SCALE_GEMINI_31_MODEL
         value: gemini-3.1-flash-lite
       - key: ROLL_SCALE_GEMINI_31_TIMEOUT
-        value: "15.0"
+        value: "30.0"
       - key: ROLL_SCALE_GEMINI_37_MODEL
         value: gemini-3.7-flash
       - key: ROLL_SCALE_GEMINI_37_TIMEOUT
@@ -224,7 +224,7 @@ services:
       - key: ROLL_SCALE_GEMINI_31_MODEL
         value: gemini-3.1-flash-lite
       - key: ROLL_SCALE_GEMINI_31_TIMEOUT
-        value: "15.0"
+        value: "30.0"
       - key: ROLL_SCALE_GEMINI_37_MODEL
         value: gemini-3.7-flash
       - key: ROLL_SCALE_GEMINI_37_TIMEOUT

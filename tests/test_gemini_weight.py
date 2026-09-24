@@ -35,6 +35,60 @@ class FakeClient:
         self.closed = True
 
 
+@pytest.mark.parametrize("failure", [504, 503, 502, "timeout"])
+def test_gemini_retries_transient_failure_with_same_image(monkeypatch, failure) -> None:
+    waits = []
+    monkeypatch.setattr("roll_qr_scale.gemini_weight.time.sleep", waits.append)
+    calls = []
+    error = TimeoutError("deadline expired") if failure == "timeout" else RuntimeError("server error")
+    if failure != "timeout":
+        error.code = failure
+    successful = FakeModels({
+        "weight_readable": True, "weight_digits": "1.04",
+        "qr_readable": False, "qr_code": None, "all_frames_agree": True,
+    })
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise error
+        return successful.generate_content(**kwargs)
+
+    reader = GeminiWeightReader("secret-key", timeout_seconds=10.0,
+        client=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
+    result = reader.read([np.zeros((480, 640, 3), dtype=np.uint8)])
+    assert result.readable and result.value == pytest.approx(1.04)
+    assert len(calls) == 2 and waits == [1.0]
+    assert calls[1]["contents"] is calls[0]["contents"]
+    assert calls[1]["config"].http_options.timeout == 30_000
+    assert calls[1]["config"].http_options.retry_options.attempts == 1
+    assert reader.status()["requests"] == 2
+    assert reader.status()["failures"] == 0
+
+
+@pytest.mark.parametrize(("code", "expected_calls"), [(504, 2), (403, 1), (429, 1)])
+def test_gemini_stops_retrying_and_never_invents_weight(monkeypatch, code, expected_calls) -> None:
+    monkeypatch.setattr("roll_qr_scale.gemini_weight.time.sleep", lambda _: None)
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        error = RuntimeError("request failed for secret-key")
+        error.code = code
+        raise error
+
+    reader = GeminiWeightReader("secret-key",
+        client=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content)))
+    result = reader.read([np.zeros((480, 640, 3), dtype=np.uint8)])
+    assert len(calls) == expected_calls
+    assert result.value is None and not result.readable
+    assert result.raw.startswith("GEMINI ERROR:")
+    assert result.transient_error is (code == 504)
+    assert "secret-key" not in result.raw
+    assert reader.status()["requests"] == expected_calls
+    assert reader.status()["failures"] == 1
+
+
 def test_gemini_reader_sends_three_sampled_full_images_and_returns_qr() -> None:
     client = FakeClient({
         "weight_readable": True,

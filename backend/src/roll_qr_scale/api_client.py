@@ -8,6 +8,44 @@ import urllib.parse
 import urllib.error
 from pathlib import Path
 
+import cv2
+import numpy as np
+
+
+_UPLOAD_IMAGE_MAX_EDGE = 1600
+_UPLOAD_IMAGE_TARGET_BYTES = 1_500_000
+
+
+def _compact_upload_image(image: bytes) -> bytes:
+    """Reduce image upload size without changing the durable local evidence."""
+    if len(image) <= 350_000:
+        return image
+    frame = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        return image
+    height, width = frame.shape[:2]
+    longest_edge = max(width, height)
+    if longest_edge > _UPLOAD_IMAGE_MAX_EDGE:
+        scale = _UPLOAD_IMAGE_MAX_EDGE / longest_edge
+        frame = cv2.resize(
+            frame,
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+    best = image
+    for quality in (88, 82, 76):
+        ok, encoded = cv2.imencode(
+            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality]
+        )
+        if not ok:
+            break
+        candidate = encoded.tobytes()
+        if len(candidate) < len(best):
+            best = candidate
+        if len(best) <= _UPLOAD_IMAGE_TARGET_BYTES:
+            break
+    return best
+
 
 class IngestResponseError(RuntimeError):
     """The cloud did not acknowledge the exact event that was sent."""
@@ -551,7 +589,7 @@ def validate_ingest_response(
     return response
 
 
-DEFAULT_SYNC_TIMEOUT = 35.0
+DEFAULT_SYNC_TIMEOUT = 120.0
 
 
 def _effective_sync_timeout(timeout: float | None = None) -> float:
@@ -578,7 +616,19 @@ def post_measurement(
 ) -> dict[str, object]:
     effective_timeout = _effective_sync_timeout(timeout)
     body = dict(payload)
-    body["image_base64"] = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
+    core_image = _compact_upload_image(Path(image_path).read_bytes())
+    body["image_base64"] = base64.b64encode(core_image).decode("ascii")
+    product_image_base64 = body.get("product_image_base64")
+    if isinstance(product_image_base64, str) and product_image_base64:
+        try:
+            product_image = base64.b64decode(product_image_base64, validate=True)
+            compact_product_image = _compact_upload_image(product_image)
+            if len(compact_product_image) < len(product_image):
+                body["product_image_base64"] = base64.b64encode(
+                    compact_product_image
+                ).decode("ascii")
+        except (ValueError, TypeError):
+            pass
     # The shared ingest endpoint routes one-photo inventory checks separately
     # while preserving the established core-weight role for production slips.
     workflow = body.get("workflow")

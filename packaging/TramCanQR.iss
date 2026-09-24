@@ -116,7 +116,7 @@ begin
     '# ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-key-for-station-' + StationSuffix + #13#10 +
     'ROLL_SCALE_GEMINI_MODEL=gemini-3.5-flash-lite' + #13#10 +
     'ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview' + #13#10 +
-    'ROLL_SCALE_GEMINI_TIMEOUT=10.0' + #13#10 +
+    'ROLL_SCALE_GEMINI_TIMEOUT=30.0' + #13#10 +
     'ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT=30.0' + #13#10 +
     '' + #13#10 +
     '# Dien bo Supabase rieng duoc cap cho dung tram nay.' + #13#10 +

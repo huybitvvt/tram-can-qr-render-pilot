@@ -95,7 +95,7 @@ ROLL_SCALE_GEMINI_API_KEY=replace-with-key-for-this-station
 # ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-key-for-this-station
 ROLL_SCALE_GEMINI_MODEL=gemini-3.5-flash-lite
 ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview
-ROLL_SCALE_GEMINI_TIMEOUT=10.0
+ROLL_SCALE_GEMINI_TIMEOUT=30.0
 ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT=30.0
 ```
 
@@ -111,7 +111,7 @@ lượt là 10 giây và 30 giây.
 Bản pilot dùng đúng một camera nhưng để Gemini đọc trực tiếp thì đổi
 `ROLL_SCALE_WEIGHT_ENGINE=gemini`. Paddle không khởi tạo. Gemini chỉ đọc số
 cân từ vùng LED đã crop, không suy đoán mã SP. Nếu crop không đọc được, backend
-thử lại ảnh toàn khung đúng một lần; lỗi mạng/timeout không bị gọi lặp. Ở lần chụp cân sản phẩm, mã QR
+thử lại ảnh toàn khung đúng một lần; lỗi 502/503/504 hoặc timeout được thử lại cùng ảnh một lần với thời hạn 30 giây. Ở lần chụp cân sản phẩm, mã QR
 được trình duyệt và ZXing backend đọc độc lập. Hai bộ giải mã khớp thì tự điền;
 nếu xung đột thì hệ thống để trống và yêu cầu người vận hành kiểm tra.
 

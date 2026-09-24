@@ -1628,6 +1628,45 @@ def test_gemini_full_frame_does_not_retry_network_error(tmp_path, monkeypatch) -
     assert result["gemini_fallback_used"] is False
 
 
+def test_temporary_gemini_failures_do_not_quarantine_either_key(tmp_path, monkeypatch) -> None:
+    class Reader:
+        def __init__(self, recover=False):
+            self.calls = 0
+            self.recover = recover
+
+        def read(self, frames, *, unit):
+            self.calls += 1
+            if self.recover and self.calls > 1:
+                return GeminiWeightSuggestion(1.04, unit, True, True, "GEMINI:ok", 0.1)
+            return GeminiWeightSuggestion(
+                None, unit, False, False, "GEMINI ERROR: 504 DEADLINE_EXCEEDED", 30.0,
+                transient_error=True,
+            )
+
+        def status(self):
+            return {"enabled": True}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(test_ui_module, "detect_weight_roi", lambda frame: None)
+    day, night = Reader(recover=True), Reader()
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None, gemini_reader=day,
+        gemini_night_readers=(night, None, None, None), weight_engine="gemini")
+    frame = np.full((600, 800, 3), 180, dtype=np.uint8)
+    try:
+        first = service.analyze(frame, "auto", "kg", capture_kind="core")
+        assert first["weight_found"] is False
+        assert not service._gemini_failed_slots
+        second = service.analyze(frame, "auto", "kg", capture_kind="core")
+        assert second["weight"] == pytest.approx(1.04)
+        assert day.calls == 2 and night.calls == 1
+    finally:
+        service.close()
+        store.close()
+
+
 def test_gemini_crop_retry_stays_on_healthy_fallback_key(tmp_path, monkeypatch) -> None:
     class FakeGeminiReader:
         def __init__(self, responses):
@@ -2963,10 +3002,10 @@ def test_multistation_defaults_and_html_controls(monkeypatch) -> None:
     assert args.weight_burst_frames == 5
     assert args.weight_engine == "local"
     assert args.gemini_fallback is False
-    assert args.gemini_timeout == pytest.approx(10.0)
+    assert args.gemini_timeout == pytest.approx(30.0)
     assert args.gemini_model == "gemini-3.5-flash-lite"
     assert args.gemini_31_model == "gemini-3.1-flash-lite"
-    assert args.gemini_31_timeout == pytest.approx(15.0)
+    assert args.gemini_31_timeout == pytest.approx(30.0)
     assert args.gemini_37_model == "gemini-3.7-flash"
     assert args.gemini_37_timeout == pytest.approx(30.0)
     assert args.gemini_accurate_model == "gemini-3.1-pro-preview"

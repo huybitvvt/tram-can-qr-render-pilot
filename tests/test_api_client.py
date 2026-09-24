@@ -338,12 +338,12 @@ def test_ingest_ack_rejects_image_less_response_without_local_evidence() -> None
 def test_effective_sync_timeout_defaults_and_env(monkeypatch) -> None:
     from roll_qr_scale.api_client import _effective_sync_timeout, DEFAULT_SYNC_TIMEOUT
 
-    assert _effective_sync_timeout() == DEFAULT_SYNC_TIMEOUT == 35.0
+    assert _effective_sync_timeout() == DEFAULT_SYNC_TIMEOUT == 120.0
     assert _effective_sync_timeout(15.0) == 15.0
     monkeypatch.setenv("ROLL_SCALE_SYNC_TIMEOUT", "45")
     assert _effective_sync_timeout() == 45.0
     monkeypatch.setenv("ROLL_SCALE_SYNC_TIMEOUT", "invalid")
-    assert _effective_sync_timeout() == 35.0
+    assert _effective_sync_timeout() == 120.0
 
 
 def test_post_measurement_passes_effective_timeout(monkeypatch, tmp_path) -> None:
@@ -372,7 +372,7 @@ def test_post_measurement_passes_effective_timeout(monkeypatch, tmp_path) -> Non
 
     # Default timeout
     post_measurement("http://localhost/test", {"event_id": "e1"}, img, "token")
-    assert captured["timeout"] == 35.0
+    assert captured["timeout"] == 120.0
 
     # Custom timeout via env
     monkeypatch.setenv("ROLL_SCALE_SYNC_TIMEOUT", "50")

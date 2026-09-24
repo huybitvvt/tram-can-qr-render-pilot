@@ -17,8 +17,8 @@ DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_GEMINI_31_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_GEMINI_37_MODEL = "gemini-3.7-flash"
 DEFAULT_GEMINI_ACCURATE_MODEL = "gemini-3.1-pro-preview"
-DEFAULT_GEMINI_TIMEOUT_SECONDS = 10.0
-DEFAULT_GEMINI_31_TIMEOUT_SECONDS = 15.0
+DEFAULT_GEMINI_TIMEOUT_SECONDS = 30.0
+DEFAULT_GEMINI_31_TIMEOUT_SECONDS = 30.0
 DEFAULT_GEMINI_37_TIMEOUT_SECONDS = 30.0
 DEFAULT_GEMINI_ACCURATE_TIMEOUT_SECONDS = 30.0
 DEFAULT_GEMINI_MAX_IMAGE_EDGE = 1280
@@ -109,6 +109,7 @@ class GeminiWeightSuggestion:
     output_tokens: int = 0
     thinking_tokens: int = 0
     total_tokens: int = 0
+    transient_error: bool = False
 
 
 class GeminiWeightReader:
@@ -423,6 +424,40 @@ class GeminiWeightReader:
             return "low"
         return "minimal"
 
+    @staticmethod
+    def _is_transient_error(exc: Exception) -> bool:
+        from httpx import TimeoutException
+
+        code = str(getattr(exc, "code", getattr(exc, "status_code", "")))
+        return code in {"502", "503", "504"} or isinstance(
+            exc, (TimeoutError, TimeoutException)
+        )
+
+    def _generate_weight_content(self, *, contents: list[object], config):
+        """Retry a transient API failure once using the same captured evidence."""
+        from google.genai import types
+
+        try:
+            return self.client.models.generate_content(
+                model=self.model, contents=contents, config=config
+            )
+        except Exception as exc:
+            if not self._is_transient_error(exc):
+                raise
+        time.sleep(1.0)
+        self._record_request()
+        # Existing installations may still configure a 10-second deadline.
+        # Give the one recovery attempt 30 seconds; keep SDK retries disabled.
+        retry_config = config.model_copy(update={
+            "http_options": types.HttpOptions(
+                timeout=30_000,
+                retry_options=types.HttpRetryOptions(attempts=1),
+            ),
+        })
+        return self.client.models.generate_content(
+            model=self.model, contents=contents, config=retry_config
+        )
+
     def read(
         self,
         frames: list[np.ndarray],
@@ -485,8 +520,7 @@ class GeminiWeightReader:
                 if self.model.startswith("gemini-3")
                 else types.ThinkingConfig(thinking_budget=0)
             )
-            response = self.client.models.generate_content(
-                model=self.model,
+            response = self._generate_weight_content(
                 contents=contents,
                 config=types.GenerateContentConfig(
                     max_output_tokens=112,
@@ -577,6 +611,7 @@ class GeminiWeightReader:
                 False,
                 f"GEMINI ERROR: {error}",
                 latency,
+                transient_error=self._is_transient_error(exc),
             )
 
     def detect_panel_regions(self, image: np.ndarray) -> dict[str, object]:

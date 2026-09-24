@@ -3211,16 +3211,15 @@ class StationUIService:
                 gemini_attempts = 1
                 suggestion_raw = suggestion.raw
                 suggestions = [suggestion]
-                # A quota/auth/transport failure is returned by the reader as
-                # ``GEMINI ERROR``. Quarantine that key and move this shift to
-                # the alternate key; the failed key is not retried on later
-                # captures until it is replaced or the backend restarts.
+                # Try the alternate key after a request failure. A temporary
+                # server timeout must not quarantine a key for later captures.
                 if (
                     not codex_used
                     and not antigravity_used
                     and self._gemini_request_failed(suggestion)
                 ):
-                    self._mark_gemini_slot_failed(gemini_active_key_slot)
+                    if not getattr(suggestion, "transient_error", False):
+                        self._mark_gemini_slot_failed(gemini_active_key_slot)
                     fallback_target = self._gemini_fallback_reader_from_slot(
                         recognition_profile, gemini_active_key_slot
                     )
@@ -3236,7 +3235,10 @@ class StationUIService:
                         gemini_fallback_used = True
                         gemini_fallback_key_slot = fallback_slot
                         gemini_active_key_slot = fallback_slot
-                        if self._gemini_request_failed(fallback_suggestion):
+                        if (
+                            self._gemini_request_failed(fallback_suggestion)
+                            and not getattr(fallback_suggestion, "transient_error", False)
+                        ):
                             self._mark_gemini_slot_failed(fallback_slot)
                         provider_source = f"gemini-fallback-{fallback_slot}"
                         suggestion_raw = (
@@ -3662,19 +3664,9 @@ class StationUIService:
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
         if not quality_pass:
-            documented_error = (
-                product_frame is not None
-                and _raw_tag(weight_raw, "ERROR_STATUS").lower() == "error"
-                and bool(_raw_tag(weight_raw, "ERROR_REASON").strip())
-            )
-            if not documented_error:
-                raise ValueError(
-                    "Ảnh chưa đạt chất lượng: "
-                    + "; ".join(str(issue) for issue in quality_payload["issues"])
-                )
-            # Keep the operator's four photos even if AI cannot read the scale.
-            # Record that the normal image-quality gate was bypassed for audit.
-            weight_raw = "PHOTO_QUALITY_OVERRIDE=1; " + weight_raw
+            # Poor image quality is advisory for production captures. Save the
+            # operator-confirmed measurement and flag the evidence for review.
+            weight_raw = _upsert_raw_tag(weight_raw, "PHOTO_QUALITY_OVERRIDE", "1")
 
         # ``event_id`` is also the idempotency key used by unbound, per-round
         # saves.  It must be accepted on its own so a browser retry cannot
