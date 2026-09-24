@@ -36,7 +36,9 @@ Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự
 ### Lưu từng lần cân
 
 Trong mỗi thẻ **Lần 1**, **Lần 2**, bấm nút lưu ngay dưới thẻ để chỉ lưu
-lần đó. Khi đủ dữ liệu, nút ghi **Lưu phiếu cân**. Nếu mới có một ảnh hoặc
+lần đó. Nhấn **Enter** hoặc nút **Lưu tất các lần** để lưu mọi lần đang có
+dữ liệu; lần đã đủ điều kiện được ghi thành phiếu cân, lần mới có ảnh được
+ghi thành ảnh chờ. Khi đủ dữ liệu, nút riêng ghi **Lưu phiếu cân**. Nếu mới có một ảnh hoặc
 AI chưa đọc được số, nút ghi **Lưu ảnh chờ**: ảnh được giữ trên máy và tự đồng
 bộ lên cloud, dù ô ảnh còn lại trống. Ảnh chờ chưa phải phiếu cân hoàn chỉnh.
 Sau khi lưu thành công, ảnh của đúng lần đó biến mất để cân tiếp; lần khác
