@@ -7,13 +7,13 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc24`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc24/TramCanQR-Setup-0.2.0-rc24.exe).
+>    Bản `0.2.0-rc25`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc25/TramCanQR-Setup-0.2.0-rc25.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Cân lõi là tùy chọn; lượt chỉ có thành phẩm và mã SP vẫn lưu được. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 
-Bản `0.2.0-rc24` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
+Bản `0.2.0-rc25` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
 
 Mã nguồn được tách theo ranh giới triển khai:
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc24.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc25.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -409,7 +409,7 @@ hoặc giới hạn tài khoản. Khi Codex lỗi, chọn lại Gemini API để
 ### Antigravity đăng nhập Google
 
 Antigravity là lựa chọn thứ ba trong `AI`. Trên máy Windows cần cài Antigravity
-CLI (`agy`) trước, sau đó bấm `Đăng nhập Antigravity` trong giao diện; backend
+CLI (`agy`) trước (có tùy chọn cài trong bộ cài Windows), sau đó bấm `Đăng nhập Antigravity` trong giao diện; backend
 sẽ mở một cửa sổ CLI riêng để đăng nhập Google. Đăng nhập xong bấm lại nút để
 kiểm tra rồi chụp ảnh cân. Có thể chạy thủ công `agy` một lần nếu cửa sổ CLI
 không tự mở.
@@ -424,9 +424,10 @@ $env:ROLL_SCALE_ANTIGRAVITY_API_KEY = "YOUR_SEPARATE_GEMINI_KEY"
 ```
 
 Nếu máy có cả `agy` và API key, backend ưu tiên CLI (tài khoản Google) để
-không gửi nhầm key Gemini hiện tại. Model mặc định của Antigravity là
-`gemini-3.6-flash-low`; `gemini-3.5-flash-lite` không nằm trong danh sách model
-Antigravity hiện tại, nên muốn dùng đúng 3.5 Flash-Lite hãy chọn `Gemini API`.
+không gửi nhầm key Gemini hiện tại. Antigravity ưu tiên `gemini-3.5-flash-low`.
+Nếu tài khoản không còn model đó, backend kiểm tra `agy models` và tự dùng Flash Low
+3.6, 3.7 hoặc 3.8 đang có; giao diện hiện model thực tế. `gemini-3.5-flash-lite`
+là model khác, thuộc lựa chọn `Gemini API`.
 Backend giữ một tiến trình `stream-json` chạy nền và làm nóng ngay lúc kiểm tra
 đăng nhập. Các lần chụp sau tái sử dụng agent đó thay vì khởi động lại `agy`;
 tiến trình được đóng cùng gateway và tự tạo lại nếu CLI bị dừng.

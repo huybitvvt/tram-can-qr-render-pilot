@@ -1,5 +1,5 @@
 #define MyAppName "Tram Can QR"
-#define MyAppVersion "0.2.0-rc24"
+#define MyAppVersion "0.2.0-rc25"
 #define MyAppExeName "TramCanQR.exe"
 
 [Setup]
@@ -24,20 +24,24 @@ Source: "..\packaging\gemini-pilot-config.env.example"; DestDir: "{app}"; Flags:
 Source: "..\packaging\HUONG-DAN-KHACH-HANG.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\docs\GEMINI-COST.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\packaging\CAP-NHAT-BAN-MOI.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\packaging\CAI-ANTIGRAVITY.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 Name: "{autodesktop}\Cập nhật Trạm Cân QR"; Filename: "{app}\CAP-NHAT-BAN-MOI.cmd"; Tasks: desktopicon
 Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startupicon
+Name: "{autoprograms}\Cài Antigravity CLI"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NoExit -ExecutionPolicy Bypass -File ""{app}\CAI-ANTIGRAVITY.ps1"""
 
 [Tasks]
 Name: "desktopicon"; Description: "Tạo biểu tượng ngoài màn hình"; GroupDescription: "Biểu tượng:"
 Name: "startupicon"; Description: "Tự mở Trạm cân QR khi đăng nhập Windows"; GroupDescription: "Khởi động:"; Flags: unchecked
+Name: "antigravitycli"; Description: "Cài Antigravity CLI để đăng nhập Google đọc cân"; GroupDescription: "Tùy chọn AI:"; Flags: unchecked
 
 [Run]
 Filename: "{sys}\notepad.exe"; Parameters: """{localappdata}\TramCanQR\config.env"""; Description: "Mở cấu hình để điền Supabase và Gemini (lần cài đầu)"; Flags: postinstall skipifsilent; Check: ShouldOpenInitialConfig
 Filename: "{app}\{#MyAppExeName}"; Description: "Mở {#MyAppName}"; Flags: nowait postinstall skipifsilent
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NoExit -ExecutionPolicy Bypass -File ""{app}\CAI-ANTIGRAVITY.ps1"""; Description: "Cài Antigravity CLI"; Flags: nowait postinstall skipifsilent; Tasks: antigravitycli
 
 [Code]
 var
@@ -118,6 +122,7 @@ begin
     'ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview' + #13#10 +
     'ROLL_SCALE_GEMINI_TIMEOUT=30.0' + #13#10 +
     'ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT=30.0' + #13#10 +
+    '# ROLL_SCALE_ANTIGRAVITY_MODEL=gemini-3.5-flash-low' + #13#10 +
     '' + #13#10 +
     '# Dien bo Supabase rieng duoc cap cho dung tram nay.' + #13#10 +
     '# ROLL_SCALE_API_URL=https://YOUR_PROJECT_REF.supabase.co/functions/v1/ingest-measurement' + #13#10 +

@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc24` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc25` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc24.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc25.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -135,11 +135,14 @@ Codex**. Nút này mở lại cửa sổ đăng nhập CLI nếu tài khoản ch
 không cần dán API key Codex vào `config.env`. Nếu Codex chưa cài, giao diện sẽ
 hiện hướng dẫn cài CLI; có thể chọn lại **Gemini API** để cân tiếp.
 
-Antigravity là lựa chọn AI thứ ba (sau Gemini API và Codex). Cần cài CLI
-`agy` trên đúng máy chạy backend; trong menu **AI**, chọn **Antigravity · Google**,
+Antigravity là lựa chọn AI thứ ba (sau Gemini API và Codex). Khi cài Trạm Cân QR,
+chọn thêm tác vụ **Cài Antigravity CLI** nếu máy chưa có `agy`. Trong menu **AI**,
+chọn **Antigravity · Google**,
 bấm **Đăng nhập Antigravity**, hoàn tất Google login ở cửa sổ mới rồi bấm lại
-để kiểm tra. Antigravity không dùng model Gemini 3.5 Flash-Lite; muốn dùng
-model đó hãy chọn Gemini API.
+để kiểm tra. Ứng dụng ưu tiên **Gemini 3.5 Flash Low**; nếu tài khoản không có
+model đó, tự chọn bản Flash Low mới hơn và hiện tên model đang dùng. Nếu bỏ qua
+tác vụ cài CLI, chạy lệnh chính thức trong PowerShell:
+`irm https://antigravity.google/cli/install.ps1 | iex`.
 
 ```text
 ROLL_SCALE_WEIGHT_ROIS=0.4500,0.8000,0.5400,0.8500;0.4450,0.7950,0.5350,0.8450;0.4550,0.8050,0.5450,0.8550

@@ -26,6 +26,7 @@ if (-not (Test-Path -LiteralPath $portableExe)) {
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\customer-config.env.example") -Destination $portableDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\gemini-pilot-config.env.example") -Destination $portableDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\HUONG-DAN-KHACH-HANG.md") -Destination $portableDir -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAI-ANTIGRAVITY.ps1") -Destination $portableDir -Force
 
 $innoCandidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -33,7 +34,7 @@ $innoCandidates = @(
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 )
 $iscc = $innoCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-$installerPath = Join-Path $installerDir "TramCanQR-Setup-0.2.0-rc24.exe"
+$installerPath = Join-Path $installerDir "TramCanQR-Setup-0.2.0-rc25.exe"
 if ($iscc) {
     & $iscc packaging\TramCanQR.iss
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build thất bại" }
@@ -44,11 +45,12 @@ if ($iscc) {
     Write-Warning "Inno Setup chưa cài; đã tạo bản portable tại dist\TramCanQR\TramCanQR.exe"
 }
 
-$handoffDir = Join-Path $projectRoot "dist\handoff-0.2.0-rc24"
+$handoffDir = Join-Path $projectRoot "dist\handoff-0.2.0-rc25"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\customer-config.env.example") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\gemini-pilot-config.env.example") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\HUONG-DAN-KHACH-HANG.md") -Destination $handoffDir -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAI-ANTIGRAVITY.ps1") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAP-NHAT-BAN-MOI.cmd") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "docs\GEMINI-COST.md") -Destination $handoffDir -Force
 if (Test-Path -LiteralPath $installerPath) {

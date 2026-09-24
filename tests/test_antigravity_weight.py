@@ -75,7 +75,7 @@ def test_login_check_uses_cached_google_account(monkeypatch) -> None:
         "_run",
         lambda arguments, **kwargs: SimpleNamespace(
             returncode=0,
-            stdout="gemini-3.6-flash-low",
+            stdout="gemini-3.5-flash-low\tGemini 3.5 Flash (Low)",
             stderr="",
         ),
     )
@@ -89,9 +89,68 @@ def test_login_check_uses_cached_google_account(monkeypatch) -> None:
     assert reader.status(refresh=True)["available"] is True
 
 
+def test_cli_prefers_flash_35_low_and_falls_back_only_when_unavailable(monkeypatch) -> None:
+    reader = AntigravityWeightReader(command="agy")
+    assert reader.requested_model == "gemini-3.5-flash-low"
+    monkeypatch.setattr(
+        reader,
+        "_run",
+        lambda arguments, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="gemini-3.5-flash-low\tGemini 3.5 Flash (Low)\n"
+            "gemini-3.6-flash-low\tGemini 3.6 Flash (Low)",
+            stderr="",
+        ),
+    )
+    reader._select_cli_model()
+    assert reader.model == "gemini-3.5-flash-low"
+
+    fallback = AntigravityWeightReader(command="agy")
+    monkeypatch.setattr(
+        fallback,
+        "_run",
+        lambda arguments, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="gemini-3.6-flash-low\tGemini 3.6 Flash (Low)",
+            stderr="",
+        ),
+    )
+    fallback._select_cli_model()
+    assert fallback.model == "gemini-3.6-flash-low"
+    assert fallback.status(refresh=True)["requested_model"] == "gemini-3.5-flash-low"
+
+
+def test_cli_rejects_missing_explicit_model(monkeypatch) -> None:
+    reader = AntigravityWeightReader(command="agy", model="gemini-3.7-flash-low")
+    monkeypatch.setattr(
+        reader,
+        "_run",
+        lambda arguments, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="gemini-3.6-flash-low\tGemini 3.6 Flash (Low)",
+            stderr="",
+        ),
+    )
+    with pytest.raises(RuntimeError, match="không có trên tài khoản"):
+        reader._select_cli_model()
+
+
+def test_standby_reuses_checked_model_and_closed_reader_cannot_start() -> None:
+    reader = AntigravityWeightReader(command="agy")
+    reader.model = "gemini-3.6-flash-low"
+    reader._model_checked = True
+    standby = reader._new_standby_reader()
+    assert standby.model == "gemini-3.6-flash-low"
+    assert standby._model_checked is True
+    standby.close()
+    with pytest.raises(RuntimeError, match="đã đóng"):
+        standby._start_stream_locked()
+
+
 def test_persistent_stream_uses_safe_headless_flags(monkeypatch) -> None:
     reader = AntigravityWeightReader(command="agy")
     monkeypatch.setattr(reader, "_executable", lambda: "agy")
+    monkeypatch.setattr(reader, "_select_cli_model", lambda: None)
     captured = {}
 
     class FakeProcess:
@@ -138,6 +197,7 @@ def test_persistent_stream_uses_safe_headless_flags(monkeypatch) -> None:
     assert "--new-project" in arguments
     assert arguments[arguments.index("--agent") + 1] == "roll-scale-reader"
     assert arguments[arguments.index("--effort") + 1] == "low"
+    assert arguments[arguments.index("--model") + 1] == "gemini-3.5-flash-low"
     assert "--sandbox" in arguments
     assert "--dangerously-skip-permissions" not in arguments
     assert "excludeDefaultComponents: true" in captured["agent_definition"]

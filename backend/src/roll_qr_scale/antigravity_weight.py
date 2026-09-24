@@ -22,7 +22,12 @@ import numpy as np
 from .gemini_weight import GeminiWeightSuggestion
 
 
-DEFAULT_ANTIGRAVITY_MODEL = "gemini-3.6-flash-low"
+DEFAULT_ANTIGRAVITY_MODEL = "gemini-3.5-flash-low"
+_LOW_LATENCY_FALLBACK_MODELS = (
+    "gemini-3.6-flash-low",
+    "gemini-3.7-flash-low",
+    "gemini-3.8-flash-low",
+)
 DEFAULT_ANTIGRAVITY_COMMAND = "agy"
 DEFAULT_ANTIGRAVITY_TIMEOUT_SECONDS = 120.0
 DEFAULT_ANTIGRAVITY_MAX_IMAGE_EDGE = 1280
@@ -108,7 +113,10 @@ class AntigravityWeightReader:
         if not 1 <= int(rotate_image_turns) <= 50:
             raise ValueError("Antigravity rotation must be between 1 and 50 image turns")
         self.command = command
+        self.requested_model = model
         self.model = model
+        self._model_checked = False
+        self._model_lock = threading.Lock()
         self.timeout_seconds = float(timeout_seconds)
         self.api_key = str(api_key or os.environ.get("ROLL_SCALE_ANTIGRAVITY_API_KEY", "")).strip()
         self.max_image_edge = int(max_image_edge)
@@ -247,6 +255,43 @@ class AntigravityWeightReader:
             check=False,
         )
 
+    def _select_cli_model(self) -> None:
+        """Pin an available low-effort Flash model before starting a CLI stream."""
+        if self._model_checked:
+            return
+        with self._model_lock:
+            if self._model_checked:
+                return
+            result = self._run(
+                ["models"],
+                cwd=Path(tempfile.gettempdir()),
+                timeout=min(60.0, self.timeout_seconds),
+            )
+            if result.returncode != 0:
+                raise RuntimeError("Không kiểm tra được danh sách model Antigravity")
+            available = {
+                line.split(None, 1)[0]
+                for line in result.stdout.splitlines()
+                if line.strip() and line[0].isalnum()
+            }
+            if self.requested_model in available:
+                selected = self.requested_model
+            elif self.requested_model == DEFAULT_ANTIGRAVITY_MODEL:
+                selected = next(
+                    (item for item in _LOW_LATENCY_FALLBACK_MODELS if item in available),
+                    None,
+                )
+                if selected is None:
+                    raise RuntimeError("Tài khoản Antigravity không có model Flash Low khả dụng")
+            else:
+                raise RuntimeError(
+                    f"Model Antigravity {self.requested_model} không có trên tài khoản này"
+                )
+            self.model = selected
+            self._model_checked = True
+            with self._lock:
+                self._status_cache = None
+
     @staticmethod
     def _json_from_output(output: str) -> dict[str, Any]:
         cleaned = str(output or "").strip()
@@ -350,6 +395,8 @@ class AntigravityWeightReader:
         Path,
         queue.Queue[str | None],
     ]:
+        if self._rotation_closed:
+            raise RuntimeError("Antigravity reader đã đóng")
         current = self._stream_process
         workspace = self._stream_workspace
         events = self._stream_events
@@ -364,6 +411,9 @@ class AntigravityWeightReader:
         executable = self._executable()
         if executable is None:
             raise FileNotFoundError("Không tìm thấy Antigravity CLI (`agy`) trên máy backend")
+        self._select_cli_model()
+        if self._rotation_closed:
+            raise RuntimeError("Antigravity reader đã đóng")
         workspace = tempfile.TemporaryDirectory(prefix="roll-scale-antigravity-stream-")
         workspace_path = Path(workspace.name)
         schema_path = workspace_path / "response-schema.json"
@@ -415,6 +465,9 @@ class AntigravityWeightReader:
         self._stream_workspace = workspace
         self._stream_events = events
         self._stream_stderr.clear()
+        if self._rotation_closed:
+            self._stop_stream_locked(graceful=False)
+            raise RuntimeError("Antigravity reader đã đóng")
         threading.Thread(
             target=self._pipe_stdout,
             args=(process, events),
@@ -519,7 +572,7 @@ class AntigravityWeightReader:
             self._stream_warmed = True
 
     def _new_standby_reader(self) -> AntigravityWeightReader:
-        return AntigravityWeightReader(
+        standby = AntigravityWeightReader(
             self.command,
             model=self.model,
             timeout_seconds=self.timeout_seconds,
@@ -529,6 +582,8 @@ class AntigravityWeightReader:
             rotate_image_turns=self.rotate_image_turns,
             _allow_standby=False,
         )
+        standby._model_checked = self._model_checked
+        return standby
 
     def _ensure_standby_warming(self) -> None:
         """Prepare a clean conversation without adding cold-start to a capture."""
@@ -753,12 +808,14 @@ class AntigravityWeightReader:
                 if authenticated
                 else "Đã thấy Antigravity CLI; bấm Đăng nhập rồi Kiểm tra"
             )
+            if authenticated and self.model != self.requested_model:
+                message += f" · 3.5 Flash Low chưa có; đang dùng {self.model}"
         else:
             authenticated = False
             available = False
             auth_method = None
             message = (
-                "Chưa cài Antigravity CLI (`agy`) và chưa có ROLL_SCALE_ANTIGRAVITY_API_KEY"
+                "Chưa cài Antigravity CLI (`agy`); chạy Cài Antigravity CLI trong menu Start"
             )
         result: dict[str, object] = {
             "enabled": True,
@@ -769,6 +826,7 @@ class AntigravityWeightReader:
             "available": available,
             "auth_method": auth_method,
             "model": self.model,
+            "requested_model": self.requested_model,
             "message": message,
             "persistent_process": bool(
                 self._stream_process is not None
@@ -981,32 +1039,25 @@ class AntigravityWeightReader:
                 "message": "Chưa cài Antigravity CLI (`agy`)",
             }
         try:
-            completed = self._run(
-                ["-p", "/model", "--print-timeout", "15s"],
-                cwd=Path(tempfile.gettempdir()),
-                timeout=min(20.0, self.timeout_seconds),
-            )
-            authenticated = completed.returncode == 0
-            message = (
-                "Antigravity đã đăng nhập và phản hồi được"
-                if authenticated
-                else (completed.stderr or completed.stdout or "Antigravity chưa đăng nhập").strip()[-300:]
-            )
+            self._select_cli_model()
+            self._warm_stream()
             with self._lock:
-                self._authenticated = authenticated
+                self._authenticated = True
                 self._status_cache = None
-            if authenticated:
-                try:
-                    self._warm_stream()
-                    message = "Antigravity đã đăng nhập; agent đọc cân đã được làm nóng"
-                except Exception as exc:
-                    message = (
-                        "Antigravity đã đăng nhập nhưng chưa làm nóng được agent: "
-                        f"{self._safe_error(exc)}"
-                    )
-            return {"ok": authenticated, "authenticated": authenticated, "message": message}
+            return {
+                "ok": True,
+                "authenticated": True,
+                "message": f"Antigravity đã đăng nhập; agent đọc cân sẵn sàng · model {self.model}",
+            }
         except Exception as exc:
-            return {"ok": False, "authenticated": False, "message": self._safe_error(exc)}
+            with self._lock:
+                self._authenticated = False
+                self._status_cache = None
+            return {
+                "ok": False,
+                "authenticated": False,
+                "message": "Antigravity chưa sẵn sàng: " + self._safe_error(exc),
+            }
 
     def read(self, frames: list[np.ndarray], *, unit: str = "kg") -> GeminiWeightSuggestion:
         sampled = self._sample_frames(frames)
@@ -1083,6 +1134,7 @@ class AntigravityWeightReader:
             self._standby_reader = None
             self._standby_ready = False
         if standby is not None:
+            standby._rotation_closed = True
             process = standby._stream_process
             if process is not None and process.poll() is None:
                 try:
@@ -1094,7 +1146,7 @@ class AntigravityWeightReader:
                 and standby_thread is not threading.current_thread()
                 and standby_thread.is_alive()
             ):
-                standby_thread.join(timeout=5.0)
+                standby_thread.join(timeout=10.0)
             if standby_thread is None or not standby_thread.is_alive():
                 standby.close()
         with self._stream_lock:

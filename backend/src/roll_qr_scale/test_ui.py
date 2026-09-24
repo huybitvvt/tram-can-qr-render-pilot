@@ -4233,7 +4233,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--antigravity-model",
         default=os.environ.get("ROLL_SCALE_ANTIGRAVITY_MODEL", DEFAULT_ANTIGRAVITY_MODEL),
-        help="Model Antigravity (mặc định gemini-3.6-flash-low; 3.5 Flash-Lite không thuộc Antigravity)",
+        help="Ưu tiên gemini-3.5-flash-low; tự dùng Flash Low mới hơn nếu tài khoản không có 3.5",
     )
     parser.add_argument(
         "--antigravity-timeout",
