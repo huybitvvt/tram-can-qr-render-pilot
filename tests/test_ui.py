@@ -449,6 +449,32 @@ def test_ui_photo_capture_decodes_qr_without_calling_weight_ai(tmp_path) -> None
     store.close()
 
 
+def test_ui_photo_capture_survives_local_qr_decoder_failure(tmp_path, monkeypatch) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    def failed_qr(_frame):
+        raise RuntimeError("QR decoder unavailable")
+    monkeypatch.setattr(service, "_decode_qr", failed_qr)
+    capture_id = "db9c7561-658f-4f9e-99fc-beb38f469a45"
+    result = service.capture_photo_draft(
+        make_qr_frame("QR-PHOTO-BACKUP"),
+        event_id=capture_id,
+        parent_event_id="73558b23-20b3-4590-96d5-67fe50e21390",
+        capture_kind="core",
+        capture_round=0,
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+    saved = store.get_photo_draft(capture_id)
+    assert result["ok"] is True
+    assert result["ai_requested"] is False
+    assert result["qr_code"] == ""
+    assert saved is not None
+    assert Path(saved.image_path).is_file()
+    service.close()
+    store.close()
+
+
 def test_ui_inventory_ai_miss_photo_is_saved_without_weight(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
@@ -2178,7 +2204,7 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "rollBatchConfirmActive()" in TEST_UI_HTML
     assert 'id="dismissRollBatchBtn"' in TEST_UI_HTML
     assert "function dismissRollBatchModal" in TEST_UI_HTML
-    assert "Không bắt buộc" in TEST_UI_HTML
+    assert "không bắt buộc" in TEST_UI_HTML.lower()
     assert "function markWeightThresholdAlerts(){return null}" in TEST_UI_HTML
     assert "function coreWeightOverLimit(){return false}" in TEST_UI_HTML
     assert "function productWeightOverLimit(){return false}" in TEST_UI_HTML
@@ -2814,7 +2840,7 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "persistEditor(session);refreshCompletionState(session)}" in TEST_UI_HTML
     assert "function attachRoundParams(" in TEST_UI_HTML
     assert 'className=\'save round-save-btn\'' in TEST_UI_HTML
-    assert "saveValidatedCapture(i)" in TEST_UI_HTML
+    assert "saveRoundEvidence(i)" in TEST_UI_HTML
     assert 'id="paramsPark"' in TEST_UI_HTML
     assert "function selectCaptureSlot(" in TEST_UI_HTML
     assert "function captureSlot(" in TEST_UI_HTML

@@ -2927,7 +2927,11 @@ class StationUIService:
             raise ValueError("Mã QR từ trình duyệt không hợp lệ")
         # QR is deliberately outside the shared AI/FIFO inference queue so a
         # busy or failed Gemini request cannot delay photo-only capture.
-        decoded = self._decode_qr(frame)
+        try:
+            decoded = self._decode_qr(frame)
+        except Exception as exc:
+            logging.warning("QR decode failed; saving photo draft without local QR: %s", exc)
+            decoded = {"qr_code": "", "decoder": "unavailable"}
         local_qr = str(decoded.get("qr_code") or "").strip()
         qr_conflict = bool(client_qr and local_qr and client_qr != local_qr)
         if qr_conflict:

@@ -7,13 +7,13 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc20`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc20/TramCanQR-Setup-0.2.0-rc20.exe).
+>    Bản `0.2.0-rc21`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc21/TramCanQR-Setup-0.2.0-rc21.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Cân lõi là tùy chọn; lượt chỉ có thành phẩm và mã SP vẫn lưu được. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 
-Bản `0.2.0-rc20` sửa nhãn camera bị kẹt ở “Đang phân tích” sau khi AI trả kết quả và giữ thông báo chi tiết khi AI chưa đọc được số cân. Bản này giữ cách hiển thị số cân AI khi ảnh chưa đạt của rc19, khả năng lưu hai lượt có bốn ảnh và số cân AI trống của rc18, cùng cách đếm ngược 3 giây và giới hạn cuộn/đợt theo máy của rc17. Môi trường chưa triển khai chức năng xác nhận đợt cân mới cần chạy migration `20260923010000_variable_weighing_batch_size.sql` và deploy Edge Function `ingest-measurement` trước khi dùng chức năng đó.
+Bản `0.2.0-rc21` chỉ lưu lần cân được chọn; ảnh đơn lẻ hoặc ảnh AI không đọc được có thể lưu vào ảnh chờ và tự đồng bộ cloud, không cần chụp đủ các ô. Màn hình chỉ dọn khi không còn dữ liệu chưa lưu. Xác nhận số cuộn là thao tác riêng, không chặn lưu phiếu cân. Chức năng xác nhận đợt cân cần chạy các migration đến `20260924020000_restore_weigh_batch_checks.sql` và deploy Edge Function `ingest-measurement` mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
 
 Mã nguồn được tách theo ranh giới triển khai:
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc20.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc21.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 

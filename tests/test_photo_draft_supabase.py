@@ -37,6 +37,13 @@ RELAXED_WEIGH_BATCH_MIGRATION = (
     / "migrations"
     / "20260924010000_relax_weigh_batch_confirmation.sql"
 ).read_text(encoding="utf-8")
+RESTORED_WEIGH_BATCH_MIGRATION = (
+    ROOT
+    / "backend"
+    / "supabase"
+    / "migrations"
+    / "20260924020000_restore_weigh_batch_checks.sql"
+).read_text(encoding="utf-8")
 
 
 def test_photo_draft_table_keeps_weight_data_truly_empty() -> None:
@@ -107,5 +114,10 @@ def test_weigh_batch_confirmation_allows_partial_or_empty_batches() -> None:
     assert "so_luong: products.length" in confirm_block
     assert "products[0]?.can_luc || confirmedAt" in confirm_block
     relaxed = RELAXED_WEIGH_BATCH_MIGRATION.lower()
-    assert "contype = 'c'" in relaxed
-    assert "drop constraint" in relaxed
+    assert "drop constraint if exists ca_can_so_luong_check" in relaxed
+    assert "so_luong between 0 and 30" in relaxed
+    assert "contype = 'c'" not in relaxed
+    restored = RESTORED_WEIGH_BATCH_MIGRATION.lower()
+    assert "ca_can_danh_sach_san_pham_check" in restored
+    assert "ca_can_trang_thai_check" in restored
+    assert "gio_bat_dau <= gio_ket_thuc" in restored

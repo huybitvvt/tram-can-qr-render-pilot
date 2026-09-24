@@ -368,19 +368,17 @@ create table if not exists public.ca_can (
   xac_nhan_boi text not null default '',
   xac_nhan_luc timestamptz not null default now(),
   created_at timestamptz not null default now(),
-  unique (ngay_can, ca, may, lenh_san_xuat, dot_can)
+  unique (ngay_can, ca, may, lenh_san_xuat, dot_can),
+  constraint ca_can_dot_can_check check (dot_can > 0),
+  constraint ca_can_moc_so_luong_check check (moc_so_luong >= so_luong),
+  constraint ca_can_gio_can_check check (gio_bat_dau <= gio_ket_thuc)
 );
 
-do $$
-declare constraint_name text;
-begin
-  for constraint_name in
-    select conname from pg_constraint
-    where conrelid = 'public.ca_can'::regclass and contype = 'c'
-  loop
-    execute format('alter table public.ca_can drop constraint %I', constraint_name);
-  end loop;
-end $$;
+alter table public.ca_can
+  drop constraint if exists ca_can_so_luong_check;
+
+alter table public.ca_can
+  add constraint ca_can_so_luong_check check (so_luong between 0 and 30);
 
 create index if not exists ca_can_source_idx
   on public.ca_can (ngay_can desc, ca, may, lenh_san_xuat, dot_can desc);
