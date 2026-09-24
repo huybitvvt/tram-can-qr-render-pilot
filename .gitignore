@@ -25,3 +25,6 @@ data/test_frame.png
 !.env.example
 Quanlycuahangxe/
 supabase/
+!backend/supabase/
+!backend/supabase/migrations/
+!backend/supabase/migrations/20260924010000_relax_weigh_batch_confirmation.sql

@@ -1068,9 +1068,6 @@ Deno.serve(async (request: Request) => {
       });
     }
     if (existingBatch) {
-      if (Number(existingBatch.so_luong) !== batchSize) {
-        return json(409, { ok: false, error: "weighing_batch_size_conflict" });
-      }
       return json(200, { ok: true, duplicate: true, item: existingBatch });
     }
     const { data: previousBatch, error: previousBatchError } = await supabase
@@ -1093,14 +1090,6 @@ Deno.serve(async (request: Request) => {
     }
     const offset = Number(previousBatch?.moc_so_luong ?? 0);
     const batchNumber = Number(previousBatch?.dot_can ?? 0) + 1;
-    if (milestone !== offset + batchSize) {
-      return json(409, {
-        ok: false,
-        error: "previous_weighing_batch_not_confirmed",
-        message: `Mốc xác nhận tiếp theo là ${offset + batchSize} cuộn (đợt ${batchNumber})`,
-        expected: offset + batchSize,
-      });
-    }
     const batchKey = [workDate, shift, machine, productionOrder, batchNumber].join("|");
     let rowsQuery = supabase
       .from(MEASUREMENT_TABLE)
@@ -1121,16 +1110,7 @@ Deno.serve(async (request: Request) => {
         detail: rowsError.message,
       });
     }
-    if (!Array.isArray(batchRows) || batchRows.length !== batchSize) {
-      return json(409, {
-        ok: false,
-        error: "weighing_batch_not_synced",
-        message: `Chưa đủ ${batchSize} cuộn đã đồng bộ Supabase cho đợt này`,
-        expected: batchSize,
-        found: Array.isArray(batchRows) ? batchRows.length : 0,
-      });
-    }
-    const products = batchRows.map((row, index) => {
+    const products = (Array.isArray(batchRows) ? batchRows : []).map((row, index) => {
       const item = row as Record<string, unknown>;
       const metadata = item.metadata !== null && typeof item.metadata === "object"
         ? item.metadata as Record<string, unknown>
@@ -1157,22 +1137,23 @@ Deno.serve(async (request: Request) => {
       };
     });
     const productCodes = [...new Set(products.map((item) => item.ma_san_pham).filter(Boolean))];
+    const confirmedAt = new Date().toISOString();
     const rowToInsert = {
       batch_key: batchKey,
       dot_can: batchNumber,
       moc_so_luong: milestone,
       ma_san_pham: productCodes.join(", ") || "--",
-      so_luong: batchSize,
+      so_luong: products.length,
       ngay_can: workDate,
-      gio_bat_dau: products[0].can_luc,
-      gio_ket_thuc: products[products.length - 1].can_luc,
+      gio_bat_dau: products[0]?.can_luc || confirmedAt,
+      gio_ket_thuc: products[products.length - 1]?.can_luc || confirmedAt,
       ca: shift,
       may: machine,
       lenh_san_xuat: productionOrder,
       danh_sach_san_pham: products,
       trang_thai: "confirmed",
       xac_nhan_boi: confirmedBy,
-      xac_nhan_luc: new Date().toISOString(),
+      xac_nhan_luc: confirmedAt,
     };
     const { data: insertedBatch, error: insertBatchError } = await supabase
       .from(WEIGH_BATCH_TABLE)

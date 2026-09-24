@@ -5409,6 +5409,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         batch_size = int(payload.get("batch_size", 10))
                     except (TypeError, ValueError) as exc:
                         raise ValueError("Số cuộn xác nhận không hợp lệ") from exc
+                    try:
+                        current_count = max(0, int(payload.get("current_count") or 0))
+                    except (TypeError, ValueError):
+                        current_count = 0
                     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
                         raise ValueError("Ngày cân không hợp lệ")
                     if not shift:
@@ -5435,6 +5439,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "production_order": production_order[:80],
                             "milestone": milestone,
                             "batch_size": batch_size,
+                            "current_count": current_count,
+                            "allow_partial": bool(payload.get("allow_partial")),
                             "confirmed_by": (web_username or "operator")[:120],
                         },
                     )

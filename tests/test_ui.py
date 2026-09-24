@@ -2831,7 +2831,7 @@ def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> Non
     assert "/api/weighing-batches/confirm" in TEST_UI_HTML
     assert "Đang tạo đợt cân trong bảng ca_can" in TEST_UI_HTML
     assert "writeRollBatchConfirmed(0)" in TEST_UI_HTML
-    assert "Math.min(available,rollBatchSize())" in TEST_UI_HTML
+    assert "readRollBatchConfirmed()+rollBatchSize()" in TEST_UI_HTML
 
 
 def test_ui_buttons_start_once_and_show_immediate_press_feedback() -> None:
