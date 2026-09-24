@@ -61,6 +61,20 @@ test('confirmation permits a partial batch while retaining the configured target
  assert.equal(sent.allow_partial,true);
 });
 
+test('confirmation preview shows estimated new rolls rather than the target milestone',()=>{
+ const nodes=new Map();
+ const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:true,textContent:'',checked:false,classList:{add(){},remove(){}},setAttribute(){},focus(){}});return nodes.get(id)};
+ const ctx=vm.createContext({$:node,weighBatchRows:[{dot_can:7,so_luong:4},{dot_can:8,so_luong:0}],rollBatchSize:()=>16,sourceLabel:()=> 'Ca A',status(){},syncRollBatchConfirmButton(){},renderControls(){}});
+ vm.runInContext('let rollBatchPendingMilestone=0,rollBatchPendingCount=0,rollBatchPendingSize=0;',ctx);
+ const start=script.indexOf('function openRollBatchModal(');
+ vm.runInContext(script.slice(start,script.indexOf('\nfunction nextRollBatchMilestone(',start)),ctx);
+ ctx.openRollBatchModal(144,20);
+ assert.equal(node('rollBatchCount').textContent,'Ước tính 16 cuộn mới');
+ assert.match(node('rollBatchNote').textContent,/Mốc 144 là mốc dự kiến/);
+ ctx.openRollBatchModal(144,null);
+ assert.equal(node('rollBatchCount').textContent,'--');
+});
+
 test('machine limits default to thermal 30, packaging 16, Da Nang 10 and can be changed separately',()=>{
  const saved=new Map(),nodes={sourceShift:{value:'HC1'},sourceMachine:{value:'MÁY CÁCH NHIỆT 11'},rollBatchSize:{value:'24'}},context={shift:'HC1',machine:'MÁY CÁCH NHIỆT 11'};
  const ctx=vm.createContext({sourceContext:context,sanitizeMachine:value=>String(value||'').trim(),

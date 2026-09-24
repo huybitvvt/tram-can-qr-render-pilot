@@ -38,6 +38,53 @@ def test_weigh_batch_limit_per_machine(shift: str, machine: str, expected: int) 
     assert test_ui_module._max_weigh_batch_size(shift, machine) == expected
 
 
+def test_analyze_accepts_fourth_weighing_round(tmp_path, monkeypatch) -> None:
+    import json
+    import urllib.error
+    import urllib.request
+
+    server, service = test_ui_module.create_server(
+        test_ui_module.build_parser().parse_args(
+            ["--db", str(tmp_path / "measurements.db"), "--captures", str(tmp_path / "captures"),
+             "--yolo-model", "", "--port", "0"]
+        )
+    )
+    analyzed = []
+
+    def fake_analyze(*args, **kwargs):
+        analyzed.append(kwargs)
+        return {"weight_found": False, "quality_pass": False, "weight_raw": ""}
+
+    monkeypatch.setattr(service, "analyze", fake_analyze)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    image = image_data_url(np.full((200, 300, 3), 255, dtype=np.uint8))
+
+    def request(round_index):
+        return urllib.request.Request(
+            f"http://{host}:{port}/api/analyze",
+            data=json.dumps({"image": image, "capture_kind": "core", "capture_round": round_index}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+
+    try:
+        with urllib.request.urlopen(request(3)) as response:
+            assert response.status == 200
+        assert len(analyzed) == 1
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(request(4))
+        assert error.value.code == 422
+        assert len(analyzed) == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+        if service.sync_worker is not None:
+            service.sync_worker.stop()
+        service.close()
+
+
 def make_qr_frame(value: str) -> np.ndarray:
     qr = qrcode.make(value).convert("RGB").resize((360, 360))
     frame = np.full((600, 800, 3), 245, dtype=np.uint8)
@@ -2873,7 +2920,7 @@ def test_ui_buttons_start_once_and_show_immediate_press_feedback() -> None:
     assert "function captureNextWeight()" in TEST_UI_HTML
     assert "if(!button.disabled)button.click()" in TEST_UI_HTML
     assert "$('discardBtn').click()" in TEST_UI_HTML
-    assert "$('saveBtn').click()" in TEST_UI_HTML
+    assert "if(event.key==='Enter'){if(event.target.closest&&event.target.closest('button'))return;event.preventDefault();saveAllRounds()}" in TEST_UI_HTML
     assert "Chụp lại cân lõi?" not in TEST_UI_HTML
 
 

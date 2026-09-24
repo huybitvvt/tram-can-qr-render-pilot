@@ -1077,7 +1077,6 @@ Deno.serve(async (request: Request) => {
       .eq("ca", shift)
       .eq("may", machine)
       .eq("lenh_san_xuat", productionOrder)
-      .eq("trang_thai", "confirmed")
       .order("dot_can", { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -1088,29 +1087,64 @@ Deno.serve(async (request: Request) => {
         detail: previousBatchError.message,
       });
     }
-    const offset = Number(previousBatch?.moc_so_luong ?? 0);
     const batchNumber = Number(previousBatch?.dot_can ?? 0) + 1;
     const batchKey = [workDate, shift, machine, productionOrder, batchNumber].join("|");
-    let rowsQuery = supabase
-      .from(MEASUREMENT_TABLE)
-      .select(
-        "event_id,qr_code,weight,tare_weight,net_weight,unit,captured_at,error_status,error_reason,metadata",
-      )
-      .eq("metadata->>work_date", workDate)
-      .eq("metadata->>shift", shift)
-      .eq("metadata->>production_order", productionOrder)
-      .order("captured_at", { ascending: true })
-      .range(offset, offset + batchSize - 1);
-    if (machine) rowsQuery = rowsQuery.eq("metadata->>machine", machine);
-    const { data: batchRows, error: rowsError } = await rowsQuery;
-    if (rowsError) {
-      return json(500, {
+    // A target milestone is not a measurement offset: partial confirmations
+    // would otherwise skip unsynced or unconfirmed rolls permanently.
+    const confirmedEventIds = new Set<string>();
+    const pageSize = 200;
+    for (let page = 0;; page += pageSize) {
+      const { data: priorBatches, error: priorError } = await supabase
+        .from(WEIGH_BATCH_TABLE)
+        .select("danh_sach_san_pham")
+        .eq("ngay_can", workDate)
+        .eq("ca", shift)
+        .eq("may", machine)
+        .eq("lenh_san_xuat", productionOrder)
+        .eq("trang_thai", "confirmed")
+        .order("dot_can", { ascending: true })
+        .range(page, page + pageSize - 1);
+      if (priorError) {
+        return json(500, { ok: false, error: "previous_weighing_batch_lookup_failed", detail: priorError.message });
+      }
+      for (const batch of priorBatches ?? []) {
+        for (const product of Array.isArray(batch.danh_sach_san_pham) ? batch.danh_sach_san_pham : []) {
+          if (product && typeof product.event_id === "string") confirmedEventIds.add(product.event_id);
+        }
+      }
+      if ((priorBatches?.length ?? 0) < pageSize) break;
+    }
+    const batchRows: Record<string, unknown>[] = [];
+    for (let offset = 0;; offset += pageSize) {
+      let rowsQuery = supabase
+        .from(MEASUREMENT_TABLE)
+        .select("event_id,qr_code,weight,tare_weight,net_weight,unit,captured_at,error_status,error_reason,metadata")
+        .eq("metadata->>work_date", workDate)
+        .eq("metadata->>shift", shift)
+        .eq("metadata->>production_order", productionOrder)
+        .order("captured_at", { ascending: true })
+        .order("event_id", { ascending: true })
+        .range(offset, offset + pageSize - 1);
+      if (machine) rowsQuery = rowsQuery.eq("metadata->>machine", machine);
+      const { data: pageRows, error: rowsError } = await rowsQuery;
+      if (rowsError) {
+        return json(500, { ok: false, error: "weighing_batch_rows_failed", detail: rowsError.message });
+      }
+      for (const row of pageRows ?? []) {
+        if (confirmedEventIds.has(String(row.event_id ?? ""))) continue;
+        batchRows.push(row);
+        if (batchRows.length === batchSize) break;
+      }
+      if (batchRows.length === batchSize || (pageRows?.length ?? 0) < pageSize) break;
+    }
+    if (!batchRows.length) {
+      return json(409, {
         ok: false,
-        error: "weighing_batch_rows_failed",
-        detail: rowsError.message,
+        error: "weighing_batch_empty",
+        message: "Chưa có cuộn mới đã đồng bộ Supabase cho đợt này. Dữ liệu cân vẫn lưu bình thường; hãy thử xác nhận sau.",
       });
     }
-    const products = (Array.isArray(batchRows) ? batchRows : []).map((row, index) => {
+    const products = batchRows.map((row, index) => {
       const item = row as Record<string, unknown>;
       const metadata = item.metadata !== null && typeof item.metadata === "object"
         ? item.metadata as Record<string, unknown>

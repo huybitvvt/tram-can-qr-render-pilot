@@ -94,7 +94,7 @@ def test_photo_draft_is_linked_to_weigh_event_and_slot() -> None:
     assert "parent_event_id: parenteventid" in FUNCTION.lower()
 
 
-def test_weigh_batch_confirmation_allows_partial_or_empty_batches() -> None:
+def test_weigh_batch_confirmation_keeps_partial_rolls_without_creating_empty_batches() -> None:
     lowered = WEIGH_BATCH_MIGRATION.lower()
     assert "create table if not exists public.ca_can" in lowered
     assert "moc_so_luong = dot_can * 10" in lowered
@@ -106,7 +106,11 @@ def test_weigh_batch_confirmation_allows_partial_or_empty_batches() -> None:
     confirm_block = FUNCTION.split('if (body.action === "confirm_weighing_batch")', 1)[1].split(
         'if (body.action === "delete_measurement")', 1
     )[0]
-    assert ".range(offset, offset + batchSize - 1)" in confirm_block
+    assert 'const confirmedEventIds = new Set<string>()' in confirm_block
+    assert 'confirmedEventIds.add(product.event_id)' in confirm_block
+    assert 'if (confirmedEventIds.has(String(row.event_id ?? ""))) continue' in confirm_block
+    assert 'if (!batchRows.length)' in confirm_block
+    assert 'error: "weighing_batch_empty"' in confirm_block
     assert "milestone !== offset + batchSize" not in confirm_block
     assert ".from(PHOTO_DRAFT_TABLE)" not in confirm_block
     assert 'error: "previous_weighing_batch_not_confirmed"' not in confirm_block

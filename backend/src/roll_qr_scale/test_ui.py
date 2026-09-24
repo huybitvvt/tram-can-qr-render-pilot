@@ -5936,8 +5936,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             raise ValueError("Burst chứa ảnh không hợp lệ")
                         weight_frames.append(decode_image(encoded_frame))
                     capture_round = int(payload.get("capture_round", 0))
-                    if not 0 <= capture_round <= 2:
-                        raise ValueError("Lần cân phải từ 1 đến 3")
+                    if not 0 <= capture_round <= 3:
+                        raise ValueError("Lần cân phải từ 1 đến 4")
                     bind_core = capture_kind != "product" and capture_round == 0
                     provider = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("recognition_provider", "gemini")))[:32]
                     profile = re.sub(r"[^a-zA-Z0-9_-]", "", str(payload.get("recognition_profile", "fast")))[:32]
