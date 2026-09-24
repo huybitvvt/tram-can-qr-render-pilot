@@ -7,13 +7,13 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc23`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc23/TramCanQR-Setup-0.2.0-rc23.exe).
+>    Bản `0.2.0-rc24`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc24/TramCanQR-Setup-0.2.0-rc24.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Cân lõi là tùy chọn; lượt chỉ có thành phẩm và mã SP vẫn lưu được. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 
-Bản `0.2.0-rc23` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân hoàn chỉnh, còn ảnh AI chưa đọc được lưu riêng. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có dữ liệu và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần xác nhận đợt cân cần Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
+Bản `0.2.0-rc24` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
 
 Mã nguồn được tách theo ranh giới triển khai:
 
@@ -22,7 +22,7 @@ Mã nguồn được tách theo ranh giới triển khai:
 - `backend/supabase/`: migration và Edge Functions.
 - `tests/`: kiểm thử tích hợp cho cả hai phần.
 
-Cloudinary + Supabase là lớp đồng bộ tùy chọn. Khi không cấu hình API, ứng dụng không gửi ảnh/dữ liệu lên Supabase. Nếu có cấu hình, nút Lưu trả kết quả sau khi commit SQLite và ảnh local; outbox gửi cloud ở nền và tự gửi tiếp sau lỗi mạng hoặc khi khởi động lại. Retry chỉ được coi là lặp an toàn khi danh tính, mã SP, số cân và hash của cả hai ảnh thuộc cùng `event_id` khớp chính xác. Ở chế độ Gemini primary, mỗi lần nhấn `Space` gửi đúng ảnh cân lõi lên Google để đọc số; ảnh thứ hai được QR decoder đọc và giữ làm bằng chứng mã SP.
+Cloudinary + Supabase là lớp đồng bộ tùy chọn. Khi không cấu hình API, ứng dụng không gửi ảnh/dữ liệu lên Supabase. Nếu có cấu hình, nút Lưu trả kết quả sau khi commit SQLite và ảnh local; outbox gửi cloud ở nền và tự gửi tiếp sau lỗi mạng hoặc khi khởi động lại. Retry chỉ được coi là lặp an toàn khi danh tính, mã SP, số cân và hash của ảnh đã chụp thuộc cùng `event_id` khớp chính xác. Ở chế độ Gemini primary, mỗi lần nhấn `Space` gửi đúng ảnh cân lõi lên Google để đọc số; ảnh thứ hai được QR decoder đọc và giữ làm bằng chứng mã SP.
 
 ## Kiến trúc đã triển khai
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc23.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc24.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -224,7 +224,7 @@ Mở `http://127.0.0.1:8080` rồi vận hành như sau:
 2. Ánh xạ browser `deviceId` được lưu trong `localStorage` theo `gateway_id`. Một camera vật lý không thể gán cho hai trạm. Nếu đổi browser/profile/cổng USB làm `deviceId` đổi, chọn lại camera.
 3. Bấm `Mở camera đã gán`. Khi camera rớt kết nối, card chuyển sang `MẤT KẾT NỐI`; giao diện chỉ thử lại đúng `deviceId` đã gán và từ chối stream nếu browser trả nhầm camera. Sự kiện cắm/rút USB cũng kích hoạt làm mới và reconnect.
 4. Chọn trạm bằng card hoặc phím `1`, `2`, `3`. `Space` luôn chụp bước còn thiếu kế tiếp theo thứ tự: lõi lần 1 → sản phẩm lần 1 → lõi lần 2 → sản phẩm lần 2. Khi AI đọc xong một bước, ảnh vẫn nằm trong ô bằng chứng nhưng khung lớn tự trở về camera live và chọn sẵn bước tiếp theo. Sau khi lưu xong phiên, thứ tự được đặt lại về lõi lần 1. QR được nhận diện độc lập từ ảnh hoặc có thể nhập/quét thủ công.
-5. Kiểm tra hai số cân, hai preview bằng chứng và mã SP tự đọc. `Enter` chỉ lưu khi đủ hai số cân + hai ảnh + mã SP trong cùng event. Dùng `Bỏ lần đang xem` nếu thật sự muốn hủy cả phiên.
+5. Kiểm tra ảnh bằng chứng và các số cân/QR đã đọc được. `Enter` lưu phiếu chính thức khi có ít nhất một ảnh; số cân hoặc QR chưa đọc được sẽ để trống và được ghi lý do lỗi tự động. Dùng `Bỏ lần đang xem` nếu thật sự muốn hủy cả phiên.
 6. Sau khi SQLite commit thành công, tùy chọn auto-advance chọn trạm kế tiếp theo vòng tròn. Checkbox trên giao diện có thể đổi hành vi trong phiên hiện tại.
 
 ### Đọc đồng loạt bảng nhiều chỉ số
@@ -351,8 +351,8 @@ Giao diện có bốn profile Gemini độc lập: `fast` dùng Gemini 3.5 Flash
 thinking `minimal`; `flash31` dùng Gemini 3.1 Flash-Lite và là mặc định ổn định;
 `flash37` dùng Gemini 3.7 Flash với thinking `low`; và `accurate` dùng model Pro
 với thinking `medium`.
-Lựa chọn model không thay đổi luồng QR độc lập hoặc quy tắc chỉ gửi Supabase
-sau khi đủ hai ảnh cân và mã sản phẩm.
+Lựa chọn model không thay đổi luồng QR độc lập hoặc quy tắc ghi local trước rồi
+đồng bộ Supabase sau khi có ít nhất một ảnh cân.
 
 Nếu key đang dùng trả lỗi API (ví dụ bị thu hồi hoặc hết quyền), backend tự
 quarantine key đó, chuyển ca sang key còn lại và không gọi lại key lỗi trong

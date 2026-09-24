@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc23` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc24` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc23.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc24.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -37,10 +37,10 @@ Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự
 
 Trong mỗi thẻ **Lần 1**, **Lần 2**, bấm nút lưu ngay dưới thẻ để chỉ lưu
 lần đó. Nhấn **Enter** hoặc nút **Lưu tất các lần** để lưu mọi lần đang có
-dữ liệu; lần đã đủ điều kiện được ghi thành phiếu cân, lần mới có ảnh được
-ghi thành ảnh chờ. Khi đủ dữ liệu, nút riêng ghi **Lưu phiếu cân**. Nếu mới có một ảnh hoặc
-AI chưa đọc được số, nút ghi **Lưu ảnh chờ**: ảnh được giữ trên máy và tự đồng
-bộ lên cloud, dù ô ảnh còn lại trống. Ảnh chờ chưa phải phiếu cân hoàn chỉnh.
+dữ liệu. Chỉ cần ít nhất một ảnh, nút **Lưu phiếu cân** ghi phiếu chính thức ngay
+cả khi chưa đọc được QR hoặc một hay cả hai số cân. Ô chưa đọc được để trống;
+hệ thống tự ghi trạng thái/lý do lỗi. Ảnh lỗi AI vẫn được giữ riêng để đọc lại,
+nhưng nút Lưu tạo phiếu cân chính thức.
 Sau khi lưu thành công, ảnh của đúng lần đó biến mất để cân tiếp; lần khác
 chưa lưu vẫn còn. Dòng **Đang chờ** trong danh sách nghĩa là bản ghi đã nằm
 trong DB local và đang chờ Supabase/Cloudinary xác nhận đồng bộ. Nếu màn hình

@@ -68,7 +68,7 @@ function getSupabaseAdminKey(): string | undefined {
 function sameEvent(
   existing: Record<string, unknown>,
   qrCode: string,
-  weight: number,
+  weight: number | null,
   unit: string,
   capturedAt: string,
   weightSource: string,
@@ -86,12 +86,15 @@ function sameEvent(
     ? existing.metadata as Record<string, unknown>
     : {};
   const existingGateway = existing.gateway_id ?? existing.device_id;
-  const storedTare = Number(existing.tare_weight ?? 0);
-  const existingCoreWeight = Number(
-    metadata.core_weight ?? (storedTare > 0 ? storedTare : existing.weight),
-  );
+  const hasMetadataCore = Object.prototype.hasOwnProperty.call(metadata, "core_weight");
+  const storedTare = existing.tare_weight === null || existing.tare_weight === undefined
+    ? null
+    : Number(existing.tare_weight);
+  const existingCoreWeight = hasMetadataCore
+    ? nullableWeight(metadata.core_weight)
+    : (storedTare !== null && storedTare > 0 ? storedTare : nullableWeight(existing.weight));
   return existing.qr_code === qrCode &&
-    existingCoreWeight === weight &&
+    sameNullableNumber(existingCoreWeight, weight) &&
     existing.unit === unit &&
     Date.parse(String(existing.captured_at)) === Date.parse(capturedAt) &&
     existing.weight_source === weightSource &&
@@ -119,10 +122,21 @@ function storedHashMatches(existing: unknown, incoming: string | null): boolean 
   return incoming !== null && String(existing).toLowerCase() === incoming;
 }
 
+function nullableWeight(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "number") return Number.NaN;
+  return value;
+}
+
+function sameNullableNumber(existing: unknown, incoming: number | null): boolean {
+  if (existing === null || existing === undefined) return incoming === null;
+  return Number(existing) === incoming;
+}
+
 function sameInventoryCheck(
   existing: Record<string, unknown>,
   productCode: string,
-  weight: number,
+  weight: number | null,
   coreWeight: number,
   tareWeight: number,
   unit: string,
@@ -1159,9 +1173,9 @@ Deno.serve(async (request: Request) => {
         event_id: item.event_id,
         qr_code: qrCode,
         ma_san_pham: productCode,
-        can_loi: Number(metadata.core_weight ?? item.tare_weight ?? 0),
-        can_san_pham: Number(metadata.product_weight ?? item.weight ?? 0),
-        trong_luong_nvl: Number(item.net_weight ?? 0),
+        can_loi: metadata.core_weight ?? item.tare_weight ?? null,
+        can_san_pham: metadata.product_weight ?? item.weight ?? null,
+        trong_luong_nvl: item.net_weight ?? null,
         don_vi: item.unit,
         can_luc: item.captured_at,
         trang_thai_loi: status,
@@ -1452,16 +1466,14 @@ Deno.serve(async (request: Request) => {
     ? body.payload_hash.trim().toLowerCase()
     : null;
   const unit = typeof body.unit === "string" ? body.unit : "";
-  const weight = typeof body.weight === "number" ? body.weight : Number.NaN;
+  const weight = nullableWeight(body.weight);
   const coreWeight = typeof body.core_weight === "number"
     ? body.core_weight
     : Number.NaN;
   const inventoryTareWeight = typeof body.tare_weight === "number"
     ? body.tare_weight
     : Number.NaN;
-  const productWeight = typeof body.product_weight === "number"
-    ? body.product_weight
-    : Number.NaN;
+  const productWeight = nullableWeight(body.product_weight);
   const capturedAt = typeof body.captured_at === "string" ? body.captured_at : "";
   const imageBase64 = typeof body.image_base64 === "string" ? body.image_base64 : "";
   const productImageBase64 = typeof body.product_image_base64 === "string"
@@ -1499,11 +1511,18 @@ Deno.serve(async (request: Request) => {
   const requestedErrorStatus = typeof body.error_status === "string"
     ? body.error_status.trim().toLowerCase()
     : taggedErrorStatus || "ok";
-  const errorStatus = requestedErrorStatus === "error" ? "error" : "ok";
+  const missingWeightReason = weight === null || productWeight === null
+    ? `AI không đọc được ${weight === null && productWeight === null
+      ? "cân lõi và cân sản phẩm"
+      : weight === null ? "cân lõi" : "cân sản phẩm"}`
+    : "";
+  const errorStatus = requestedErrorStatus === "error" || Boolean(missingWeightReason)
+    ? "error"
+    : "ok";
   const errorReason = errorStatus === "error"
-    ? (typeof body.error_reason === "string"
+    ? (typeof body.error_reason === "string" && body.error_reason.trim()
       ? body.error_reason.trim().slice(0, 500)
-      : sourceTag("ERROR_REASON", 500))
+      : sourceTag("ERROR_REASON", 500) || missingWeightReason)
     : "";
 
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(eventId)) {
@@ -1518,7 +1537,7 @@ Deno.serve(async (request: Request) => {
     return json(422, { ok: false, error: "invalid_photo_event_slot" });
   }
   if (
-    (!photoDraft && !qrCode) || qrCode.length > 512 ||
+    (inventoryCheck && !qrCode) || qrCode.length > 512 ||
     (inventoryCheck && productCode !== qrCode)
   ) {
     return json(422, { ok: false, error: "invalid_qr_code" });
@@ -1558,13 +1577,15 @@ Deno.serve(async (request: Request) => {
   ) {
     return json(422, { ok: false, error: "invalid_payload_hash" });
   }
-  if (!photoDraft && (!Number.isFinite(weight) || weight < 0 || !UNITS.has(unit))) {
+  if (!photoDraft && (!UNITS.has(unit) ||
+    (weight !== null && (!Number.isFinite(weight) || weight < 0)) ||
+    (inventoryCheck && weight === null))) {
     return json(422, { ok: false, error: "invalid_weight" });
   }
-  if (
-    !photoDraft && !inventoryCheck &&
-    (requestedErrorStatus !== errorStatus || (errorStatus === "error" && !errorReason))
-  ) {
+  if (!photoDraft && !inventoryCheck && requestedErrorStatus !== "ok" && requestedErrorStatus !== "error") {
+    return json(422, { ok: false, error: "invalid_error_status" });
+  }
+  if (!photoDraft && !inventoryCheck && errorStatus === "error" && !errorReason) {
     return json(422, { ok: false, error: "invalid_error_status" });
   }
   if (!capturedAt || Number.isNaN(Date.parse(capturedAt))) {
@@ -1573,8 +1594,17 @@ Deno.serve(async (request: Request) => {
   if (imageBase64.length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 4) {
     return json(413, { ok: false, error: "image_too_large" });
   }
-  if (!inventoryCheck && !photoDraft && (!Number.isFinite(productWeight) || productWeight < 0)) {
+  if (!inventoryCheck && !photoDraft && productWeight !== null &&
+    (!Number.isFinite(productWeight) || productWeight < 0)) {
     return json(422, { ok: false, error: "invalid_product_weight" });
+  }
+  if (!inventoryCheck && !photoDraft && weight !== null && productWeight !== null &&
+    weight > productWeight) {
+    return json(422, {
+      ok: false,
+      error: "core_exceeds_product_weight",
+      message: "Cân lõi phải ≤ cân SP.",
+    });
   }
   if (
     inventoryCheck &&
@@ -2276,12 +2306,14 @@ Deno.serve(async (request: Request) => {
   if (deviceError) {
     return json(500, { ok: false, error: "device_upsert_failed" });
   }
-  const { error: rollError } = await supabase.from("rolls").upsert(
-    { qr_code: qrCode, last_seen_at: now },
-    { onConflict: "qr_code" },
-  );
-  if (rollError) {
-    return json(500, { ok: false, error: "roll_upsert_failed" });
+  if (qrCode) {
+    const { error: rollError } = await supabase.from("rolls").upsert(
+      { qr_code: qrCode, last_seen_at: now },
+      { onConflict: "qr_code" },
+    );
+    if (rollError) {
+      return json(500, { ok: false, error: "roll_upsert_failed" });
+    }
   }
 
   const captureDate = new Date(capturedAt);

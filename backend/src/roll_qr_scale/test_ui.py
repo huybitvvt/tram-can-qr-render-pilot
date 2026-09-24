@@ -1041,11 +1041,11 @@ def _merge_source_tags(weight_raw: str, payload: dict[str, object]) -> str:
 def _persistable_weight_raw(
     weight_raw: str,
     *,
-    weight: float,
+    weight: float | None,
     vision_confirmed: bool,
 ) -> str:
     raw = str(weight_raw or "").strip()
-    if not vision_confirmed:
+    if not vision_confirmed and weight is not None:
         if not raw.startswith("MANUAL:"):
             raw = f"MANUAL:{weight}" + (f"; {raw}" if raw else "")
     return raw[:1000]
@@ -1090,8 +1090,12 @@ def _local_measurement_items(
                 item.weight_raw or "",
             )
             product_weight = float(match.group(1)) if match else None
-        core_missing = _raw_tag(item.weight_raw or "", "CORE_MISSING") == "1"
-        has_core = not core_missing and bool(
+        core_missing = (
+            item.weight is None
+            or _raw_tag(item.weight_raw or "", "CORE_MISSING") == "1"
+        )
+        core_image_missing = _raw_tag(item.weight_raw or "", "CORE_IMAGE_MISSING") == "1"
+        has_core = not core_image_missing and bool(
             item.image_path and Path(item.image_path).is_file()
         )
         has_product = bool(
@@ -1100,7 +1104,7 @@ def _local_measurement_items(
         core_url = (
             f"/api/measurement-image?event_id={urllib.parse.quote(item.event_id)}&kind=core"
             if has_core
-            else None if core_missing else item.remote_image_url
+            else None if core_image_missing else item.remote_image_url
         )
         product_url = (
             f"/api/measurement-image?event_id={urllib.parse.quote(item.event_id)}&kind=product"
@@ -1120,7 +1124,7 @@ def _local_measurement_items(
             "tare_weight": None if core_missing else item.weight,
             "net_weight": (
                 round(product_weight - item.weight, 4)
-                if product_weight is not None and not core_missing
+                if product_weight is not None and item.weight is not None and not core_missing
                 else None
             ),
             "weight_raw": item.weight_raw
@@ -1576,8 +1580,8 @@ def _persist_measurement_edit(
     *,
     event_id: str,
     qr_code: str,
-    core_weight: float,
-    product_weight: float,
+    core_weight: float | None,
+    product_weight: float | None,
     work_date: str = "",
     shift: str = "",
     machine: str = "",
@@ -1602,6 +1606,16 @@ def _persist_measurement_edit(
         if selected_error_status == "error"
         else ""
     )
+    missing = []
+    if core_weight is None:
+        missing.append("cân lõi")
+    if product_weight is None:
+        missing.append("cân sản phẩm")
+    if missing:
+        selected_error_status = "error"
+        selected_error_reason = selected_error_reason or (
+            "AI không đọc được " + " và ".join(missing)
+        )
     error_status = selected_error_status
     error_reason = selected_error_reason
     remote_item: dict[str, object] | None = None
@@ -1644,7 +1658,13 @@ def _persist_measurement_edit(
             persist_raw = _upsert_raw_tag(
                 persist_raw, "SOURCE_PRODUCTION_ORDER", production_order
             )
-        persist_raw = _upsert_raw_tag(persist_raw, "PRODUCT_WEIGHT", f"{product_weight:g}")
+    persist_raw = _upsert_raw_tag(
+        persist_raw, "PRODUCT_WEIGHT",
+        f"{product_weight:g}" if product_weight is not None else "unread",
+    )
+    persist_raw = _upsert_raw_tag(
+        persist_raw, "CORE_MISSING", "1" if core_weight is None else "0"
+    )
     persist_raw = _upsert_raw_tag(persist_raw, "ERROR_STATUS", error_status)
     persist_raw = _upsert_raw_tag(
         persist_raw,
@@ -3606,7 +3626,7 @@ class StationUIService:
     def capture(
         self,
         qr_code: str,
-        weight: float,
+        weight: float | None,
         unit: str,
         frame: np.ndarray,
         vision_confirmed: bool = False,
@@ -3623,18 +3643,20 @@ class StationUIService:
     ) -> dict[str, object]:
         qr_code = qr_code.strip()
         if not qr_code:
-            decoded = self.decode_qr(frame)
-            if not decoded.get("found"):
-                raise ValueError("Chưa có QR; hãy quét mã hoặc đưa QR vào camera")
-            qr_code = str(decoded["qr_code"])
-            qr_source = f"camera:{decoded['decoder']}"
+            try:
+                decoded = self.decode_qr(frame)
+            except Exception:
+                logging.warning("QR decode failed during capture; saving without QR", exc_info=True)
+                decoded = {"found": False}
+            qr_code = str(decoded.get("qr_code") or "").strip() if decoded.get("found") else ""
+            qr_source = f"camera:{decoded['decoder']}" if qr_code else "none"
         else:
             qr_source = "test-ui:input"
         if len(qr_code) > 512:
             raise ValueError("QR dài quá 512 ký tự")
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
-        if not math.isfinite(weight) or weight < 0:
+        if weight is not None and (not math.isfinite(weight) or weight < 0):
             raise ValueError("Số cân phải là số không âm")
         machine = machine.strip()
         station_source: dict[str, object] | None = None
@@ -3659,7 +3681,11 @@ class StationUIService:
         source_machine = machine or tagged_machine
         if source_machine and not tagged_machine:
             weight_raw = _upsert_raw_tag(weight_raw, "SOURCE_MACHINE", source_machine)
-        if product_weight is not None:
+        if product_weight is not None and (
+            not math.isfinite(product_weight) or product_weight < 0
+        ):
+            raise ValueError("Số cân sản phẩm phải là số không âm")
+        if product_weight is not None or weight is not None:
             validate_production_weights(weight, product_weight, unit, source_machine)
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
@@ -3667,6 +3693,27 @@ class StationUIService:
             # Poor image quality is advisory for production captures. Save the
             # operator-confirmed measurement and flag the evidence for review.
             weight_raw = _upsert_raw_tag(weight_raw, "PHOTO_QUALITY_OVERRIDE", "1")
+
+        missing = []
+        if weight is None:
+            missing.append("cân lõi")
+            weight_raw = _upsert_raw_tag(weight_raw, "CORE_MISSING", "1")
+        if product_weight is None and _raw_tag(weight_raw, "PRODUCT_WEIGHT").lower() == "unread":
+            missing.append("cân sản phẩm")
+        automatic_reasons = []
+        if missing:
+            automatic_reasons.append("AI không đọc được " + " và ".join(missing))
+        if not qr_code:
+            automatic_reasons.append("Chưa nhận diện được mã QR")
+        if _raw_tag(weight_raw, "CORE_IMAGE_MISSING") == "1":
+            automatic_reasons.append("Chưa có ảnh cân lõi")
+        if automatic_reasons:
+            weight_raw = _upsert_raw_tag(weight_raw, "ERROR_STATUS", "error")
+            current_reason = _raw_tag(weight_raw, "ERROR_REASON")
+            for reason in automatic_reasons:
+                if reason not in current_reason:
+                    current_reason = " · ".join(filter(None, (current_reason, reason)))
+            weight_raw = _upsert_raw_tag(weight_raw, "ERROR_REASON", current_reason[:500])
 
         # ``event_id`` is also the idempotency key used by unbound, per-round
         # saves.  It must be accepted on its own so a browser retry cannot
@@ -3701,7 +3748,7 @@ class StationUIService:
                 if existing is None:
                     # Render can restart after the browser received an analysis
                     # but before the operator saves. The request still contains
-                    # both evidence images and a verified frame hash, so degrade
+                    # the evidence image and a verified frame hash, so degrade
                     # to the normal durable unbound path instead of losing the
                     # weighing because the in-memory analysis binding vanished.
                     analysis_id = None
@@ -3766,7 +3813,7 @@ class StationUIService:
             measurement = self.store.get(measurement.event_id) or measurement
         if bound_capture and station_id:
             self._cleanup_evidence_steps(station_id, measurement.event_id)
-        # The local event and both images are durable before the response.
+        # The local event and all supplied images are durable before the response.
         # Wake the outbox without making the operator wait for cloud upload.
         if self.sync_worker is not None:
             self.sync_worker.notify()
@@ -5073,7 +5120,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
                     raw_weight = str(metadata.get("weight_raw", "") or item.get("weight_raw", ""))
                     core_missing = _raw_tag(raw_weight, "CORE_MISSING") == "1"
-                    if core_missing:
+                    core_image_missing = _raw_tag(raw_weight, "CORE_IMAGE_MISSING") == "1"
+                    if core_image_missing:
                         core_url = None
                     product_weight_value = item.get("product_weight")
                     if product_weight_value is None:
@@ -5597,7 +5645,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if local is not None:
                         previous_qr = previous_qr or str(local.qr_code or "").strip()
                         qr_code = previous_qr
-                        previous_core = float(local.weight)
+                        if local.weight is not None:
+                            previous_core = float(local.weight)
                         if local.product_weight is not None:
                             previous_product = float(local.product_weight)
                         weight_raw = weight_raw or (local.weight_raw or "")
@@ -6011,14 +6060,18 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 if self.path == "/api/capture":
                     try:
                         raw_weight = payload.get("weight")
-                        weight = float(raw_weight) if raw_weight not in (None, "") else 0.0
+                        weight = (
+                            float(raw_weight)
+                            if raw_weight not in (None, "")
+                            else None
+                        )
                     except (TypeError, ValueError) as exc:
                         raise ValueError("Số cân không hợp lệ") from exc
                     weight_raw = _merge_source_tags(str(payload.get("weight_raw", "")), payload)
-                    if not raw_frame and product_frame_raw and raw_weight in (None, "", 0, 0.0):
-                        weight_raw = _upsert_raw_tag(weight_raw, "CORE_MISSING", "1")
-                    if not _raw_tag(weight_raw, "SOURCE_PRODUCTION_ORDER"):
-                        raise ValueError("Thiếu Lệnh sản xuất")
+                    if not raw_frame and product_frame_raw:
+                        weight_raw = _upsert_raw_tag(weight_raw, "CORE_IMAGE_MISSING", "1")
+                        if raw_weight in (None, ""):
+                            weight_raw = _upsert_raw_tag(weight_raw, "CORE_MISSING", "1")
                     product_weight_value = payload.get("product_weight")
                     if product_weight_value is None:
                         product_match = re.search(

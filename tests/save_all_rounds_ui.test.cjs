@@ -12,7 +12,7 @@ function setup(saveRoundEvidence){
  ]};
  const messages=[];
  const ctx=vm.createContext({current:()=>session,persistEditor(){},ensureRounds(){},sessionRoundCount:()=>2,
-  roundCanSave:(_session,index)=>index===0,roundHasPhoto:round=>Boolean(round.coreImage||round.productImage),
+  savableRoundIndexes:()=>session.rounds.flatMap((round,index)=>!round.saved&&(round.coreImage||round.productImage)?[index]:[]),roundHasPhoto:round=>Boolean(round.coreImage||round.productImage),
   saveRoundEvidence,renderControls(){},status:(_node,message)=>messages.push(message),captureStatus:{},console});
  const start=script.indexOf('async function saveAllRounds(');
  vm.runInContext(script.slice(start,script.indexOf('\nsaveCapture=saveValidatedCapture;',start)),ctx);

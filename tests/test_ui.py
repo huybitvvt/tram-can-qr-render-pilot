@@ -243,28 +243,92 @@ def test_ui_capture_saves_two_error_rounds_with_four_images_and_unreadable_weigh
         store.close()
 
 
-def test_ui_capture_rejects_unreadable_photo_without_documented_error(tmp_path) -> None:
+def test_ui_capture_auto_marks_unreadable_weights_as_error(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     try:
-        with pytest.raises(ValueError, match="Ảnh chưa đạt chất lượng"):
-            service.capture("ROLL-ERROR", 0.0, "kg", frame, product_frame=frame)
-        with pytest.raises(ValueError, match="Ảnh chưa đạt chất lượng"):
-            service.capture(
-                "ROLL-ERROR", 0.0, "kg", frame,
-                weight_raw="ERROR_STATUS=error", product_frame=frame,
-            )
-        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 0
+        result = service.capture(
+            "ROLL-ERROR", None, "kg", frame,
+            weight_raw="PRODUCT_WEIGHT=unread", product_frame=frame,
+        )
+        saved = store.get(result["event_id"])
+        assert saved is not None
+        assert saved.weight is None
+        assert saved.product_weight is None
+        assert "ERROR_STATUS=error" in saved.weight_raw
+        assert "ERROR_REASON=AI không đọc được cân lõi và cân sản phẩm" in saved.weight_raw
+        assert "PHOTO_QUALITY_OVERRIDE=1" in saved.weight_raw
+        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 1
     finally:
         service.close()
         store.close()
 
 
-def test_frontend_saves_only_complete_unsaved_rounds_in_separate_requests() -> None:
+def test_ui_capture_saves_documented_ai_failure_with_one_photo(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    frame = np.zeros((600, 800, 3), dtype=np.uint8)
+    event_id = str(uuid.uuid4())
+    try:
+        result = service.capture(
+            "ROLL-AI-MISS",
+            None,
+            "kg",
+            frame,
+            event_id=event_id,
+            weight_raw=(
+                "CORE_MISSING=1; PRODUCT_WEIGHT=unread; "
+                "ERROR_STATUS=error; ERROR_REASON=AI không đọc được số cân"
+            ),
+        )
+        saved = store.get(event_id)
+        assert result["event_id"] == event_id
+        assert saved is not None
+        assert saved.weight is None
+        assert saved.product_weight is None
+        assert Path(saved.image_path).is_file()
+        assert not saved.product_image_path
+        assert "PHOTO_QUALITY_OVERRIDE=1" in saved.weight_raw
+    finally:
+        service.close()
+        store.close()
+
+
+def test_ui_capture_without_qr_or_weights_creates_official_local_ticket(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    frame = np.zeros((600, 800, 3), dtype=np.uint8)
+    event_id = str(uuid.uuid4())
+    try:
+        result = service.capture(
+            "", None, "kg", frame, event_id=event_id,
+            weight_raw="PRODUCT_WEIGHT=unread",
+        )
+        saved = store.get(event_id)
+        assert result["event_id"] == event_id
+        assert result["qr_code"] == ""
+        assert saved is not None
+        assert saved.qr_code == ""
+        assert saved.weight is None and saved.product_weight is None
+        assert saved.qr_source == "none"
+        assert saved.sync_status == "local"
+        assert Path(saved.image_path).is_file()
+        assert not saved.product_image_path
+        assert "ERROR_STATUS=error" in saved.weight_raw
+        assert "AI không đọc được cân lõi và cân sản phẩm" in saved.weight_raw
+        assert "Chưa nhận diện được mã QR" in saved.weight_raw
+        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 1
+        assert store.connection.execute("SELECT COUNT(*) FROM photo_drafts").fetchone()[0] == 0
+    finally:
+        service.close()
+        store.close()
+
+
+def test_frontend_saves_photo_backed_rounds_in_separate_requests() -> None:
     assert "Lưu phần đã đủ" in TEST_UI_HTML
     assert "function savableRoundIndexes(session)" in TEST_UI_HTML
-    assert "round&&!round.saved&&roundProductReady" in TEST_UI_HTML
+    assert "round&&!round.saved&&roundHasPhoto(round)" in TEST_UI_HTML
     assert "for(const index of indexes)" in TEST_UI_HTML
     assert "event_id:round.eventId" in TEST_UI_HTML
     assert "product_weight:productValue" in TEST_UI_HTML
@@ -3033,7 +3097,7 @@ def test_multistation_defaults_and_html_controls(monkeypatch) -> None:
         "ensureCamerasForSelect()",
         "ensureCameraPermission()",
         "session.stream!==stream||session.streamGeneration!==generation",
-        "ĐỦ DỮ LIỆU · ",
+        "PHIẾU CÂN CÓ ẢNH · ",
         "prepareNextCapture('',session)",
         "'awaiting-code'",
         "'awaiting-weight'",
@@ -3583,7 +3647,7 @@ def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path)
     thread.start()
     host, port = server.server_address
 
-    frame = make_qr_frame("PROD-999_TEST")
+    frame = np.zeros((600, 800, 3), dtype=np.uint8)
     encoded = image_data_url(frame)
 
     # Send capture without core weight or image, only product_image & product_weight
@@ -3591,11 +3655,10 @@ def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path)
         f"http://{host}:{port}/api/capture",
         data=json.dumps(
             {
-                "qr_code": "PROD-999_TEST",
+                "qr_code": "",
                 "product_weight": 7.5,
                 "unit": "kg",
                 "product_image": encoded,
-                "production_order": "LSX-999",
                 "work_date": "2026-09-22",
                 "shift": "12C1",
                 "machine": "MÁY BAO BÌ 11",
@@ -3606,7 +3669,8 @@ def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path)
     with urllib.request.urlopen(req) as resp:
         res = json.loads(resp.read().decode("utf-8"))
         assert res["ok"] is True
-        assert res["weight"] == 0.0
+        assert res["weight"] is None
+        assert res["qr_code"] == ""
 
     # Verify that GET /api/measurements immediately returns this local record
     list_req = urllib.request.Request(f"http://{host}:{port}/api/measurements?limit=50&work_date=2026-09-22")
@@ -3614,9 +3678,11 @@ def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path)
         list_res = json.loads(resp.read().decode("utf-8"))
         assert list_res["ok"] is True
         assert len(list_res["items"]) >= 1
-        item = next(i for i in list_res["items"] if i["qr_code"] == "PROD-999_TEST")
+        item = next(i for i in list_res["items"] if i["event_id"] == res["event_id"])
         assert item["core_weight"] is None
         assert item["product_weight"] == 7.5
+        assert item["error_status"] == "error"
+        assert "Chưa nhận diện được mã QR" in item["error_reason"]
         assert item["has_core_image"] is False
         assert item["has_product_image"] is True
 
@@ -3626,7 +3692,7 @@ def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path)
     with urllib.request.urlopen(local_req) as resp:
         local_res = json.loads(resp.read().decode("utf-8"))
         assert local_res["source"] == "local"
-        assert any(i["qr_code"] == "PROD-999_TEST" for i in local_res["items"])
+        assert any(i["event_id"] == res["event_id"] for i in local_res["items"])
 
     server.shutdown()
     server.server_close()

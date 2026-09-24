@@ -15,7 +15,7 @@ function setup(items=[]){
   sourceQuery:()=>'',api:async()=>({items}),syncCaptureProductCodes:()=>{},
   statusForPartialWeights:()=> 'Continue capturing',
  });
- const names=['sessionRoundCount','ensureRounds','validWeightValue','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
+ const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasPhoto','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
  vm.runInContext('let productionQrByCode={};',ctx);
  for(const name of names){const line=script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'('));assert.ok(line,name);vm.runInContext(line,ctx)}
  ctx.renderControls=()=>{nodes.saveBtn={disabled:!ctx.savableRoundIndexes(session).length}};
@@ -59,26 +59,50 @@ test('a completed measurement still blocks duplicate QR and explains why',()=>{
  assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/TRÙNG MÃ QR/);
  assert.doesNotMatch(messages.at(-1).message,/Nhấn Enter|Đã chụp đủ 0/);
 });
-test('server duplicate rejection retains its warning after refreshing controls',async()=>{
+test('server duplicate rejection clears QR but still permits photo-backed save',async()=>{
  const {ctx,session,nodes,messages}=setup();const code=session.rounds[0].qr;
  ctx.api=async()=>({items:[{event_id:'saved',qr_code:code}]});
  assert.equal(await ctx.verifyQrAgainstServer(code,session,0),true);
- assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/TRÙNG MÃ QR/);
+ assert.equal(session.rounds[0].qr,'');
+ assert.equal(nodes.saveBtn.disabled,false);assert.match(messages.at(-1).message,/TRÙNG MÃ QR/);
 });
-test('missing QR and missing defect reason explain disabled save and recover after correction',()=>{
+test('one photo with no QR or readable weights enables official save',()=>{
  const {ctx,session,nodes,messages}=setup();const round=session.rounds[0],code=round.qr;
- round.qr='';ctx.refreshCompletionState(session);
- assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/nhập mã QR/);
- round.qr=code;round.errorStatus='error';ctx.refreshCompletionState(session);
+ round.qr='';round.productImage='';round.weight='';round.productWeight='';round.errorStatus='error';
+ ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,false);assert.deepEqual(Array.from(ctx.savableRoundIndexes(session)),[0]);
+ assert.match(messages.at(-1).message,/phiếu cân chính thức/);
+ round.coreImage='';ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);
+ round.coreImage='core';round.productImage='product';round.qr=code;round.weight='1.18';round.productWeight='12.96';ctx.refreshCompletionState(session);
  assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/Lý do lỗi/);
  round.errorReason='Damaged';ctx.refreshCompletionState(session);assert.equal(nodes.saveBtn.disabled,false);
 });
-test('an AI reading from a poor image needs a documented error before save',()=>{
+test('official request keeps one photo and null weights with automatic error reason',()=>{
+ const ctx=vm.createContext({validWeightValue:value=>String(value??'').trim()!==''&&Number(value)>=0,
+  sourceRawTags:()=> 'SOURCE_DATE=2026-09-24',sourceContext:{date:'2026-09-24',shift:'HC1',machine:'M1',order:'',bi:'0.16'},
+  normalizeBiWeight:()=>0.16,newEventId:()=> 'event-1',roundOwnsSessionBinding:()=>false});
+ const start=script.indexOf('function captureBodyForRound(');
+ vm.runInContext(script.slice(start,script.indexOf('\nasync function saveUnboundRound(',start)),ctx);
+ const session={unit:'kg',stationId:'station-01',cameraId:'camera-01'};
+ const round={eventId:'event-1',coreImage:'core-photo',productImage:'',weight:'',productWeight:'',qr:'',errorStatus:'ok',errorReason:''};
+ const body=ctx.captureBodyForRound(session,round,0,false);
+ assert.equal(body.image,'core-photo');assert.equal(body.product_image,'');
+ assert.equal(body.qr_code,'');assert.equal(body.weight,null);assert.equal(body.product_weight,null);
+ assert.equal(body.error_status,'error');assert.match(body.error_reason,/AI không đọc được cân lõi và cân sản phẩm/);
+ assert.match(body.error_reason,/Chưa có ảnh cân sản phẩm/);
+ assert.equal(body.require_complete_evidence,undefined);
+ round.coreImage='';round.productImage='product-photo';round.productWeight='8.25';
+ const productOnly=ctx.captureBodyForRound(session,round,0,false);
+ assert.equal(productOnly.image,'');assert.equal(productOnly.product_image,'product-photo');
+ assert.equal(productOnly.weight,null);assert.equal(productOnly.product_weight,8.25);
+ assert.match(productOnly.weight_raw,/CORE_IMAGE_MISSING=1/);
+});
+test('an AI reading from a poor image may save when the weights are known',()=>{
  const {ctx,session,nodes,messages}=setup();const round=session.rounds[0];
  round.coreAnalysis={weight_found:true,weight:7.03,quality_pass:false};
  round.weight='7.03';ctx.refreshCompletionState(session);
- assert.equal(nodes.saveBtn.disabled,true);
- assert.match(messages.at(-1).message,/ảnh chưa đạt chất lượng/);
+ assert.equal(nodes.saveBtn.disabled,false);
  round.errorStatus='error';round.errorReason='Màn hình cân bị lóa';ctx.refreshCompletionState(session);
  assert.equal(nodes.saveBtn.disabled,false);
 });

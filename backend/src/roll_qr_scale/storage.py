@@ -30,7 +30,10 @@ class Measurement:
     id: int
     event_id: str
     qr_code: str
-    weight: float
+    # A production ticket may be committed when AI cannot read one or both
+    # displays.  ``None`` is kept as an actual blank value; zero is a valid
+    # reading and must not be used as a missing-value sentinel.
+    weight: float | None
     unit: str
     captured_at: str
     image_path: str
@@ -264,7 +267,7 @@ class MeasurementStore:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 event_id TEXT NOT NULL UNIQUE,
                 qr_code TEXT NOT NULL,
-                weight REAL NOT NULL,
+                weight REAL,
                 unit TEXT NOT NULL,
                 captured_at TEXT NOT NULL,
                 image_path TEXT NOT NULL,
@@ -426,6 +429,22 @@ class MeasurementStore:
                     f"ALTER TABLE measurements ADD COLUMN {column} {definition}"
                 )
 
+        # Older local databases declared the core weight NOT NULL.  Rebuild
+        # that table once so an AI-error ticket can persist a real SQL NULL
+        # while retaining every existing row and idempotency key.
+        weight_info = next(
+            (
+                row
+                for row in self.connection.execute(
+                    "PRAGMA table_info(measurements)"
+                ).fetchall()
+                if str(row["name"]) == "weight"
+            ),
+            None,
+        )
+        if weight_info is not None and int(weight_info["notnull"] or 0):
+            self._rebuild_measurements_allow_blank_weight()
+
         photo_existing = {
             str(row["name"])
             for row in self.connection.execute("PRAGMA table_info(photo_drafts)").fetchall()
@@ -444,6 +463,54 @@ class MeasurementStore:
             "UPDATE photo_drafts SET parent_event_id = event_id "
             "WHERE parent_event_id = ''"
         )
+
+    def _rebuild_measurements_allow_blank_weight(self) -> None:
+        self.connection.execute("ALTER TABLE measurements RENAME TO measurements_legacy")
+        self.connection.execute(
+            """
+            CREATE TABLE measurements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                qr_code TEXT NOT NULL,
+                weight REAL,
+                unit TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                image_path TEXT NOT NULL,
+                product_image_path TEXT NOT NULL DEFAULT '',
+                weight_source TEXT NOT NULL,
+                qr_source TEXT NOT NULL DEFAULT 'camera',
+                product_weight REAL,
+                sync_status TEXT NOT NULL DEFAULT 'local',
+                sync_error TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                next_retry_at TEXT,
+                last_attempt_at TEXT,
+                synced_at TEXT,
+                remote_id INTEGER,
+                remote_image_url TEXT,
+                remote_image_public_id TEXT,
+                weight_raw TEXT NOT NULL DEFAULT '',
+                weight_stable INTEGER NOT NULL DEFAULT 1,
+                gateway_id TEXT NOT NULL DEFAULT '',
+                station_id TEXT NOT NULL DEFAULT '',
+                camera_id TEXT NOT NULL DEFAULT '',
+                analysis_id TEXT NOT NULL DEFAULT '',
+                frame_sha256 TEXT NOT NULL DEFAULT '',
+                payload_hash TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        columns = (
+            "id,event_id,qr_code,weight,unit,captured_at,image_path,"
+            "product_image_path,weight_source,qr_source,product_weight,sync_status,"
+            "sync_error,retry_count,next_retry_at,last_attempt_at,synced_at,remote_id,"
+            "remote_image_url,remote_image_public_id,weight_raw,weight_stable,gateway_id,"
+            "station_id,camera_id,analysis_id,frame_sha256,payload_hash"
+        )
+        self.connection.execute(
+            f"INSERT INTO measurements ({columns}) SELECT {columns} FROM measurements_legacy"
+        )
+        self.connection.execute("DROP TABLE measurements_legacy")
 
         # Backfill structured product weight from captures made before the
         # dedicated column existed. Do not guess rows without this exact tag.
@@ -481,7 +548,7 @@ class MeasurementStore:
             if not payload_hash:
                 payload_hash = self._calculate_payload_hash(
                     qr_code=str(row["qr_code"]),
-                    weight=float(row["weight"]),
+                    weight=(float(row["weight"]) if row["weight"] is not None else None),
                     unit=str(row["unit"]),
                     captured_at=str(row["captured_at"]),
                     weight_source=str(row["weight_source"]),
@@ -526,7 +593,7 @@ class MeasurementStore:
             "qr_source": qr_source,
             "station_id": station_id,
             "unit": unit,
-            "weight": float(weight),
+            "weight": float(weight) if weight is not None else None,
             "weight_raw": weight_raw,
             "weight_source": weight_source,
             "weight_stable": bool(weight_stable),
@@ -633,7 +700,7 @@ class MeasurementStore:
     def save(
         self,
         qr_code: str,
-        weight: float,
+        weight: float | None,
         unit: str,
         frame: np.ndarray,
         weight_source: str,
@@ -670,7 +737,7 @@ class MeasurementStore:
     def save_idempotent(
         self,
         qr_code: str,
-        weight: float,
+        weight: float | None,
         unit: str,
         frame: np.ndarray,
         weight_source: str,
@@ -800,7 +867,7 @@ class MeasurementStore:
             id=int(row["id"]),
             event_id=str(row["event_id"]),
             qr_code=str(row["qr_code"]),
-            weight=float(row["weight"]),
+            weight=(float(row["weight"]) if row["weight"] is not None else None),
             unit=str(row["unit"]),
             captured_at=str(row["captured_at"]),
             image_path=str(row["image_path"]),
@@ -881,8 +948,8 @@ class MeasurementStore:
         event_id: str,
         *,
         qr_code: str,
-        weight: float,
-        product_weight: float,
+        weight: float | None,
+        product_weight: float | None,
         weight_raw: str = "",
     ) -> Measurement:
         event_id = str(event_id or "").strip()
@@ -901,8 +968,8 @@ class MeasurementStore:
                 """,
                 (
                     qr_code.strip(),
-                    float(weight),
-                    float(product_weight),
+                    float(weight) if weight is not None else None,
+                    float(product_weight) if product_weight is not None else None,
                     str(weight_raw or "").strip(),
                     str(weight_raw or "").strip(),
                     event_id,
@@ -1252,7 +1319,7 @@ class MeasurementStore:
             id=int(row["id"]),
             event_id=str(row["event_id"]),
             product_code=str(row["product_code"]),
-            weight=float(row["weight"]),
+            weight=(float(row["weight"]) if row["weight"] is not None else None),
             core_weight=float(row["core_weight"]),
             tare_weight=float(row["tare_weight"]),
             unit=str(row["unit"]),

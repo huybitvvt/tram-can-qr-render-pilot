@@ -58,7 +58,7 @@ def test_photo_draft_table_keeps_weight_data_truly_empty() -> None:
 def test_ingest_routes_photo_draft_before_measurement_validation() -> None:
     assert 'const photoDraft = workflow === "photo_draft"' in FUNCTION
     assert 'const PHOTO_DRAFT_TABLE = "anh_can_cho_ai"' in FUNCTION
-    assert 'if (!photoDraft && (!Number.isFinite(weight)' in FUNCTION
+    assert 'if (!photoDraft && (!UNITS.has(unit)' in FUNCTION
     assert 'status: "awaiting_ai"' in FUNCTION
     assert 'ai_requested: false' in FUNCTION
     assert "/photo-draft/${parentEventId}/${captureKind}-${captureRound + 1}/${eventId}" in FUNCTION

@@ -69,10 +69,11 @@ round.saved=true;assert.equal(sessionOverWeightLimit(session),false);
     assert result.returncode == 0, result.stderr
 
 
-def test_frontend_can_save_unreadable_weights_when_product_image_and_qr_exist():
+def test_frontend_can_save_unreadable_weights_with_one_image_and_no_qr():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = [
         "validWeightValue",
+        "roundHasPhoto",
         "roundCoreReady",
         "roundProductReady",
         "roundReadyToSave",
@@ -97,9 +98,12 @@ const session={unit:'kg',rounds:[round]};
 assert.equal(roundReadyToSave(session,0),true);
 assert.equal(roundCanSave(session,0),true);
 round.productImage='';
-assert.equal(roundCanSave(session,0),false);
+assert.equal(roundCanSave(session,0),true);
 round.productImage='product';round.qr='';
+assert.equal(roundCanSave(session,0),true);
+round.coreImage='';round.productImage='';
 assert.equal(roundCanSave(session,0),false);
+round.coreImage='core';round.productImage='product';
 round.qr='ROLL-001';
 round.weight='0.16';round.productWeight='1.25';
 assert.equal(roundReadyToSave(session,0),true);
