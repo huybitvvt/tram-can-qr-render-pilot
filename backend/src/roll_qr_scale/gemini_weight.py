@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import re
 import threading
 import time
@@ -450,29 +451,31 @@ class GeminiWeightReader:
         )
 
     def _generate_weight_content(self, *, contents: list[object], config):
-        """Retry a transient API failure once using the same captured evidence."""
+        """Retry transient API failures with short exponential backoff."""
         from google.genai import types
 
-        try:
-            return self.client.models.generate_content(
-                model=self.model, contents=contents, config=config
-            )
-        except Exception as exc:
-            if not self._is_transient_error(exc):
-                raise
-        time.sleep(1.0)
-        self._record_request()
-        # Existing installations may still configure a 10-second deadline.
-        # Give the one recovery attempt 30 seconds; keep SDK retries disabled.
-        retry_config = config.model_copy(update={
-            "http_options": types.HttpOptions(
-                timeout=30_000,
-                retry_options=types.HttpRetryOptions(attempts=1),
-            ),
-        })
-        return self.client.models.generate_content(
-            model=self.model, contents=contents, config=retry_config
-        )
+        request_config = config
+        for attempt in range(3):
+            try:
+                return self.client.models.generate_content(
+                    model=self.model, contents=contents, config=request_config
+                )
+            except Exception as exc:
+                if not self._is_transient_error(exc) or attempt == 2:
+                    raise
+                # 503 UNAVAILABLE is temporary server overload. Give Gemini
+                # two additional chances with exponential backoff and jitter;
+                # then let the caller try the alternate key or local OCR.
+                time.sleep((1.0, 2.0)[attempt] + random.uniform(0.0, 0.5))
+                self._record_request()
+                # Keep SDK retries disabled so retries are bounded and visible
+                # in the local usage counter.
+                request_config = config.model_copy(update={
+                    "http_options": types.HttpOptions(
+                        timeout=30_000,
+                        retry_options=types.HttpRetryOptions(attempts=1),
+                    ),
+                })
 
     def read(
         self,
