@@ -158,19 +158,19 @@ class GeminiWeightReader:
         self.rpd_limit = max(1, int(rpd_limit))
         if client is None:
             try:
-                import httpx
                 from google import genai
                 from google.genai import types
+                from .gemini_transport import prefer_httpx_transport
             except ImportError as exc:
                 raise RuntimeError(
                     "Gemini fallback requires google-genai==2.16.0"
                 ) from exc
+            prefer_httpx_transport()
             client = genai.Client(
                 api_key=self.api_key,
                 http_options=types.HttpOptions(
                     timeout=round(self.timeout_seconds * 1000),
                     retry_options=types.HttpRetryOptions(attempts=1),
-                    async_client_args={"transport": httpx.AsyncHTTPTransport()},
                 ),
             )
         self.client = client
@@ -451,7 +451,6 @@ class GeminiWeightReader:
 
     def _generate_weight_content(self, *, contents: list[object], config):
         """Retry a transient API failure once using the same captured evidence."""
-        import httpx
         from google.genai import types
 
         try:
@@ -469,7 +468,6 @@ class GeminiWeightReader:
             "http_options": types.HttpOptions(
                 timeout=30_000,
                 retry_options=types.HttpRetryOptions(attempts=1),
-                async_client_args={"transport": httpx.AsyncHTTPTransport()},
             ),
         })
         return self.client.models.generate_content(

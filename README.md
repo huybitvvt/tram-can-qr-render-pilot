@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc28`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc28/TramCanQR-Setup-0.2.0-rc28.exe).
+>    Bản `0.2.0-rc29`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc29/TramCanQR-Setup-0.2.0-rc29.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc28.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc29.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -651,3 +651,5 @@ Bản 0.2.0-rc26 thử lại một lần khi Gemini trả JSON không hợp lệ
 Bản 0.2.0-rc27 thêm watermark logo mờ trên trang cân và phiếu in. Xem `docs/release-notes-0.2.0-rc27.md`.
 
 Bản 0.2.0-rc28 sửa lỗi khởi động do Gemini SDK chọn `aiohttp` không đầy đủ trong bản đóng gói; SDK giờ dùng HTTPX. Xem `docs/release-notes-0.2.0-rc28.md`.
+
+Bản 0.2.0-rc29 tránh lỗi sao chép `SSLContext` khi Gemini fallback và giữ HTTPX làm transport kể cả khi `aiohttp` có mặt không đầy đủ. Xem `docs/release-notes-0.2.0-rc29.md`.

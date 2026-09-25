@@ -38,7 +38,7 @@ $innoCandidates = @(
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 )
 $iscc = $innoCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-$installerPath = Join-Path $installerDir "TramCanQR-Setup-0.2.0-rc28.exe"
+$installerPath = Join-Path $installerDir "TramCanQR-Setup-0.2.0-rc29.exe"
 if ($iscc) {
     & $iscc packaging\TramCanQR.iss
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup build thất bại" }
@@ -49,7 +49,7 @@ if ($iscc) {
     Write-Warning "Inno Setup chưa cài; đã tạo bản portable tại dist\TramCanQR\TramCanQR.exe"
 }
 
-$handoffDir = Join-Path $projectRoot "dist\handoff-0.2.0-rc28"
+$handoffDir = Join-Path $projectRoot "dist\handoff-0.2.0-rc29"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\customer-config.env.example") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\gemini-pilot-config.env.example") -Destination $handoffDir -Force
@@ -66,7 +66,7 @@ if (Test-Path -LiteralPath $installerPath) {
         ((Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash + "  " + (Split-Path $installerPath -Leaf))
     )
 } else {
-    $portableArchive = Join-Path $handoffDir "TramCanQR-portable-0.2.0-rc28.zip"
+    $portableArchive = Join-Path $handoffDir "TramCanQR-portable-0.2.0-rc29.zip"
     Compress-Archive -Path $portableDir -DestinationPath $portableArchive -CompressionLevel Optimal -Force
     $hashes = @(
         ((Get-FileHash -LiteralPath $portableArchive -Algorithm SHA256).Hash + "  " + (Split-Path $portableArchive -Leaf))

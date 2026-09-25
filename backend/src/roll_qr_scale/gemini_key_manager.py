@@ -229,16 +229,16 @@ class GeminiKeyManager:
     def validate(self, api_key: str) -> None:
         value = self._validate_format(api_key)
         try:
-            import httpx
             from google import genai
             from google.genai import types
+            from .gemini_transport import prefer_httpx_transport
         except ImportError as exc:
             raise RuntimeError("Thiếu google-genai trên backend") from exc
+        prefer_httpx_transport()
         client = genai.Client(
             api_key=value,
             http_options=types.HttpOptions(
                 timeout=10000,
-                async_client_args={"transport": httpx.AsyncHTTPTransport()},
             ),
         )
         try:
