@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import sqlite3
@@ -185,6 +186,7 @@ class PhotoDraft:
     camera_id: str = ""
     frame_sha256: str = ""
     payload_hash: str = ""
+    reread_weight: float | None = None
 
     def api_payload(self, device_id: str = "") -> dict[str, object]:
         payload = asdict(self)
@@ -197,6 +199,7 @@ class PhotoDraft:
             "remote_image_url",
             "remote_image_public_id",
             "image_path",
+            "reread_weight",
         ):
             payload.pop(local_field)
         payload["workflow"] = "photo_draft"
@@ -359,7 +362,27 @@ class MeasurementStore:
                 station_id TEXT NOT NULL DEFAULT '',
                 camera_id TEXT NOT NULL DEFAULT '',
                 frame_sha256 TEXT NOT NULL DEFAULT '',
-                payload_hash TEXT NOT NULL DEFAULT ''
+                payload_hash TEXT NOT NULL DEFAULT '',
+                reread_weight REAL
+            )
+            """
+        )
+        self.connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weigh_batches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                work_date TEXT NOT NULL,
+                shift TEXT NOT NULL,
+                machine TEXT NOT NULL,
+                production_order TEXT NOT NULL,
+                milestone INTEGER NOT NULL,
+                batch_size INTEGER NOT NULL,
+                item_json TEXT NOT NULL,
+                sync_status TEXT NOT NULL DEFAULT 'pending',
+                sync_error TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                next_retry_at TEXT,
+                UNIQUE(work_date, shift, machine, production_order, milestone)
             )
             """
         )
@@ -453,6 +476,7 @@ class MeasurementStore:
             "parent_event_id": "TEXT NOT NULL DEFAULT ''",
             "capture_kind": "TEXT NOT NULL DEFAULT 'core'",
             "capture_round": "INTEGER NOT NULL DEFAULT 0",
+            "reread_weight": "REAL",
         }
         for column, definition in photo_additions.items():
             if column not in photo_existing:
@@ -1001,11 +1025,33 @@ class MeasurementStore:
             rows = self.connection.execute(
                 "SELECT event_id, parent_event_id, capture_kind, capture_round, "
                 "qr_code, captured_at, image_path, remote_image_url, work_date, "
-                "shift, machine, production_order, status, sync_status, sync_error "
+                "shift, machine, production_order, status, sync_status, sync_error, "
+                "reread_weight "
                 "FROM photo_drafts "
                 "ORDER BY id DESC"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def photo_drafts_for_parent(self, parent_event_id: str) -> list[PhotoDraft]:
+        with self._lock:
+            rows = self.connection.execute(
+                "SELECT * FROM photo_drafts WHERE parent_event_id = ? OR event_id = ? "
+                "ORDER BY captured_at DESC, id DESC",
+                (parent_event_id, parent_event_id),
+            ).fetchall()
+        return [self._photo_draft_from_row(row) for row in rows]
+
+    def set_photo_draft_reread_weight(self, event_id: str, weight: float) -> None:
+        if not math.isfinite(weight) or weight < 0:
+            raise ValueError("Số cân đọc lại không hợp lệ")
+        with self._lock:
+            cursor = self.connection.execute(
+                "UPDATE photo_drafts SET reread_weight = ? WHERE event_id = ?",
+                (weight, event_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Unknown photo draft: {event_id}")
+            self.connection.commit()
 
     def attach_product_image(self, event_id: str, frame: np.ndarray) -> str:
         """Persist the product-weight evidence beside its core-weight event."""
@@ -1625,6 +1671,10 @@ class MeasurementStore:
             camera_id=str(row["camera_id"]),
             frame_sha256=str(row["frame_sha256"]),
             payload_hash=str(row["payload_hash"]),
+            reread_weight=(
+                float(row["reread_weight"])
+                if row["reread_weight"] is not None else None
+            ),
         )
 
     def get_photo_draft(self, event_id: str) -> PhotoDraft | None:
@@ -1760,7 +1810,114 @@ class MeasurementStore:
             int(row["total"])
             + self.inventory_pending_count()
             + self.photo_draft_pending_count()
+            + self.weigh_batch_pending_count()
         )
+
+    def weigh_batch_pending_count(self) -> int:
+        with self._lock:
+            row = self.connection.execute(
+                "SELECT COUNT(*) AS total FROM weigh_batches "
+                "WHERE sync_status IN ('pending','failed')"
+            ).fetchone()
+        return int(row["total"])
+
+    def list_weigh_batches(
+        self, work_date: str, shift: str, machine: str, production_order: str,
+        *, limit: int = 50,
+    ) -> list[dict[str, object]]:
+        with self._lock:
+            rows = self.connection.execute(
+                "SELECT * FROM weigh_batches WHERE work_date = ? AND shift = ? "
+                "AND machine = ? AND production_order = ? ORDER BY id DESC LIMIT ?",
+                (work_date, shift, machine, production_order, limit),
+            ).fetchall()
+        return [
+            {**json.loads(row["item_json"]), "sync_status": row["sync_status"],
+             "sync_error": row["sync_error"]}
+            for row in rows
+        ]
+
+    def save_weigh_batch(
+        self, work_date: str, shift: str, machine: str, production_order: str,
+        milestone: int, batch_size: int, candidates: list[dict[str, object]],
+        *, needs_sync: bool,
+    ) -> tuple[dict[str, object], bool]:
+        source = (work_date, shift, machine, production_order)
+        with self._lock:
+            existing = self.connection.execute(
+                "SELECT * FROM weigh_batches WHERE work_date = ? AND shift = ? "
+                "AND machine = ? AND production_order = ? AND milestone = ?",
+                (*source, milestone),
+            ).fetchone()
+            if existing is not None:
+                return {**json.loads(existing["item_json"]),
+                        "sync_status": existing["sync_status"],
+                        "sync_error": existing["sync_error"]}, True
+            previous = self.connection.execute(
+                "SELECT item_json FROM weigh_batches WHERE work_date = ? AND shift = ? "
+                "AND machine = ? AND production_order = ? ORDER BY id",
+                source,
+            ).fetchall()
+            used = {
+                str(product.get("event_id") or "")
+                for row in previous
+                for product in json.loads(row["item_json"]).get("danh_sach_san_pham", [])
+            }
+            products = [item for item in candidates if str(item.get("event_id") or "") not in used][:batch_size]
+            if not products:
+                raise ValueError("Chưa có cuộn mới đã lưu trên máy cho đợt này")
+            numbered = [{**item, "stt": index} for index, item in enumerate(products, 1)]
+            item = {
+                "dot_can": len(previous) + 1,
+                "ma_san_pham": str(numbered[0].get("ma_san_pham") or ""),
+                "so_luong": len(numbered), "ngay_can": work_date,
+                "gio_bat_dau": numbered[0].get("can_luc"),
+                "gio_ket_thuc": numbered[-1].get("can_luc"),
+                "ca": shift, "may": machine, "lenh_san_xuat": production_order,
+                "moc_so_luong": milestone, "trang_thai": "confirmed",
+                "danh_sach_san_pham": numbered,
+            }
+            self.connection.execute(
+                "INSERT INTO weigh_batches (work_date,shift,machine,production_order,"
+                "milestone,batch_size,item_json,sync_status) VALUES (?,?,?,?,?,?,?,?)",
+                (*source, milestone, batch_size, json.dumps(item, ensure_ascii=False),
+                 "pending" if needs_sync else "local"),
+            )
+            self.connection.commit()
+        return {**item, "sync_status": "pending" if needs_sync else "local",
+                "sync_error": None}, False
+
+    def pending_weigh_batches(self, *, limit: int = 20) -> list[dict[str, object]]:
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        with self._lock:
+            rows = self.connection.execute(
+                "SELECT * FROM weigh_batches WHERE sync_status IN ('pending','failed') "
+                "AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY id LIMIT ?",
+                (now, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_weigh_batch_sync(self, batch_id: int, error: str | None = None) -> None:
+        with self._lock:
+            if error:
+                row = self.connection.execute(
+                    "SELECT retry_count FROM weigh_batches WHERE id = ?", (batch_id,)
+                ).fetchone()
+                retries = int(row["retry_count"] if row else 0) + 1
+                retry_at = (datetime.now(timezone.utc) + timedelta(
+                    seconds=min(300, 2 ** min(retries, 8))
+                )).isoformat(timespec="milliseconds")
+                self.connection.execute(
+                    "UPDATE weigh_batches SET sync_status='failed',sync_error=?,"
+                    "retry_count=?,next_retry_at=? WHERE id=?",
+                    (error[:1000], retries, retry_at, batch_id),
+                )
+            else:
+                self.connection.execute(
+                    "UPDATE weigh_batches SET sync_status='synced',sync_error=NULL,"
+                    "next_retry_at=NULL WHERE id=?", (batch_id,),
+                )
+            self.connection.commit()
 
     def local_backup_report(
         self,

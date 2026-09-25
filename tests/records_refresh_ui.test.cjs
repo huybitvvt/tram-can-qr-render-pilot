@@ -21,6 +21,7 @@ function setup(){
     recordCell:(row,value)=>{row.cells.push(value);return {}},
     renderShiftCount(){},rebuildProductionQrIndex(){},
     productWeightFromRaw:()=>NaN,biWeightFromRaw:()=>0,nvlWeight:(p,c,b)=>p-c-b,
+    optionalRecordWeight:value=>value==null?NaN:Number(value),
     recordErrorStatus:()=>'',recordErrorReason:()=>'',recordImages(){},
     formatRecordWeight:n=>Number.isFinite(n)?String(n):'--',productCodeFromQr:()=>'',
     appendProductionDeleteAction(){},extraRoundsFromRaw:()=>'',loadWeighBatches:async()=>{},

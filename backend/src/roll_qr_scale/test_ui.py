@@ -1200,6 +1200,7 @@ def _photo_draft_display_items(
                 "product_image_url": None,
                 "has_core_image": False,
                 "has_product_image": False,
+                "reread_available": False,
                 "error_only": True,
                 "error_status": "error",
                 "error_reason": "AI chưa đọc được số cân",
@@ -1232,9 +1233,13 @@ def _photo_draft_display_items(
         if kind not in {"core", "product"}:
             kind = "core"
         image_key = (parent_id, kind)
+        reread_weight = item.get("reread_weight")
         if image_url and captured_at >= image_times.get(image_key, ""):
             payload[f"{kind}_image_url"] = image_url
             payload[f"has_{kind}_image"] = True
+            payload[f"{kind}_weight"] = (
+                float(reread_weight) if reread_weight is not None else "unread"
+            )
             image_times[image_key] = captured_at
 
         state = str(item.get("sync_status") or "synced").strip().lower()
@@ -1245,6 +1250,38 @@ def _photo_draft_display_items(
 
     items: list[dict[str, object]] = []
     for parent_id, payload in grouped.items():
+        payload["reread_available"] = any(
+            str(payload.get(f"{kind}_image_url") or "").startswith(
+                "/api/photo-draft-image?"
+            )
+            for kind in ("core", "product")
+        )
+        unread = [
+            "cân " + ("lõi" if kind == "core" else "sản phẩm")
+            for kind in ("core", "product")
+            if payload.get(f"has_{kind}_image")
+            and payload.get(f"{kind}_weight") in (None, "unread")
+        ]
+        missing = [
+            "ảnh " + ("lõi" if kind == "core" else "sản phẩm")
+            for kind in ("core", "product")
+            if not payload.get(f"has_{kind}_image")
+        ]
+        reasons = []
+        if unread:
+            reasons.append("AI chưa đọc được số cân (" + " và ".join(unread) + ")")
+        if missing:
+            reasons.append("Chưa có " + " và ".join(missing))
+        if not payload.get("qr_code"):
+            reasons.append("Chưa nhận diện được mã QR")
+        if (
+            isinstance(payload.get("core_weight"), (int, float))
+            and isinstance(payload.get("product_weight"), (int, float))
+            and payload["core_weight"] > payload["product_weight"]
+        ):
+            reasons.append("Cân lõi lớn hơn cân sản phẩm")
+        payload["error_reason"] = " · ".join(reasons) or "Ảnh chờ lưu phiếu cân"
+        payload["record_note"] = "Ảnh đã lưu · " + str(payload["error_reason"])
         states = sync_states.get(parent_id, {"synced"})
         storage_sync_status = (
             "failed"
@@ -1257,7 +1294,7 @@ def _photo_draft_display_items(
         )
         payload["storage_sync_status"] = storage_sync_status
         payload["sync_status"] = storage_sync_status
-        details = ["AI chưa đọc được số cân"]
+        details = [str(payload["error_reason"])]
         details.extend(sorted(sync_errors.get(parent_id, set())))
         payload["sync_error"] = " · ".join(details)
         if _matches_source_filters(
@@ -1912,6 +1949,8 @@ class StationUIService:
             self.codex_reader.close()
         if self.antigravity_reader is not None:
             self.antigravity_reader.close()
+        if self.sync_worker is not None:
+            self.sync_worker.stop()
 
     @staticmethod
     def _reader_model(reader: GeminiWeightReader | None) -> str | None:
@@ -2233,17 +2272,31 @@ class StationUIService:
         return f"{roi.x1:.4f},{roi.y1:.4f},{roi.x2:.4f},{roi.y2:.4f}"
 
     @staticmethod
-    def _gemini_crop(frame: np.ndarray, roi: NormalizedROI) -> np.ndarray:
+    def _gemini_crop(
+        frame: np.ndarray, roi: NormalizedROI, *, pad_ratio: float = 0.12
+    ) -> np.ndarray:
         left, top, right, bottom = roi.pixels(frame)
         width = max(1, right - left)
         height = max(1, bottom - top)
-        pad_x = max(4, round(width * 0.12))
-        pad_y = max(4, round(height * 0.18))
+        pad_x = max(0, round(width * pad_ratio))
+        pad_y = max(0, round(height * (pad_ratio * 1.5)))
         frame_height, frame_width = frame.shape[:2]
         return frame[
             max(0, top - pad_y) : min(frame_height, bottom + pad_y),
             max(0, left - pad_x) : min(frame_width, right + pad_x),
         ]
+
+    @classmethod
+    def _ai_scale_head_crop(
+        cls, frame: np.ndarray, roi: NormalizedROI, *, zoom_inset: bool = False
+    ) -> np.ndarray:
+        # A zoom ROI already contains the whole controller. A raw LED ROI does
+        # not, so expand it to include the display housing and nearby context.
+        return (
+            cls._gemini_crop(frame, roi, pad_ratio=0.0)
+            if zoom_inset
+            else cls._scale_context_crop(frame, roi)
+        )
 
     @staticmethod
     def _distant_weight_roi(frame: np.ndarray) -> tuple[NormalizedROI, str] | None:
@@ -2274,6 +2327,9 @@ class StationUIService:
                 continue
             if box_width > width * 0.08 or box_height > height * 0.035:
                 continue
+            center_x = (left + box_width / 2) / max(1, width)
+            if not 0.25 <= center_x <= 0.75:
+                continue
             aspect = box_width / max(1, box_height)
             if not 0.8 <= aspect <= 12:
                 continue
@@ -2297,32 +2353,36 @@ class StationUIService:
             bottom / height,
         ), "distant-red-led"
 
+    @classmethod
+    def _find_scale_roi(cls, frame: np.ndarray) -> tuple[NormalizedROI, str] | None:
+        located = detect_weight_roi(frame)
+        if located is None:
+            return cls._distant_weight_roi(frame)
+        roi, _ = located
+        center_x = (roi.x1 + roi.x2) / 2
+        if roi.x2 - roi.x1 > 0.25 or not 0.2 <= center_x <= 0.8:
+            return cls._distant_weight_roi(frame)
+        return located
+
     @staticmethod
     def _scale_context_crop(frame: np.ndarray, roi: NormalizedROI) -> np.ndarray:
-        """Include the indicator, scale platform, and weighed object in the zoom."""
+        """Include the indicator, keypad, housing, and nearby context in the zoom."""
 
         left, top, right, bottom = roi.pixels(frame)
         frame_height, frame_width = frame.shape[:2]
         roi_width = max(1, right - left)
         roi_height = max(1, bottom - top)
-        crop_width = min(
-            frame_width,
-            max(round(frame_width * 0.40), roi_width * 10),
-        )
-        crop_height = min(
-            frame_height,
-            max(round(frame_height * 0.24), roi_height * 12),
-        )
-        center_x = (left + right) / 2
-        # Keep more room above the LED row for the platform and weighed item.
-        crop_left = round(center_x - (crop_width / 2))
-        crop_top = round(((top + bottom) / 2) - (crop_height * 0.64))
-        crop_left = min(max(0, crop_left), frame_width - crop_width)
-        crop_top = min(max(0, crop_top), frame_height - crop_height)
-        return frame[
-            crop_top : crop_top + crop_height,
-            crop_left : crop_left + crop_width,
-        ]
+
+        pad_left = max(round(roi_width * 1.2), round(frame_width * 0.08))
+        pad_right = max(round(roi_width * 2.6), round(frame_width * 0.16))
+        pad_top = max(round(roi_height * 1.2), round(frame_height * 0.08))
+        pad_bottom = max(round(roi_height * 3.5), round(frame_height * 0.20))
+
+        crop_left = max(0, left - pad_left)
+        crop_right = min(frame_width, right + pad_right)
+        crop_top = max(0, top - pad_top)
+        crop_bottom = min(frame_height, bottom + pad_bottom)
+        return frame[crop_top:crop_bottom, crop_left:crop_right]
 
     @classmethod
     def _zoomed_evidence(
@@ -3012,6 +3072,131 @@ class StationUIService:
             "ai_requested": False,
         }
 
+    def reread_photo_drafts(
+        self,
+        parent_event_id: str,
+        *,
+        recognition_profile: str = "fast",
+        recognition_provider: str = "gemini",
+    ) -> dict[str, object]:
+        """Read saved error photos and promote a complete pair to a measurement."""
+        try:
+            if uuid.UUID(parent_event_id).version != 4:
+                raise ValueError
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError("event_id dòng lỗi không hợp lệ") from exc
+        if self.store.get(parent_event_id) is not None:
+            raise ValueError("Dòng này đã có phiếu cân; hãy làm mới danh sách")
+        drafts = self.store.photo_drafts_for_parent(parent_event_id)
+        if not drafts:
+            raise ValueError("Không tìm thấy ảnh lỗi trên máy này")
+        chosen = {
+            kind: next((draft for draft in drafts if draft.capture_kind == kind), None)
+            for kind in ("core", "product")
+        }
+        if not any(chosen.values()):
+            raise ValueError("Dòng lỗi không có ảnh cân lõi hoặc cân sản phẩm")
+        frames: dict[str, np.ndarray] = {}
+        readings: dict[str, float | None] = {}
+        errors: dict[str, str] = {}
+        for kind, draft in chosen.items():
+            if draft is None:
+                continue
+            readings[kind] = draft.reread_weight
+            path = Path(draft.image_path)
+            if not path.is_file():
+                errors[kind] = "Ảnh local không còn trên máy"
+                continue
+            try:
+                frame = decode_image_bytes(path.read_bytes())
+                frames[kind] = frame
+                result = self.analyze(
+                    frame, "auto", "kg",
+                    recognition_profile=recognition_profile,
+                    recognition_provider=recognition_provider,
+                    capture_kind=kind,
+                    context_station_id=draft.station_id or None,
+                    context_camera_id=draft.camera_id or None,
+                    context_shift=draft.shift,
+                )
+                if not result.get("weight_found"):
+                    errors[kind] = "AI chưa đọc được số cân"
+                    continue
+                weight = float(result["weight"])
+                if not math.isfinite(weight) or weight < 0:
+                    raise ValueError("AI trả số cân không hợp lệ")
+                self.store.set_photo_draft_reread_weight(draft.event_id, weight)
+                readings[kind] = weight
+            except Exception as exc:
+                errors[kind] = str(exc)[:240]
+
+        product = chosen["product"]
+        qr_code = next((draft.qr_code for draft in drafts if draft.qr_code), "")
+        qr_source = next((draft.qr_source for draft in drafts if draft.qr_code), "none")
+        if product is not None and not qr_code and "product" in frames:
+            try:
+                decoded = _decode_product_qr_for_reread(self, frames["product"])
+                qr_code = str(decoded.get("qr_code") or "").strip()
+                qr_source = str(decoded.get("qr_decoder") or "none")
+            except Exception as exc:
+                errors["qr"] = str(exc)[:240]
+
+        promoted = False
+        if (
+            chosen["core"] is not None and product is not None
+            and readings.get("core") is not None
+            and readings.get("product") is not None
+            and qr_code and "core" in frames and "product" in frames
+        ):
+            core = chosen["core"]
+            assert core is not None
+            try:
+                validate_production_weights(
+                    readings["core"], readings["product"], "kg",
+                    product.machine or core.machine,
+                )
+            except ValueError as exc:
+                errors["weights"] = str(exc)[:240]
+                return {
+                    "ok": True, "event_id": parent_event_id, "promoted": False,
+                    "core_weight": readings.get("core"),
+                    "product_weight": readings.get("product"),
+                    "qr_code": qr_code, "errors": errors,
+                }
+            raw = ""
+            for name, value in (
+                ("SOURCE_DATE", product.work_date or core.work_date),
+                ("SOURCE_SHIFT", product.shift or core.shift),
+                ("SOURCE_MACHINE", product.machine or core.machine),
+                ("SOURCE_PRODUCTION_ORDER", product.production_order or core.production_order),
+                ("PRODUCT_WEIGHT", f"{readings['product']:g}"),
+                ("REREAD_CORE", f"{readings['core']:g}"),
+                ("REREAD_PRODUCT", f"{readings['product']:g}"),
+                ("ERROR_STATUS", "ok"),
+            ):
+                if value:
+                    raw = _upsert_raw_tag(raw, name, value)
+            saved = self.store.save_idempotent(
+                qr_code, readings["core"], "kg", frames["core"],
+                "camera-ai:reread", needs_sync=self.sync_worker is not None,
+                qr_source=qr_source, weight_raw=raw, event_id=parent_event_id,
+                captured_at=product.captured_at,
+                gateway_id=product.gateway_id or core.gateway_id,
+                station_id=product.station_id or core.station_id,
+                camera_id=product.camera_id or core.camera_id,
+            )
+            self.store.attach_product_weight(saved.measurement.event_id, readings["product"])
+            self.store.attach_product_image(saved.measurement.event_id, frames["product"])
+            if self.sync_worker is not None:
+                self.sync_worker.notify()
+            promoted = True
+        return {
+            "ok": True, "event_id": parent_event_id, "promoted": promoted,
+            "core_weight": readings.get("core"),
+            "product_weight": readings.get("product"),
+            "qr_code": qr_code, "errors": errors,
+        }
+
     def assess_quality(self, frame: np.ndarray) -> FrameQuality:
         return assess_frame_quality(frame, **self.quality_settings)
 
@@ -3094,7 +3279,7 @@ class StationUIService:
                 roi = None
                 roi_method = f"{provider_prefix}-full-frame"
             elif auto_roi:
-                located = detect_weight_roi(frame)
+                located = self._find_scale_roi(frame)
                 if located is None:
                     roi = None
                 else:
@@ -3217,7 +3402,24 @@ class StationUIService:
                 gemini_fallback_used = True
                 gemini_fallback_key_slot = gemini_active_key_slot
             single_image_request = len(frames) == 1
-            ai_frames = [frame] if single_image_request else frames
+            full_frames = [frame] if single_image_request else frames
+            crop_is_available = bool(
+                capture_kind in {"core", "product", "inventory"} and roi is not None
+            )
+            ai_crop_applied = crop_is_available
+            ai_frames = (
+                [
+                    self._ai_scale_head_crop(
+                        item, roi,
+                        zoom_inset=bool(roi_method_override and roi_method_override.startswith("zoom-")),
+                    )
+                    for item in full_frames
+                ]
+                if crop_is_available
+                else full_frames
+            )
+            if crop_is_available:
+                roi_method = f"{provider_prefix}-scale-head-{crop_retry_method or 'detected'}"
             if len(ai_frames) == 2:
                 reading = WeightReading(
                     None,
@@ -3267,34 +3469,24 @@ class StationUIService:
                         )
                         suggestion = fallback_suggestion
                         selected_ai_reader = fallback_reader
-                crop_is_available = bool(
-                    capture_kind in {"core", "product", "inventory"} and roi is not None
-                )
-                # Full-frame is the normal path: Gemini can locate the small scale
-                # display from its factory context. Only retry a focused LED crop
-                # when a valid AI response explicitly says the weight is unreadable.
-                # Network/API errors are not retried here.
+                # Retry the full scene only when the broad controller crop was
+                # readable by the API but did not contain a usable weight.
                 if (
                     crop_is_available
                     and suggestion.value is None
                     and not antigravity_used
                     and not self._gemini_request_failed(suggestion)
                 ):
-                    cropped_frames = [self._gemini_crop(item, roi) for item in ai_frames]
-                    fallback = selected_ai_reader.read(cropped_frames, unit=unit)
+                    fallback = selected_ai_reader.read(full_frames, unit=unit)
                     suggestions.append(fallback)
                     gemini_attempts = len(suggestions)
                     gemini_fallback_used = True
-                    ai_crop_applied = True
                     suggestion_raw = (
-                        f"FULL FRAME ATTEMPT: {suggestion.raw}; "
-                        f"CROP RETRY: {fallback.raw}"
+                        f"SCALE HEAD ATTEMPT: {suggestion.raw}; "
+                        f"FULL FRAME RETRY: {fallback.raw}"
                     )
                     suggestion = fallback
-                    roi_method = (
-                        f"{provider_prefix}-full-frame+crop-"
-                        f"{crop_retry_method or 'detected'}-retry"
-                    )
+                    roi_method += "+full-frame-retry"
                 gemini_suggestion = suggestion.value
                 gemini_latency_seconds = sum(item.latency_seconds for item in suggestions)
                 gemini_input_tokens = sum(item.input_tokens for item in suggestions)
@@ -3562,7 +3754,7 @@ class StationUIService:
             elif not auto_roi_requested:
                 located = parse_normalized_roi(roi_text), "manual"
             else:
-                located = detect_weight_roi(frame) or self._distant_weight_roi(frame)
+                located = self._find_scale_roi(frame)
             if located is not None:
                 source_roi, evidence_zoom_method = located
                 composite, zoom_roi = self._zoomed_evidence(frame, source_roi)
@@ -5040,7 +5232,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if remote_error_parent_ids is not None
                     else _local_error_parent_ids(store, **list_filters)
                     - local_measurement_ids
-                )
+                ) - local_measurement_ids
                 error_count = len(error_parent_ids)
                 error_items = [
                     item
@@ -5275,28 +5467,12 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             if parsed.path == "/api/weighing-batches":
                 query = urllib.parse.parse_qs(parsed.query)
-                ingest_url = _ingest_api_url()
-                ingest_token = _ingest_api_token()
-                if not ingest_url or not ingest_token:
-                    self.send_json(
-                        503,
-                        {
-                            "ok": False,
-                            "error": "supabase_not_configured",
-                            "message": "Chưa cấu hình Supabase để đọc bảng ca_can",
-                        },
-                    )
-                    return
                 try:
-                    items = fetch_remote_weigh_batches(
-                        ingest_url,
-                        ingest_token,
-                        work_date=str(query.get("work_date", [""])[0]).strip(),
-                        shift=str(query.get("shift", [""])[0]).strip(),
-                        machine=str(query.get("machine", [""])[0]).strip(),
-                        production_order=str(
-                            query.get("production_order", [""])[0]
-                        ).strip(),
+                    items = store.list_weigh_batches(
+                        str(query.get("work_date", [""])[0]).strip(),
+                        str(query.get("shift", [""])[0]).strip(),
+                        str(query.get("machine", [""])[0]).strip(),
+                        str(query.get("production_order", [""])[0]).strip(),
                         limit=max(
                             1,
                             min(int(query.get("limit", ["50"])[0]), 200),
@@ -5324,7 +5500,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     return
                 self.send_json(
                     200,
-                    {"ok": True, "source": "ca_can", "items": items},
+                    {"ok": True, "source": "local", "items": items},
                 )
                 return
             if parsed.path == "/api/inventory-checks":
@@ -5468,27 +5644,35 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         raise ValueError(
                             f"Số cuộn xác nhận phải từ 1 đến {max_batch_size} cho máy này"
                         )
-                    ingest_url = _ingest_api_url()
-                    ingest_token = _ingest_api_token()
-                    if not ingest_url or not ingest_token:
-                        raise ValueError("Chưa cấu hình Supabase để ghi bảng ca_can")
-                    result = post_remote_action(
-                        ingest_url,
-                        ingest_token,
-                        body={
-                            "action": "confirm_weighing_batch",
-                            "work_date": work_date,
-                            "shift": shift[:80],
-                            "machine": machine[:80],
-                            "production_order": production_order[:80],
-                            "milestone": milestone,
-                            "batch_size": batch_size,
-                            "current_count": current_count,
-                            "allow_partial": bool(payload.get("allow_partial")),
-                            "confirmed_by": (web_username or "operator")[:120],
-                        },
+                    measurements = _local_measurement_items(
+                        store, 100000, work_date=work_date, shift=shift,
+                        machine=machine, production_order=production_order,
                     )
-                    self.send_json(200, result)
+                    measurements.sort(key=lambda item: (
+                        str(item.get("captured_at") or ""), str(item.get("event_id") or "")
+                    ))
+                    candidates = []
+                    for item in measurements:
+                        code = str(item.get("qr_code") or "").strip()
+                        candidates.append({
+                            "event_id": item["event_id"], "qr_code": code,
+                            "ma_san_pham": code.split("_", 1)[0],
+                            "can_loi": item.get("core_weight"),
+                            "can_san_pham": item.get("product_weight"),
+                            "trong_luong_nvl": item.get("net_weight"),
+                            "don_vi": item.get("unit"),
+                            "can_luc": item.get("captured_at"),
+                            "trang_thai_loi": item.get("error_status"),
+                            "ly_do_loi": item.get("error_reason"),
+                        })
+                    item, duplicate = store.save_weigh_batch(
+                        work_date, shift[:80], machine[:80],
+                        production_order[:80], milestone, batch_size,
+                        candidates, needs_sync=service.sync_worker is not None,
+                    )
+                    if service.sync_worker is not None:
+                        service.sync_worker.notify()
+                    self.send_json(200, {"ok": True, "item": item, "duplicate": duplicate})
                     return
                 if self.path == "/api/session/discard":
                     discarded = service.discard_session(
@@ -5649,7 +5833,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             previous_core = float(local.weight)
                         if local.product_weight is not None:
                             previous_product = float(local.product_weight)
-                        weight_raw = weight_raw or (local.weight_raw or "")
+                        weight_raw = (local.weight_raw or "") or weight_raw
                         if not work_date:
                             work_date = _item_source_date(
                                 {
@@ -5679,10 +5863,12 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             )
                         unit = unit or local.unit or "kg"
                     try:
-                        if previous_core is None:
-                            previous_core = float(payload.get("core_weight"))
-                        if previous_product is None:
-                            previous_product = float(payload.get("product_weight"))
+                        raw_core = payload.get("core_weight")
+                        raw_product = payload.get("product_weight")
+                        if previous_core is None and raw_core not in (None, ""):
+                            previous_core = float(raw_core)
+                        if previous_product is None and raw_product not in (None, ""):
+                            previous_product = float(raw_product)
                     except (TypeError, ValueError) as exc:
                         raise ValueError(
                             "Thiếu khối lượng hiện tại để đọc lại"
@@ -5718,6 +5904,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             recognition_provider=recognition_provider,
                             capture_kind=kind,
                             client_qr_code=("" if kind == "product" else previous_qr),
+                            context_station_id=(local.station_id or None) if local else None,
+                            context_camera_id=(local.camera_id or None) if local else None,
                             context_shift=shift,
                         )
                     except Exception as exc:
@@ -5778,16 +5966,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             weight_raw = _upsert_raw_tag(
                                 weight_raw, "REREAD_QR_DECODER", qr_decoder[:80]
                             )
-                    if not str(qr_code or "").strip():
-                        raise ValueError(
-                            "Thiếu mã QR"
-                            + (
-                                " và không đọc lại được từ ảnh SP"
-                                if kind == "product"
-                                else ""
-                            )
-                        )
-                    if float(core_weight) > float(product_weight):
+                    if (core_weight is not None and product_weight is not None
+                            and float(core_weight) > float(product_weight)):
                         raise ValueError(
                             "Cân lõi phải ≤ cân SP sau khi đọc lại "
                             f"({core_weight:g} > {product_weight:g})"
@@ -5803,12 +5983,14 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         store,
                         event_id=event_id,
                         qr_code=qr_code,
-                        core_weight=float(core_weight),
-                        product_weight=float(product_weight),
+                        core_weight=core_weight,
+                        product_weight=product_weight,
                         work_date=work_date,
                         shift=shift,
                         machine=machine,
                         production_order=production_order,
+                        error_status="error" if not qr_code else "ok",
+                        error_reason="Chưa nhận diện được mã QR" if not qr_code else "",
                         weight_raw=weight_raw,
                     )
                     product_code = ""
@@ -5843,6 +6025,16 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         }
                     )
                     self.send_json(200, persisted)
+                    return
+                if self.path == "/api/measurements/retry-error":
+                    self.send_json(
+                        200,
+                        service.reread_photo_drafts(
+                            str(payload.get("event_id") or "").strip(),
+                            recognition_profile=str(payload.get("recognition_profile") or "fast"),
+                            recognition_provider=str(payload.get("recognition_provider") or "gemini"),
+                        ),
+                    )
                     return
                 if self.path == "/api/codex/login":
                     if service.codex_reader is None:

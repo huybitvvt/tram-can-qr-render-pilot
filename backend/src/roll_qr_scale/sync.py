@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import base64
 import inspect
+import json
 import time
 from pathlib import Path
 from collections.abc import Callable
@@ -389,6 +390,39 @@ class OutboxSyncWorker:
                 )
                 if succeeded:
                     synced += 1
+            # Batch confirmations are derived from measurements, so upload
+            # their source rows first. A cloud failure never blocks local print.
+            for batch in self.store.pending_weigh_batches(limit=limit):
+                try:
+                    if not self.api_url or not self.device_token:
+                        break
+                    products = json.loads(str(batch["item_json"])).get(
+                        "danh_sach_san_pham", []
+                    )
+                    if any(
+                        (measurement := self.store.get(str(product.get("event_id") or "")))
+                        is None or measurement.sync_status != "synced"
+                        for product in products
+                    ):
+                        continue
+                    post_remote_action(
+                        self.api_url,
+                        self.device_token,
+                        body={
+                            "action": "confirm_weighing_batch",
+                            "work_date": batch["work_date"],
+                            "shift": batch["shift"],
+                            "machine": batch["machine"],
+                            "production_order": batch["production_order"],
+                            "milestone": batch["milestone"],
+                            "batch_size": batch["batch_size"],
+                            "allow_partial": True,
+                        },
+                    )
+                    self.store.mark_weigh_batch_sync(int(batch["id"]))
+                    synced += 1
+                except Exception as exc:
+                    self.store.mark_weigh_batch_sync(int(batch["id"]), str(exc))
             return synced
 
     def stop(self) -> None:

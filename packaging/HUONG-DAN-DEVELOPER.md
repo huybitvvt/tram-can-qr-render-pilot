@@ -43,7 +43,7 @@ Script tự chạy test rồi tạo:
 
 ```text
 dist\TramCanQR\TramCanQR.exe
-dist\installer\TramCanQR-Setup-0.2.0-rc30.exe
+dist\installer\TramCanQR-Setup-0.2.0-rc31.exe
 ```
 
 Nếu test hoặc build lỗi, không gửi lại file EXE/installer cũ. Trước mỗi đợt

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import urllib.request
@@ -616,7 +617,13 @@ def post_measurement(
 ) -> dict[str, object]:
     effective_timeout = _effective_sync_timeout(timeout)
     body = dict(payload)
-    core_image = _compact_upload_image(Path(image_path).read_bytes())
+    original_image = Path(image_path).read_bytes()
+    expected_hash = str(body.get("frame_sha256") or "").strip().lower()
+    if expected_hash and hashlib.sha256(original_image).hexdigest() != expected_hash:
+        raise ValueError("Local capture SHA-256 does not match the saved image")
+    # The Edge Function checks frame_sha256 against the uploaded JPEG bytes.
+    # Re-encoding a hashed capture makes every large upload fail with 422.
+    core_image = original_image if expected_hash else _compact_upload_image(original_image)
     body["image_base64"] = base64.b64encode(core_image).decode("ascii")
     product_image_base64 = body.get("product_image_base64")
     if isinstance(product_image_base64, str) and product_image_base64:
@@ -650,10 +657,21 @@ def post_measurement(
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=effective_timeout) as response:
-        response_body = response.read()
-        if not 200 <= response.status < 300:
-            raise RuntimeError(f"API returned HTTP {response.status}")
+    try:
+        with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+            response_body = response.read()
+            if not 200 <= response.status < 300:
+                raise RuntimeError(f"API returned HTTP {response.status}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read(4096).decode("utf-8", errors="replace")
+        try:
+            error_body = json.loads(detail)
+        except json.JSONDecodeError:
+            error_body = {}
+        code = str(error_body.get("error") or "").strip() if isinstance(error_body, dict) else ""
+        message = str(error_body.get("message") or "").strip() if isinstance(error_body, dict) else ""
+        reason = ": ".join(part for part in (code, message) if part)
+        raise RuntimeError(f"Cloud HTTP {exc.code}" + (f": {reason[:300]}" if reason else "")) from exc
     if not response_body:
         return {}
     parsed = json.loads(response_body.decode("utf-8"))

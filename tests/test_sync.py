@@ -14,6 +14,40 @@ from roll_qr_scale.storage import MeasurementStore
 from roll_qr_scale.sync import OutboxSyncWorker
 
 
+def test_local_weigh_batch_prints_before_cloud_and_syncs_later(tmp_path, monkeypatch) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    measurement = store.save(
+        "SP_001", 0.82, "kg", np.zeros((80, 100, 3), dtype=np.uint8),
+        "manual", needs_sync=True,
+    )
+    candidates = [{
+        "event_id": measurement.event_id, "qr_code": "SP_001", "ma_san_pham": "SP",
+        "can_loi": 0.82, "can_san_pham": 5.92, "don_vi": "kg",
+        "can_luc": "2026-09-25T10:00:00Z", "trang_thai_loi": "ok",
+    }]
+    item, duplicate = store.save_weigh_batch(
+        "2026-09-25", "HC1", "Máy 1", "LSX-1", 10, 10, candidates,
+        needs_sync=True,
+    )
+    assert duplicate is False
+    assert item["so_luong"] == 1
+    assert item["sync_status"] == "pending"
+    assert store.list_weigh_batches("2026-09-25", "HC1", "Máy 1", "LSX-1")[0]["danh_sach_san_pham"][0]["qr_code"] == "SP_001"
+    store.mark_synced(measurement.event_id, 1, "https://example.test/image.jpg", "img-1")
+    sent = []
+
+    def fake_action(url, token, *, body, timeout=30.0):
+        sent.append(body)
+        return {"ok": True, "item": {"dot_can": 1}}
+
+    monkeypatch.setattr("roll_qr_scale.sync.post_remote_action", fake_action)
+    worker = OutboxSyncWorker(store, "https://example.test/ingest", "token")
+    assert worker.sync_once() == 1
+    assert sent[0]["action"] == "confirm_weighing_batch"
+    assert store.list_weigh_batches("2026-09-25", "HC1", "Máy 1", "LSX-1")[0]["sync_status"] == "synced"
+    store.close()
+
+
 def test_outbox_syncs_committed_measurement(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     measurement = store.save(

@@ -39,6 +39,7 @@ class FakeClient:
 def test_gemini_retries_transient_failure_with_same_image(monkeypatch, failure) -> None:
     waits = []
     monkeypatch.setattr("roll_qr_scale.gemini_weight.time.sleep", waits.append)
+    monkeypatch.setattr("roll_qr_scale.gemini_weight.random.uniform", lambda *_: 0.0)
     calls = []
     error = TimeoutError("deadline expired") if failure == "timeout" else RuntimeError("server error")
     if failure != "timeout":
@@ -66,7 +67,7 @@ def test_gemini_retries_transient_failure_with_same_image(monkeypatch, failure) 
     assert reader.status()["failures"] == 0
 
 
-@pytest.mark.parametrize(("code", "expected_calls"), [(504, 2), (403, 1), (429, 1)])
+@pytest.mark.parametrize(("code", "expected_calls"), [(504, 3), (403, 1), (429, 1)])
 def test_gemini_stops_retrying_and_never_invents_weight(monkeypatch, code, expected_calls) -> None:
     monkeypatch.setattr("roll_qr_scale.gemini_weight.time.sleep", lambda _: None)
     calls = []
@@ -87,6 +88,35 @@ def test_gemini_stops_retrying_and_never_invents_weight(monkeypatch, code, expec
     assert "secret-key" not in result.raw
     assert reader.status()["requests"] == expected_calls
     assert reader.status()["failures"] == 1
+
+
+def test_gemini_succeeds_on_second_retry(monkeypatch) -> None:
+    waits = []
+    monkeypatch.setattr("roll_qr_scale.gemini_weight.time.sleep", waits.append)
+    monkeypatch.setattr("roll_qr_scale.gemini_weight.random.uniform", lambda *_: 0.0)
+    calls = []
+
+    def generate_content(**kwargs):
+        calls.append(kwargs)
+        if len(calls) < 3:
+            error = RuntimeError("server unavailable")
+            error.code = 503
+            raise error
+        return FakeModels({
+            "weight_readable": True, "weight_digits": "1.04",
+            "qr_readable": False, "qr_code": None, "all_frames_agree": True,
+        }).generate_content(**kwargs)
+
+    reader = GeminiWeightReader("secret-key", client=SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content)
+    ))
+    result = reader.read([np.zeros((480, 640, 3), dtype=np.uint8)])
+
+    assert result.readable and result.value == pytest.approx(1.04)
+    assert len(calls) == 3
+    assert waits == [1.0, 2.0]
+    assert all(call["contents"] is calls[0]["contents"] for call in calls)
+    assert reader.status()["requests"] == 3
 
 
 def test_gemini_reader_sends_three_sampled_full_images_and_returns_qr() -> None:

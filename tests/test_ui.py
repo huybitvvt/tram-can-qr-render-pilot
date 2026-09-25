@@ -38,6 +38,56 @@ def test_weigh_batch_limit_per_machine(shift: str, machine: str, expected: int) 
     assert test_ui_module._max_weigh_batch_size(shift, machine) == expected
 
 
+def test_weigh_batch_can_be_confirmed_and_printed_from_local_db(tmp_path) -> None:
+    import json
+    import urllib.request
+
+    args = test_ui_module.build_parser().parse_args([
+        "--db", str(tmp_path / "measurements.db"),
+        "--captures", str(tmp_path / "captures"),
+        "--yolo-model", "", "--weight-engine", "local", "--port", "0",
+    ])
+    server, service = test_ui_module.create_server(args)
+    measurement = service.store.save(
+        "SP_001", 0.82, "kg", np.zeros((80, 120, 3), dtype=np.uint8),
+        "manual", weight_raw=(
+            "SOURCE_DATE=2026-09-25; SOURCE_SHIFT=HC1; "
+            "SOURCE_MACHINE=Máy 1; SOURCE_PRODUCTION_ORDER=LSX-1; "
+            "PRODUCT_WEIGHT=5.92"
+        ),
+    )
+    service.store.attach_product_weight(measurement.event_id, 5.92)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        request = urllib.request.Request(
+            base + "/api/weighing-batches/confirm",
+            data=json.dumps({
+                "work_date": "2026-09-25", "shift": "HC1", "machine": "Máy 1",
+                "production_order": "LSX-1", "milestone": 10, "batch_size": 10,
+            }).encode(),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(request) as response:
+            confirmed = json.load(response)
+        with urllib.request.urlopen(
+            base + "/api/weighing-batches?work_date=2026-09-25&shift=HC1"
+            "&machine=M%C3%A1y%201&production_order=LSX-1"
+        ) as response:
+            listed = json.load(response)
+        assert confirmed["item"]["sync_status"] in {"local", "pending"}
+        assert confirmed["item"]["so_luong"] == 1
+        assert listed["source"] == "local"
+        assert listed["items"][0]["danh_sach_san_pham"][0]["event_id"] == measurement.event_id
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        service.close()
+        service.store.close()
+
+
 def test_analyze_accepts_fourth_weighing_round(tmp_path, monkeypatch) -> None:
     import json
     import urllib.error
@@ -584,6 +634,174 @@ def test_ui_photo_capture_survives_local_qr_decoder_failure(tmp_path, monkeypatc
     assert Path(saved.image_path).is_file()
     service.close()
     store.close()
+
+
+def test_reread_saved_core_photo_keeps_incomplete_row_as_error(tmp_path, monkeypatch) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    parent_id = str(uuid.uuid4())
+    capture_id = str(uuid.uuid4())
+    store.save_photo_draft_idempotent(
+        np.zeros((80, 120, 3), dtype=np.uint8),
+        event_id=capture_id, parent_event_id=parent_id, capture_kind="core",
+    )
+    monkeypatch.setattr(service, "analyze", lambda *_args, **_kwargs: {
+        "weight_found": True, "weight": 0.16,
+    })
+
+    result = service.reread_photo_drafts(parent_id)
+    items = test_ui_module._local_production_items(store, 10)
+
+    assert result["promoted"] is False
+    assert result["core_weight"] == pytest.approx(0.16)
+    assert store.get(parent_id) is None
+    assert items[0]["core_weight"] == pytest.approx(0.16)
+    assert items[0]["error_status"] == "error"
+    assert "Chưa có ảnh sản phẩm" in items[0]["error_reason"]
+    service.close()
+    store.close()
+
+
+def test_reread_weight_stays_bound_to_the_photo_that_was_read() -> None:
+    parent_id = str(uuid.uuid4())
+    rows = [
+        {"event_id": str(uuid.uuid4()), "parent_event_id": parent_id,
+         "capture_kind": "core", "captured_at": "2026-09-25T10:00:00Z",
+         "image_url": "https://example.test/old.jpg", "reread_weight": 0.16},
+        {"event_id": str(uuid.uuid4()), "parent_event_id": parent_id,
+         "capture_kind": "core", "captured_at": "2026-09-25T10:01:00Z",
+         "image_url": "https://example.test/new.jpg", "reread_weight": None},
+    ]
+
+    item = test_ui_module._photo_draft_display_items(rows)[0]
+
+    assert item["core_image_url"] == "https://example.test/new.jpg"
+    assert item["core_weight"] == "unread"
+
+
+def test_reread_saved_photo_pair_promotes_one_measurement(tmp_path, monkeypatch) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    parent_id = str(uuid.uuid4())
+    for kind, qr in (("core", ""), ("product", "SP-001")):
+        store.save_photo_draft_idempotent(
+            np.zeros((80, 120, 3), dtype=np.uint8),
+            event_id=str(uuid.uuid4()), parent_event_id=parent_id,
+            capture_kind=kind, qr_code=qr,
+        )
+    monkeypatch.setattr(service, "analyze", lambda *_args, **kwargs: {
+        "weight_found": True,
+        "weight": 0.16 if kwargs["capture_kind"] == "core" else 0.40,
+    })
+
+    result = service.reread_photo_drafts(parent_id)
+    saved = store.get(parent_id)
+    items = test_ui_module._local_production_items(store, 10)
+
+    assert result["promoted"] is True
+    assert saved is not None
+    assert saved.weight == pytest.approx(0.16)
+    assert saved.product_weight == pytest.approx(0.40)
+    assert Path(saved.product_image_path).is_file()
+    assert len(items) == 1 and not items[0].get("error_only")
+    service.close()
+    store.close()
+
+
+def test_reread_error_measurement_fills_both_missing_weights(tmp_path, monkeypatch) -> None:
+    import json
+    import urllib.error
+    import urllib.request
+
+    server, service = test_ui_module.create_server(
+        test_ui_module.build_parser().parse_args([
+            "--db", str(tmp_path / "measurements.db"),
+            "--captures", str(tmp_path / "captures"),
+            "--yolo-model", "", "--port", "0",
+        ])
+    )
+    event_id = str(uuid.uuid4())
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    service.capture(
+        "SP-001", None, "kg", frame, True,
+        "PRODUCT_WEIGHT=unread", product_frame=frame,
+        event_id=event_id,
+    )
+    monkeypatch.setattr(service, "analyze", lambda *_args, **kwargs: {
+        "weight_found": True,
+        "weight": 0.16 if kwargs["capture_kind"] == "core" else 0.40,
+    })
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    try:
+        for kind in ("core", "product"):
+            request = urllib.request.Request(
+                f"http://{host}:{port}/api/measurements/reread",
+                data=json.dumps({"event_id": event_id, "kind": kind}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            try:
+                with urllib.request.urlopen(request) as response:
+                    assert response.status == 200
+            except urllib.error.HTTPError as exc:
+                pytest.fail(f"{kind}: {exc.read().decode()}")
+        saved = service.store.get(event_id)
+        assert saved is not None
+        assert saved.weight == pytest.approx(0.16)
+        assert saved.product_weight == pytest.approx(0.40)
+        assert "ERROR_STATUS=ok" in saved.weight_raw
+        assert "REREAD_CORE=0.16" in saved.weight_raw
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+        if service.sync_worker is not None:
+            service.sync_worker.stop()
+        service.close()
+
+
+def test_reread_error_photo_endpoint_returns_partial_result(tmp_path, monkeypatch) -> None:
+    import json
+    import urllib.request
+
+    server, service = test_ui_module.create_server(
+        test_ui_module.build_parser().parse_args([
+            "--db", str(tmp_path / "measurements.db"),
+            "--captures", str(tmp_path / "captures"),
+            "--yolo-model", "", "--port", "0",
+        ])
+    )
+    parent_id = str(uuid.uuid4())
+    service.store.save_photo_draft_idempotent(
+        np.zeros((80, 120, 3), dtype=np.uint8),
+        event_id=str(uuid.uuid4()), parent_event_id=parent_id,
+        capture_kind="core",
+    )
+    monkeypatch.setattr(service, "analyze", lambda *_args, **_kwargs: {
+        "weight_found": True, "weight": 0.16,
+    })
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+    try:
+        request = urllib.request.Request(
+            f"http://{host}:{port}/api/measurements/retry-error",
+            data=json.dumps({"event_id": parent_id}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request) as response:
+            result = json.loads(response.read())
+        assert result["ok"] is True
+        assert result["promoted"] is False
+        assert result["core_weight"] == pytest.approx(0.16)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2.0)
+        if service.sync_worker is not None:
+            service.sync_worker.stop()
+        service.close()
 
 
 def test_ui_inventory_ai_miss_photo_is_saved_without_weight(tmp_path) -> None:
@@ -1379,7 +1597,7 @@ def test_gemini_full_frame_keeps_local_qr_on_cloud_conflict(tmp_path) -> None:
     assert "kept checksum-validated local QR" in result["weight_raw"]
 
 
-def test_render_capture_sends_full_frame_with_scale_zoom_to_gemini(tmp_path, monkeypatch) -> None:
+def test_render_capture_sends_scale_head_crop_to_gemini(tmp_path, monkeypatch) -> None:
     class FakeGeminiReader:
         def __init__(self):
             self.shape = None
@@ -1387,8 +1605,8 @@ def test_render_capture_sends_full_frame_with_scale_zoom_to_gemini(tmp_path, mon
         def read(self, frames, *, unit):
             assert len(frames) == 1
             self.shape = frames[0].shape[:2]
-            assert self.shape[0] > 600
-            assert self.shape[1] == 800
+            assert 150 < self.shape[0] < 600
+            assert 200 < self.shape[1] < 800
             return GeminiWeightSuggestion(13.04, unit, True, True, "GEMINI:test", 0.2)
 
         def status(self):
@@ -1427,10 +1645,10 @@ def test_render_capture_sends_full_frame_with_scale_zoom_to_gemini(tmp_path, mon
     assert result["evidence_zoom_applied"] is True
     assert result["evidence_zoom_method"] == "red-led"
     assert str(result["evidence_image"]).startswith("data:image/jpeg;base64,")
-    assert result["gemini_crop_applied"] is False
+    assert result["gemini_crop_applied"] is True
     assert result["gemini_attempts"] == 1
     assert result["gemini_fallback_used"] is False
-    assert result["roi_method"] == "gemini-full-frame+zoom-red-led"
+    assert result["roi_method"] == "gemini-scale-head-zoom-red-led"
 
 
 def test_zoomed_core_evidence_keeps_analysis_binding_for_final_save(
@@ -1622,10 +1840,10 @@ def test_unreadable_gemini_full_frame_retries_one_led_crop(tmp_path, monkeypatch
 
     service.close()
     store.close()
-    assert reader.shapes[0][0] > 600
-    assert reader.shapes[0][1] == 800
-    assert reader.shapes[1][0] < reader.shapes[0][0]
-    assert reader.shapes[1][1] < reader.shapes[0][1]
+    assert reader.shapes[0][0] < 600
+    assert reader.shapes[0][1] < 800
+    assert reader.shapes[1][0] > reader.shapes[0][0]
+    assert reader.shapes[1][1] > reader.shapes[0][1]
     assert result["weight"] == pytest.approx(13.04)
     assert result["gemini_attempts"] == 2
     assert result["gemini_fallback_used"] is True
@@ -1634,9 +1852,9 @@ def test_unreadable_gemini_full_frame_retries_one_led_crop(tmp_path, monkeypatch
     assert result["gemini_output_tokens"] == 30
     assert result["gemini_total_tokens"] == 330
     assert result["gemini_crop_applied"] is True
-    assert result["roi_method"] == "gemini-full-frame+crop-zoom-red-led-retry"
-    assert "FULL FRAME ATTEMPT" in result["weight_raw"]
-    assert "CROP RETRY" in result["weight_raw"]
+    assert result["roi_method"] == "gemini-scale-head-zoom-red-led+full-frame-retry"
+    assert "SCALE HEAD ATTEMPT" in result["weight_raw"]
+    assert "FULL FRAME RETRY" in result["weight_raw"]
 
 
 def test_gemini_full_frame_does_not_retry_network_error(tmp_path, monkeypatch) -> None:
@@ -2335,7 +2553,8 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "Số lượng trong ca" in TEST_UI_HTML
     assert "data.total_count" in TEST_UI_HTML
     assert "data.measurement_count" in TEST_UI_HTML
-    assert "data.synced_measurement_count" in TEST_UI_HTML
+    assert "data.measurement_count==null?null:Number(data.measurement_count)" in TEST_UI_HTML
+    assert "local_only=1" in TEST_UI_HTML
     assert "data.error_count" in TEST_UI_HTML
     assert "ảnh AI lỗi không tính" in TEST_UI_HTML
     assert "maybePromptRollBatchConfirm" not in TEST_UI_HTML
@@ -2485,6 +2704,7 @@ def test_master_supabase_table_filters_by_machine(monkeypatch) -> None:
 def test_load_production_orders_reads_dotenv_before_master_check(
     monkeypatch, tmp_path: Path
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     env_path = tmp_path / ".env"
     env_path.write_text(
         "\n".join(
@@ -3007,7 +3227,7 @@ def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> Non
     assert 'id="printSheet"' in TEST_UI_HTML
     assert "function printWeighBatch" in TEST_UI_HTML
     assert "/api/weighing-batches/confirm" in TEST_UI_HTML
-    assert "Đang tạo đợt cân trong bảng ca_can" in TEST_UI_HTML
+    assert "Đang lưu đợt cân trên máy" in TEST_UI_HTML
     assert "writeRollBatchConfirmed(0)" in TEST_UI_HTML
     assert "readRollBatchConfirmed()+rollBatchSize()" in TEST_UI_HTML
 
@@ -3624,7 +3844,11 @@ def test_measurement_pages_do_not_repeat_synced_local_rows(tmp_path, monkeypatch
         service.store.close()
 
 
-def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path) -> None:
+def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(test_ui_module, "_supabase_project_url", lambda: "")
+    monkeypatch.setattr(test_ui_module, "_supabase_read_key", lambda: "")
+    monkeypatch.setattr(test_ui_module, "_ingest_api_url", lambda: "")
+    monkeypatch.setattr(test_ui_module, "_ingest_api_token", lambda: "")
     import json
     import threading
     import urllib.request

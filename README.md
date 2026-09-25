@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc30`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc30/TramCanQR-Setup-0.2.0-rc30.exe).
+>    Bản `0.2.0-rc31`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc31/TramCanQR-Setup-0.2.0-rc31.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc30.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc31.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -654,4 +654,7 @@ Bản 0.2.0-rc28 sửa lỗi khởi động do Gemini SDK chọn `aiohttp` khôn
 
 Bản 0.2.0-rc29 tránh lỗi sao chép `SSLContext` khi Gemini fallback và giữ HTTPX làm transport kể cả khi `aiohttp` có mặt không đầy đủ. Xem `docs/release-notes-0.2.0-rc29.md`.
 
-Bản 0.2.0-rc30 thử lại lỗi Gemini `502/503/504` và timeout tối đa hai lần, chờ lùi tăng dần có jitter trước khi chuyển sang khóa dự phòng hoặc OCR local. Xem `docs/release-notes-0.2.0-rc30.md`.
+Bản 0.2.0-rc31 thử lại lỗi Gemini `502/503/504` và timeout tối đa hai lần, chờ lùi tăng dần có jitter trước khi chuyển sang khóa dự phòng hoặc OCR local. Xem `docs/release-notes-0.2.0-rc31.md`.
+
+
+Bản 0.2.0-rc31 cắt rộng quanh toàn bộ đầu cân gửi Gemini ở mức medium resolution, thêm nút đọc lại ảnh lỗi, sửa lỗi đồng bộ 422 và tối ưu bộ đếm/in phiếu local. Xem `docs/release-notes-0.2.0-rc31.md`.

@@ -1,4 +1,13 @@
 import urllib.parse
+import base64
+import hashlib
+import io
+import json
+import urllib.error
+
+import cv2
+import numpy as np
+import pytest
 
 from roll_qr_scale.api_client import (
     delete_supabase_photo_drafts,
@@ -382,3 +391,54 @@ def test_post_measurement_passes_effective_timeout(monkeypatch, tmp_path) -> Non
     # Explicit argument overrides env
     post_measurement("http://localhost/test", {"event_id": "e1"}, img, "token", timeout=20.0)
     assert captured["timeout"] == 20.0
+
+
+def test_post_measurement_preserves_hashed_jpeg_bytes(monkeypatch, tmp_path) -> None:
+    image = np.random.default_rng(5).integers(0, 255, (900, 1600, 3), dtype=np.uint8)
+    encoded, jpeg = cv2.imencode(".jpg", image)
+    assert encoded
+    original = jpeg.tobytes()
+    assert len(original) > 350_000
+    path = tmp_path / "capture.jpg"
+    path.write_bytes(original)
+    sent = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"ok": true}'
+
+    def fake_urlopen(request, timeout):
+        sent.update(json.loads(request.data))
+        return Response()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    post_measurement(
+        "http://localhost/test",
+        {"event_id": "e1", "frame_sha256": hashlib.sha256(original).hexdigest()},
+        path,
+        "token",
+    )
+    assert base64.b64decode(sent["image_base64"]) == original
+
+
+def test_post_measurement_reports_cloud_validation_code(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "capture.jpg"
+    path.write_bytes(b"\xff\xd8\xff\xd9")
+
+    def fake_urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            request.full_url, 422, "Unprocessable Entity", {},
+            io.BytesIO(b'{"ok":false,"error":"frame_sha256_mismatch"}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="Cloud HTTP 422: frame_sha256_mismatch"):
+        post_measurement("http://localhost/test", {"event_id": "e1"}, path, "token")
