@@ -413,6 +413,18 @@ class GeminiWeightReader:
         text = str(getattr(response, "text", "") or "").strip()
         if not text:
             raise ValueError("Gemini returned an empty response")
+        decoder = json.JSONDecoder()
+        parse_error: json.JSONDecodeError | None = None
+        for start in (match.start() for match in re.finditer(r"\{", text)):
+            try:
+                value, _ = decoder.raw_decode(text, start)
+            except json.JSONDecodeError as exc:
+                parse_error = exc
+                continue
+            if isinstance(value, dict):
+                return _GeminiScalePayload.model_validate(value)
+        if parse_error is not None:
+            raise parse_error
         return _GeminiScalePayload.model_validate(json.loads(text))
 
     def _safe_error(self, exc: Exception) -> str:
@@ -428,6 +440,8 @@ class GeminiWeightReader:
     def _is_transient_error(exc: Exception) -> bool:
         from httpx import TimeoutException
 
+        if isinstance(exc, json.JSONDecodeError):
+            return True
         code = str(getattr(exc, "code", getattr(exc, "status_code", "")))
         return code in {"502", "503", "504"} or isinstance(
             exc, (TimeoutError, TimeoutException)
@@ -529,7 +543,27 @@ class GeminiWeightReader:
                     thinking_config=thinking_config,
                 ),
             )
-            payload = self._payload(response)
+            for parse_attempt in range(2):
+                try:
+                    payload = self._payload(response)
+                    break
+                except json.JSONDecodeError:
+                    if parse_attempt:
+                        raise
+                    # Structured output can occasionally arrive malformed.
+                    # Retry once with the same captured frames before failing
+                    # over to another key or rejecting the image.
+                    time.sleep(0.25)
+                    self._record_request()
+                    response = self._generate_weight_content(
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            max_output_tokens=112,
+                            response_mime_type="application/json",
+                            response_schema=_GEMINI_RESPONSE_SCHEMA,
+                            thinking_config=thinking_config,
+                        ),
+                    )
             latency = time.perf_counter() - started
             usage = getattr(response, "usage_metadata", None)
             input_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
