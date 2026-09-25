@@ -7,13 +7,13 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc27`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc27/TramCanQR-Setup-0.2.0-rc27.exe).
+>    Bản `0.2.0-rc28`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc28/TramCanQR-Setup-0.2.0-rc28.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Cân lõi là tùy chọn; lượt chỉ có thành phẩm và mã SP vẫn lưu được. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 
-Bản `0.2.0-rc27` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
+Bản `0.2.0-rc28` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
 
 Mã nguồn được tách theo ranh giới triển khai:
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc27.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc28.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -649,3 +649,5 @@ Lưu ý giấy phép: Ultralytics phát hành code/model theo AGPL-3.0; hệ th�
 Bản 0.2.0-rc26 thử lại một lần khi Gemini trả JSON không hợp lệ, và chấp nhận JSON hợp lệ kể cả khi có Markdown hoặc văn bản bao quanh. Xem `docs/release-notes-0.2.0-rc26.md`.
 
 Bản 0.2.0-rc27 thêm watermark logo mờ trên trang cân và phiếu in. Xem `docs/release-notes-0.2.0-rc27.md`.
+
+Bản 0.2.0-rc28 sửa lỗi khởi động do Gemini SDK chọn `aiohttp` không đầy đủ trong bản đóng gói; SDK giờ dùng HTTPX. Xem `docs/release-notes-0.2.0-rc28.md`.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roll-qr-scale"
-version = "0.2.0rc27"
+version = "0.2.0rc28"
 description = "Capture a roll QR code and bind it to a scale reading."
 requires-python = ">=3.10"
 dependencies = [
