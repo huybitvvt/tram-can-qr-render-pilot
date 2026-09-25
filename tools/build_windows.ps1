@@ -13,8 +13,12 @@ if (-not $python) {
 }
 & $python -m pip install "pyinstaller==6.21.0"
 if ($LASTEXITCODE -ne 0) { throw "Không cài được PyInstaller" }
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $python -m PyInstaller --noconfirm --clean packaging\TramCanQR.spec
-if ($LASTEXITCODE -ne 0) { throw "PyInstaller build thất bại" }
+$pyInstallerExitCode = $LASTEXITCODE
+$ErrorActionPreference = $previousErrorActionPreference
+if ($pyInstallerExitCode -ne 0) { throw "PyInstaller build failed (exit code $pyInstallerExitCode)" }
 
 $portableDir = Join-Path $projectRoot "dist\TramCanQR"
 $portableExe = Join-Path $portableDir "TramCanQR.exe"
@@ -62,8 +66,10 @@ if (Test-Path -LiteralPath $installerPath) {
         ((Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash + "  " + (Split-Path $installerPath -Leaf))
     )
 } else {
+    $portableArchive = Join-Path $handoffDir "TramCanQR-portable-0.2.0-rc25.zip"
+    Compress-Archive -Path $portableDir -DestinationPath $portableArchive -CompressionLevel Optimal -Force
     $hashes = @(
-        ((Get-FileHash -LiteralPath $portableExe -Algorithm SHA256).Hash + "  " + (Split-Path $portableExe -Leaf) + " (EXE; keep the complete TramCanQR folder)")
+        ((Get-FileHash -LiteralPath $portableArchive -Algorithm SHA256).Hash + "  " + (Split-Path $portableArchive -Leaf))
     )
 }
 $hashes | Set-Content -LiteralPath (Join-Path $handoffDir "SHA256SUMS.txt") -Encoding ascii
