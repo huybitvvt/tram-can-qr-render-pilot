@@ -327,7 +327,7 @@ class OutboxSyncWorker:
             measurement = self.store.get(event_id)
             if measurement is None:
                 return False
-            if measurement.sync_status == "synced":
+            if measurement.sync_status == "synced" and measurement.sync_error != "cloudinary_pending":
                 return True
             return self._sync_measurement(measurement)
 
@@ -338,7 +338,7 @@ class OutboxSyncWorker:
             check = self.store.get_inventory_check(event_id)
             if check is None:
                 return False
-            if check.sync_status == "synced":
+            if check.sync_status == "synced" and check.sync_error != "cloudinary_pending":
                 return True
             return self._sync_inventory_check(check)
 
@@ -349,7 +349,7 @@ class OutboxSyncWorker:
             draft = self.store.get_photo_draft(event_id)
             if draft is None:
                 return False
-            if draft.sync_status == "synced":
+            if draft.sync_status == "synced" and draft.sync_error != "cloudinary_pending":
                 return True
             return self._sync_photo_draft(draft)
 
@@ -393,37 +393,44 @@ class OutboxSyncWorker:
             # Batch confirmations are derived from measurements, so upload
             # their source rows first. A cloud failure never blocks local print.
             for batch in self.store.pending_weigh_batches(limit=limit):
-                try:
-                    if not self.api_url or not self.device_token:
-                        break
-                    products = json.loads(str(batch["item_json"])).get(
-                        "danh_sach_san_pham", []
-                    )
-                    if any(
-                        (measurement := self.store.get(str(product.get("event_id") or "")))
-                        is None or measurement.sync_status != "synced"
-                        for product in products
-                    ):
-                        continue
-                    post_remote_action(
-                        self.api_url,
-                        self.device_token,
-                        body={
-                            "action": "confirm_weighing_batch",
-                            "work_date": batch["work_date"],
-                            "shift": batch["shift"],
-                            "machine": batch["machine"],
-                            "production_order": batch["production_order"],
-                            "milestone": batch["milestone"],
-                            "batch_size": batch["batch_size"],
-                            "allow_partial": True,
-                        },
-                    )
-                    self.store.mark_weigh_batch_sync(int(batch["id"]))
+                if self._sync_weigh_batch(batch):
                     synced += 1
-                except Exception as exc:
-                    self.store.mark_weigh_batch_sync(int(batch["id"]), str(exc))
             return synced
+
+    def sync_weigh_batch(self, batch: dict[str, object]) -> bool:
+        with self._sync_lock:
+            return self._sync_weigh_batch(batch)
+
+    def _sync_weigh_batch(self, batch: dict[str, object]) -> bool:
+        try:
+            if not self.api_url or not self.device_token:
+                return False
+            products = json.loads(str(batch["item_json"])).get("danh_sach_san_pham", [])
+            if any(
+                (measurement := self.store.get(str(product.get("event_id") or "")))
+                is None or measurement.sync_status != "synced" or measurement.sync_error
+                for product in products
+            ):
+                return False
+            post_remote_action(
+                self.api_url,
+                self.device_token,
+                body={
+                    "action": "confirm_weighing_batch",
+                    "work_date": batch["work_date"],
+                    "shift": batch["shift"],
+                    "machine": batch["machine"],
+                    "production_order": batch["production_order"],
+                    "milestone": batch["milestone"],
+                    "batch_size": batch["batch_size"],
+                    "allow_partial": True,
+                },
+            )
+            self.store.mark_weigh_batch_sync(int(batch["id"]))
+            return True
+        except Exception as exc:
+            self.store.mark_weigh_batch_sync(int(batch["id"]), str(exc))
+            return False
 
     def stop(self) -> None:
         self._stop.set()

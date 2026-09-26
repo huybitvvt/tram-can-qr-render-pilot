@@ -17,6 +17,7 @@ import time
 import unicodedata
 import urllib.parse
 import uuid
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -1007,6 +1008,46 @@ def _matches_source_filters(
     return True
 
 
+def _manual_sync_filters(payload: dict[str, object]) -> dict[str, str]:
+    scope = str(payload.get("scope") or "production").strip()
+    if scope not in {"production", "inventory", "all"}:
+        raise ValueError("Phạm vi đồng bộ không hợp lệ")
+    filters = {
+        key: str(payload.get(key) or "").strip()
+        for key in ("date_from", "date_to", "shift", "machine", "production_order", "qr_code")
+    }
+    if not filters["date_from"] or not filters["date_to"]:
+        raise ValueError("Chọn Từ ngày và Đến ngày trước khi đồng bộ")
+    try:
+        start = date.fromisoformat(filters["date_from"])
+        end = date.fromisoformat(filters["date_to"])
+    except ValueError as exc:
+        raise ValueError("Khoảng ngày đồng bộ không hợp lệ") from exc
+    if end < start:
+        raise ValueError("Đến ngày phải sau hoặc bằng Từ ngày")
+    if any(len(value) > 200 for value in filters.values()):
+        raise ValueError("Bộ lọc đồng bộ quá dài")
+    return {**filters, "scope": scope}
+
+
+def _manual_sync_matches(item: dict[str, object], filters: dict[str, str]) -> bool:
+    item_date = _item_source_date(item)
+    if not item_date or not filters["date_from"] <= item_date <= filters["date_to"]:
+        return False
+    for field, tag in (
+        ("shift", "SOURCE_SHIFT"),
+        ("machine", "SOURCE_MACHINE"),
+        ("production_order", "SOURCE_PRODUCTION_ORDER"),
+    ):
+        selected = filters[field]
+        if selected and _item_source_value(item, field, tag) != selected:
+            return False
+    code = filters["qr_code"].casefold()
+    if code and code not in str(item.get("qr_code") or "").casefold():
+        return False
+    return True
+
+
 def _merge_source_tags(weight_raw: str, payload: dict[str, object]) -> str:
     """Ensure Ca / Máy / Lệnh sản xuất tags are present for Supabase metadata."""
 
@@ -1745,6 +1786,126 @@ def _persist_measurement_edit(
     }
 
 
+class ManualSyncController:
+    """Run one explicitly requested, filtered outbox upload at a time."""
+
+    MAX_SCAN = 100_000
+    MAX_JOB = 5_000
+
+    def __init__(self, store: MeasurementStore, worker: OutboxSyncWorker):
+        self.store = store
+        self.worker = worker
+        self._lock = threading.Lock()
+        self._job: dict[str, object] = {"state": "idle"}
+
+    def _plan(self, filters: dict[str, str]) -> tuple[list[tuple[str, object]], dict[str, int]]:
+        selected: list[tuple[str, object, str, int]] = []
+        counts = {"measurements": 0, "photo_drafts": 0, "inventory_checks": 0, "weigh_batches": 0}
+
+        def candidates(load: object) -> list[object]:
+            rows = load(limit=self.MAX_SCAN + 1, include_deferred=True, include_local=True)
+            if len(rows) > self.MAX_SCAN:
+                raise ValueError("Quá nhiều dữ liệu chờ đồng bộ; hãy thu hẹp khoảng ngày")
+            return rows
+
+        if filters["scope"] in {"production", "all"}:
+            for item in candidates(self.store.pending):
+                if _manual_sync_matches(vars(item), filters):
+                    selected.append(("measurement", item.event_id, item.captured_at, item.id))
+                    counts["measurements"] += 1
+            for item in candidates(self.store.pending_photo_drafts):
+                if _manual_sync_matches(vars(item), filters):
+                    selected.append(("photo_draft", item.event_id, item.captured_at, item.id))
+                    counts["photo_drafts"] += 1
+            if not filters["qr_code"]:
+                for batch in candidates(self.store.pending_weigh_batches):
+                    if _manual_sync_matches(batch, filters):
+                        selected.append(("weigh_batch", batch, str(batch["work_date"]), int(batch["id"])))
+                        counts["weigh_batches"] += 1
+        if filters["scope"] in {"inventory", "all"}:
+            for item in candidates(self.store.pending_inventory_checks):
+                source = {**vars(item), "qr_code": item.product_code}
+                if _manual_sync_matches(source, filters):
+                    selected.append(("inventory", item.event_id, item.captured_at, item.id))
+                    counts["inventory_checks"] += 1
+        if len(selected) > self.MAX_JOB:
+            raise ValueError("Có hơn 5.000 dòng khớp bộ lọc; hãy thu hẹp khoảng ngày")
+        selected.sort(key=lambda row: (row[0] == "weigh_batch", row[2], row[3]))
+        return [(kind, value) for kind, value, _, _ in selected], counts
+
+    def preview(self, payload: dict[str, object]) -> dict[str, object]:
+        filters = _manual_sync_filters(payload)
+        plan, counts = self._plan(filters)
+        return {"ok": True, "filters": filters, "counts": counts, "total": len(plan)}
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            return dict(self._job)
+
+    def start(self, payload: dict[str, object]) -> dict[str, object]:
+        filters = _manual_sync_filters(payload)
+        with self._lock:
+            if self._job.get("state") == "running":
+                raise ValueError("Đã có lượt đồng bộ đang chạy trên máy này")
+            plan, counts = self._plan(filters)
+            if not plan:
+                raise ValueError("Không có dữ liệu local chờ đồng bộ khớp bộ lọc")
+            self._job = {
+                "ok": True,
+                "job_id": str(uuid.uuid4()),
+                "state": "running",
+                "filters": filters,
+                "counts": counts,
+                "total": len(plan),
+                "done": 0,
+                "synced": 0,
+                "failed": 0,
+                "deferred": 0,
+                "last_error": "",
+            }
+            thread = threading.Thread(
+                target=self._run, args=(plan,), name="manual-cloud-sync", daemon=True
+            )
+            thread.start()
+            return dict(self._job)
+
+    def _run(self, plan: list[tuple[str, object]]) -> None:
+        try:
+            for kind, value in plan:
+                error = ""
+                try:
+                    if kind == "measurement":
+                        ok = self.worker.sync_event(str(value))
+                        row = self.store.get(str(value))
+                    elif kind == "photo_draft":
+                        ok = self.worker.sync_photo_draft_event(str(value))
+                        row = self.store.get_photo_draft(str(value))
+                    elif kind == "inventory":
+                        ok = self.worker.sync_inventory_event(str(value))
+                        row = self.store.get_inventory_check(str(value))
+                    else:
+                        batch = value
+                        ok = self.worker.sync_weigh_batch(batch)
+                        row = self.store.get_weigh_batch(int(batch["id"]))
+                    state = str(row["sync_status"] if kind == "weigh_batch" else row.sync_status) if row else "missing"
+                    error = str((row["sync_error"] if kind == "weigh_batch" else row.sync_error) or "") if row else "Dòng local không còn tồn tại"
+                    result = "synced" if ok and state == "synced" and not error else "deferred" if state in {"pending", "synced"} else "failed"
+                except Exception as exc:
+                    result = "failed"
+                    error = str(exc)
+                with self._lock:
+                    self._job["done"] = int(self._job["done"]) + 1
+                    self._job[result] = int(self._job[result]) + 1
+                    if error:
+                        self._job["last_error"] = error[:500]
+            with self._lock:
+                self._job["state"] = "complete"
+        except Exception as exc:
+            with self._lock:
+                self._job["state"] = "error"
+                self._job["last_error"] = str(exc)[:500]
+
+
 class StationUIService:
     def __init__(
         self,
@@ -1826,6 +1987,7 @@ class StationUIService:
         parsed_weight_rois = [parse_normalized_roi(value) for value in configured_weight_rois]
         self.store = store
         self.sync_worker = sync_worker
+        self.manual_sync = ManualSyncController(store, sync_worker) if sync_worker else None
         self.lookup_url = lookup_url
         self.lookup_token = lookup_token
         self.duplicate_window = duplicate_window
@@ -3048,8 +3210,6 @@ class StationUIService:
             station_id=station_id,
             camera_id=camera_id,
         )
-        if self.sync_worker is not None:
-            self.sync_worker.notify()
         current = self.store.get_photo_draft(draft.event_id) or draft
         return {
             "ok": True,
@@ -3189,8 +3349,6 @@ class StationUIService:
             )
             self.store.attach_product_weight(saved.measurement.event_id, readings["product"])
             self.store.attach_product_image(saved.measurement.event_id, frames["product"])
-            if self.sync_worker is not None:
-                self.sync_worker.notify()
             promoted = True
         return {
             "ok": True, "event_id": parent_event_id, "promoted": promoted,
@@ -4008,9 +4166,6 @@ class StationUIService:
         if bound_capture and station_id:
             self._cleanup_evidence_steps(station_id, measurement.event_id)
         # The local event and all supplied images are durable before the response.
-        # Wake the outbox without making the operator wait for cloud upload.
-        if self.sync_worker is not None:
-            self.sync_worker.notify()
         saved = self.store.get(measurement.event_id)
         current = saved or measurement
         return {
@@ -4176,8 +4331,6 @@ class StationUIService:
             self.sessions.mark_saved(str(analysis_id))
         if bound_capture and station_id:
             self._cleanup_evidence_steps(station_id, check.event_id)
-        if self.sync_worker is not None:
-            self.sync_worker.notify()
         current = self.store.get_inventory_check(check.event_id) or check
         return {
             "ok": True,
@@ -4661,10 +4814,9 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             args.api_url,
             args.api_token,
             args.gateway_id,
-            maintenance_enabled=True,
+            maintenance_enabled=False,
             local_retention_days=args.local_retention_days,
         )
-        worker.start()
     service = StationUIService(
         store,
         worker,
@@ -4997,12 +5149,19 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         ),
                         "ocr_min_confidence": service.ocr_min_confidence,
                         "sync_enabled": service.sync_worker is not None,
+                        "sync_mode": "manual",
                         "image_provider": "cloudinary" if service.sync_worker is not None else "local",
                         "release": os.environ.get("RENDER_GIT_COMMIT", "local")[:12],
                         "quality_settings": service.quality_settings,
                         **identity_status,
                     },
                 )
+                return
+            if parsed.path == "/api/manual-sync/status":
+                if service.manual_sync is None:
+                    self.send_json(503, {"ok": False, "message": "Chưa cấu hình Supabase để đồng bộ"})
+                else:
+                    self.send_json(200, {"ok": True, **service.manual_sync.status()})
                 return
             if parsed.path == "/api/antigravity/usage":
                 if service.antigravity_reader is None:
@@ -5616,6 +5775,17 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             try:
                 payload = self.read_json()
+                if self.path in {"/api/manual-sync/preview", "/api/manual-sync/start"}:
+                    if service.manual_sync is None:
+                        self.send_json(503, {"ok": False, "message": "Chưa cấu hình Supabase để đồng bộ"})
+                        return
+                    result = (
+                        service.manual_sync.preview(payload)
+                        if self.path.endswith("/preview")
+                        else service.manual_sync.start(payload)
+                    )
+                    self.send_json(200, result)
+                    return
                 if self.path == "/api/weighing-batches/confirm":
                     work_date = str(payload.get("work_date") or "").strip()
                     shift = str(payload.get("shift") or "").strip()
@@ -5672,8 +5842,6 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         production_order[:80], milestone, batch_size,
                         candidates, needs_sync=service.sync_worker is not None,
                     )
-                    if service.sync_worker is not None:
-                        service.sync_worker.notify()
                     self.send_json(200, {"ok": True, "item": item, "duplicate": duplicate})
                     return
                 if self.path == "/api/session/discard":

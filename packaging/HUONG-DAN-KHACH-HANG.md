@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc32` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc33` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc32.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc33.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -43,9 +43,22 @@ hệ thống tự ghi trạng thái/lý do lỗi. Ảnh lỗi AI vẫn được 
 nhưng nút Lưu tạo phiếu cân chính thức.
 Sau khi lưu thành công, ảnh của đúng lần đó biến mất để cân tiếp; lần khác
 chưa lưu vẫn còn. Dòng **Đang chờ** trong danh sách nghĩa là bản ghi đã nằm
-trong DB local và đang chờ Supabase/Cloudinary xác nhận đồng bộ. Nếu màn hình
+trong DB local và cần được đồng bộ thủ công lên Supabase/Cloudinary. Nếu màn hình
 báo chưa lưu được ảnh, giữ nguyên ảnh và bấm lại nút để thử lại.
 Xác nhận số cuộn là thao tác riêng, không ngăn lưu từng lần cân hay ảnh chờ.
+
+### Đồng bộ thủ công
+
+Từ bản `0.2.0-rc33`, ứng dụng không tự gửi dữ liệu local lên Supabase hoặc
+Cloudinary. Sau khi lưu phiếu, mở tab **Danh sách**. Chọn **Từ ngày**, **Đến
+ngày**, và nếu cần thì chọn **Ca**, nhập **Mã sản phẩm**, **Máy**, **Lệnh sản
+xuất**. Tại mục **Đồng bộ local → Supabase / Cloudinary**, chọn phạm vi **Phiếu
+cân và ảnh lỗi**, **Cân kiểm kho** hoặc **Tất cả dữ liệu local**. Bấm **Xem số
+dòng chờ** để kiểm tra, rồi bấm **Đồng bộ theo bộ lọc** và xác nhận. Giữ ứng dụng
+mở đến khi tiến độ kết thúc. Dòng báo lỗi hoặc còn chờ có thể đồng bộ lại bằng
+cùng bộ lọc sau khi xử lý nguyên nhân. Bộ lọc máy, ca, LSX yêu cầu bản ghi có
+đúng thông tin tương ứng; để trống nếu muốn lấy mọi bản ghi trong khoảng ngày.
+Để trống **Mã sản phẩm** nếu cần đồng bộ cả xác nhận đợt cân.
 
 ## 2. Danh tính từng trạm
 
@@ -180,7 +193,7 @@ bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`
 - Sau khi lưu, kiểm tra ngay dòng mới trong danh sách bên dưới. Trạng thái
   **Đang chờ** nghĩa là phiếu và ảnh đã lưu trên máy, đang gửi cloud ở nền.
   Bấm **Làm mới danh sách** để xem khi trạng thái chuyển thành **Đã đồng bộ**.
-  Nếu mạng lỗi, ứng dụng tự thử lại; khi mở lại ứng dụng, bản ghi còn chờ vẫn
+  Nếu mạng lỗi, chọn lại bộ lọc rồi bấm đồng bộ thủ công; khi mở lại ứng dụng, bản ghi còn chờ vẫn
   được gửi tiếp. Giữ máy chạy và có mạng đến khi các dòng cần gửi đã đồng bộ.
 
 Dữ liệu local, ảnh, SQLite và log nằm tại:

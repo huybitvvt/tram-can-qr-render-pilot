@@ -17,6 +17,7 @@ from roll_qr_scale.storage import MeasurementStore
 from roll_qr_scale.sync import OutboxSyncWorker
 from roll_qr_scale.test_ui import (
     TEST_UI_HTML,
+    ManualSyncController,
     StationUIService,
     decode_image,
     decode_session_cookie,
@@ -387,7 +388,7 @@ def test_frontend_saves_photo_backed_rounds_in_separate_requests() -> None:
     assert "if(!weightsReady(session)){status(captureStatus,'Cần đủ" not in TEST_UI_HTML
 
 
-def test_ui_save_returns_before_background_upload_of_complete_event(tmp_path) -> None:
+def test_ui_save_returns_before_explicit_worker_upload_of_complete_event(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     sent: list[tuple[dict[str, object], bytes]] = []
     send_started = threading.Event()
@@ -416,7 +417,6 @@ def test_ui_save_returns_before_background_upload_of_complete_event(tmp_path) ->
         send=fake_send,
     )
     service = StationUIService(store, worker, None, None)
-    worker.start()
     try:
         frame = make_qr_frame("EVIDENCE-QR")
         result = service.capture(
@@ -429,9 +429,13 @@ def test_ui_save_returns_before_background_upload_of_complete_event(tmp_path) ->
         )
         assert result["sync_status"] == "pending"
         assert result["remote_id"] is None
-        assert send_started.wait(3)
+        assert not send_started.is_set()
         assert store.get(str(result["event_id"])).sync_status == "pending"
+        sync_thread = threading.Thread(target=worker.sync_event, args=(str(result["event_id"]),))
+        sync_thread.start()
+        assert send_started.wait(3)
         release_send.set()
+        sync_thread.join(3)
         deadline = time.monotonic() + 3
         while time.monotonic() < deadline:
             saved = store.get(str(result["event_id"]))
@@ -450,6 +454,68 @@ def test_ui_save_returns_before_background_upload_of_complete_event(tmp_path) ->
         release_send.set()
         worker.stop()
         service.close()
+        store.close()
+
+
+def test_manual_sync_sends_only_rows_matching_all_selected_filters(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    frame = np.zeros((80, 100, 3), dtype=np.uint8)
+    tags = "SOURCE_DATE=2026-09-26; SOURCE_SHIFT=12C1; SOURCE_MACHINE=Máy 11; SOURCE_PRODUCTION_ORDER=LSX-1"
+    wanted = store.save("SP-001", 3.0, "kg", frame, "manual", needs_sync=True, weight_raw=tags)
+    other_machine = store.save("SP-002", 4.0, "kg", frame, "manual", needs_sync=True,
+                               weight_raw=tags.replace("Máy 11", "Máy 12"))
+    other_day = store.save("SP-003", 5.0, "kg", frame, "manual", needs_sync=True,
+                           weight_raw=tags.replace("2026-09-26", "2026-09-25"))
+    local_only = store.save("SP-004", 6.0, "kg", frame, "manual", needs_sync=False,
+                            weight_raw=tags)
+    sent: list[str] = []
+
+    def fake_send(url, payload, image_path, token):
+        sent.append(str(payload["event_id"]))
+        return {"ok": True, "event_id": payload["event_id"], "id": 901,
+                "image_url": "https://images.example/evidence.jpg",
+                "image_public_id": "roll-captures/evidence"}
+
+    worker = OutboxSyncWorker(store, "https://example.test/ingest", "token", send=fake_send)
+    controller = ManualSyncController(store, worker)
+    filters = {"scope": "production", "date_from": "2026-09-26", "date_to": "2026-09-26",
+               "shift": "12C1", "machine": "Máy 11", "production_order": "LSX-1", "qr_code": "SP-001"}
+    try:
+        preview = controller.preview(filters)
+        assert preview["total"] == 1
+        assert preview["counts"]["measurements"] == 1
+        assert sent == []
+        controller.start(filters)
+        deadline = time.monotonic() + 3
+        while controller.status()["state"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert controller.status()["state"] == "complete"
+        assert controller.status()["synced"] == 1, controller.status()["last_error"]
+        assert sent == [wanted.event_id]
+        assert store.get(wanted.event_id).sync_status == "synced"
+        assert store.get(other_machine.event_id).sync_status == "pending"
+        assert store.get(other_day.event_id).sync_status == "pending"
+        local_filters = {**filters, "qr_code": "SP-004"}
+        assert controller.preview(local_filters)["total"] == 1
+        controller.start(local_filters)
+        deadline = time.monotonic() + 3
+        while controller.status()["state"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert controller.status()["synced"] == 1, controller.status()["last_error"]
+        assert sent == [wanted.event_id, local_only.event_id]
+        store.mark_cloudinary_pending(other_machine.event_id, 902, None, None)
+        retry_filters = {**filters, "machine": "Máy 12", "qr_code": "SP-002"}
+        assert controller.preview(retry_filters)["total"] == 1
+        controller.start(retry_filters)
+        deadline = time.monotonic() + 3
+        while controller.status()["state"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert controller.status()["synced"] == 1, controller.status()["last_error"]
+        assert store.get(other_machine.event_id).sync_error is None
+        assert sent == [wanted.event_id, local_only.event_id, other_machine.event_id]
+        with pytest.raises(ValueError, match="ngày"):
+            controller.preview({"scope": "all"})
+    finally:
         store.close()
 
 
@@ -2213,7 +2279,7 @@ def test_ui_has_capture_controls_without_lookup_panel() -> None:
         assert removed_control not in TEST_UI_HTML
     assert "MỘT CAMERA · QR + CÂN" in TEST_UI_HTML
     assert "ĐÃ LƯU LẦN " in TEST_UI_HTML
-    assert "ĐỒNG BỘ SUPABASE: BẬT" in TEST_UI_HTML
+    assert "CLOUD: THỦ CÔNG" in TEST_UI_HTML
     assert "analyzeCurrent()" in TEST_UI_HTML
     assert "SẴN SÀNG CHỤP TIẾP" in TEST_UI_HTML
     assert "prepareNextCapture(data.qr_code)" in TEST_UI_HTML

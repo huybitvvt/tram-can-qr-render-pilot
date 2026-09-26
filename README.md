@@ -7,13 +7,13 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc32`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc32/TramCanQR-Setup-0.2.0-rc32.exe).
+>    Bản `0.2.0-rc33`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc33/TramCanQR-Setup-0.2.0-rc33.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Cân lõi là tùy chọn; lượt chỉ có thành phẩm và mã SP vẫn lưu được. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 
-Bản `0.2.0-rc28` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu vẫn ghi local trước, Supabase và Cloudinary đồng bộ nền. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
+Bản `0.2.0-rc28` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu ghi local trước. Từ bản `0.2.0-rc33`, vào **Danh sách** để chọn bộ lọc và bấm **Đồng bộ theo bộ lọc** khi cần gửi Supabase/Cloudinary. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
 
 Mã nguồn được tách theo ranh giới triển khai:
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc32.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc33.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -576,7 +576,7 @@ Trước khi vận hành chính thức phải nghiệm thu lại tại đúng m�
 3. Chụp thử ở mức cân thấp/cao, tem thẳng/nghiêng/cong/bẩn và ánh sáng đầu/giữa/cuối ca.
 4. Xác nhận ảnh không bị chặn bởi kiểm tra chất lượng và ô xanh/vàng bao đúng QR/màn hình LED.
 5. Chạy bộ nghiệm thu held-out ở trên; không chấp nhận sửa tay để làm đẹp kết quả test.
-6. Thử mất mạng/mất điện: bản ghi phải còn trong SQLite/outbox và tự đồng bộ lại.
+6. Thử mất mạng/mất điện: bản ghi phải còn trong SQLite/outbox và đồng bộ được bằng nút thủ công sau khi có mạng.
 7. Chạy song song với quy trình cũ ít nhất một ca, đối chiếu từng lần cân trước khi bỏ quy trình cũ.
 8. Với nhiều camera, xác nhận từng `deviceId` đúng trạm, rút/cắm lại từng camera và kiểm tra reconnect không chuyển nhầm card; thử lại sau khi restart browser và gateway.
 9. Mở đồng thời toàn bộ preview ở độ phân giải dự kiến để kiểm tra băng thông USB, nguồn hub, nhiệt độ và tốc độ FIFO QR/OCR; chạy xen kẽ `Space`/`Enter` đủ lâu trên cả ba trạm.
@@ -660,3 +660,5 @@ Bản 0.2.0-rc31 thử lại lỗi Gemini `502/503/504` và timeout tối đa ha
 Bản 0.2.0-rc31 cắt rộng quanh toàn bộ đầu cân gửi Gemini ở mức medium resolution, thêm nút đọc lại ảnh lỗi, sửa lỗi đồng bộ 422 và tối ưu bộ đếm/in phiếu local. Xem `docs/release-notes-0.2.0-rc31.md`.
 
 Bản 0.2.0-rc32 sửa phiên phân tích bị kẹt sau khi ứng dụng khởi động lại. Phiên cũ hiện rõ lỗi và có thể bấm **Bỏ** để mở lại camera; thao tác Bỏ xác minh đúng mã phiên. Xem `docs/release-notes-0.2.0-rc32.md`.
+
+Bản 0.2.0-rc33 tắt đồng bộ nền, thêm đồng bộ thủ công theo ngày, ca, mã sản phẩm, máy, LSX và phạm vi dữ liệu. Xem `docs/release-notes-0.2.0-rc33.md`.

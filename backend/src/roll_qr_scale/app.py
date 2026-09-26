@@ -232,8 +232,7 @@ def _save_current(
     recent_saves[capture_key] = now
     duplicate_suffix = "; DUPLICATE" if save_result.duplicate else ""
     if sync_worker is not None:
-        sync_worker.notify()
-        return f"SAVED #{measurement.id}{duplicate_suffix}; QUEUED"
+        return f"SAVED #{measurement.id}{duplicate_suffix}; PENDING MANUAL SYNC"
     return f"SAVED #{measurement.id}{duplicate_suffix}"
 
 
@@ -290,8 +289,6 @@ def run(args: argparse.Namespace) -> int:
             device_id=args.gateway_id,
             interval=args.sync_interval,
         )
-        if not args.once:
-            sync_worker.start()
     if weight_input == "serial":
         weight_source = SerialWeightSource(
             args.serial_port,
@@ -409,9 +406,6 @@ def run(args: argparse.Namespace) -> int:
                         station_id=args.station_id,
                         camera_id=args.camera_id,
                     )
-                    if sync_worker is not None and status.startswith("SAVED"):
-                        synced = sync_worker.sync_once()
-                        status += f"; SYNCED={synced}"
                     print(status)
                 else:
                     print(f"QR={latest_qr!r} WEIGHT={reading.value!r} {reading.unit} STABLE={reading.stable}")

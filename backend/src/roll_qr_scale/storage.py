@@ -1093,11 +1093,16 @@ class MeasurementStore:
         include_deferred: bool = False,
         *,
         include_failed: bool = True,
+        include_local: bool = False,
     ) -> list[Measurement]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
         parameters: tuple[object, ...] = (limit,) if include_deferred else (now, limit)
-        statuses = "('pending', 'failed')" if include_failed else "('pending')"
+        statuses = "(" + ", ".join(
+            f"'{status}'" for status in (
+                ["pending"] + (["failed"] if include_failed else []) + (["local"] if include_local else [])
+            )
+        ) + ")"
         with self._lock:
             rows = self.connection.execute(
                 f"""
@@ -1416,11 +1421,16 @@ class MeasurementStore:
         include_deferred: bool = False,
         *,
         include_failed: bool = True,
+        include_local: bool = False,
     ) -> list[InventoryCheck]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
         parameters: tuple[object, ...] = (limit,) if include_deferred else (now, limit)
-        statuses = "('pending', 'failed')" if include_failed else "('pending')"
+        statuses = "(" + ", ".join(
+            f"'{status}'" for status in (
+                ["pending"] + (["failed"] if include_failed else []) + (["local"] if include_local else [])
+            )
+        ) + ")"
         with self._lock:
             rows = self.connection.execute(
                 f"""
@@ -1690,11 +1700,16 @@ class MeasurementStore:
         include_deferred: bool = False,
         *,
         include_failed: bool = True,
+        include_local: bool = False,
     ) -> list[PhotoDraft]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
         parameters: tuple[object, ...] = (limit,) if include_deferred else (now, limit)
-        statuses = "('pending', 'failed')" if include_failed else "('pending')"
+        statuses = "(" + ", ".join(
+            f"'{status}'" for status in (
+                ["pending"] + (["failed"] if include_failed else []) + (["local"] if include_local else [])
+            )
+        ) + ")"
         with self._lock:
             rows = self.connection.execute(
                 f"""
@@ -1887,15 +1902,28 @@ class MeasurementStore:
         return {**item, "sync_status": "pending" if needs_sync else "local",
                 "sync_error": None}, False
 
-    def pending_weigh_batches(self, *, limit: int = 20) -> list[dict[str, object]]:
+    def pending_weigh_batches(
+        self, *, limit: int = 20, include_deferred: bool = False,
+        include_local: bool = False,
+    ) -> list[dict[str, object]]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
+        parameters = (limit,) if include_deferred else (now, limit)
+        statuses = "('pending','failed','local')" if include_local else "('pending','failed')"
         with self._lock:
             rows = self.connection.execute(
-                "SELECT * FROM weigh_batches WHERE sync_status IN ('pending','failed') "
-                "AND (next_retry_at IS NULL OR next_retry_at <= ?) ORDER BY id LIMIT ?",
-                (now, limit),
+                f"SELECT * FROM weigh_batches WHERE sync_status IN {statuses} "
+                + retry_clause + " ORDER BY id LIMIT ?",
+                parameters,
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_weigh_batch(self, batch_id: int) -> dict[str, object] | None:
+        with self._lock:
+            row = self.connection.execute(
+                "SELECT * FROM weigh_batches WHERE id = ?", (batch_id,)
+            ).fetchone()
+        return dict(row) if row else None
 
     def mark_weigh_batch_sync(self, batch_id: int, error: str | None = None) -> None:
         with self._lock:
