@@ -2904,10 +2904,12 @@ class StationUIService:
             except OSError:
                 pass
 
-    def discard_session(self, station_id: str, *, event_id: str | None = None) -> bool:
+    def discard_session(self, station_id: str, *, event_id: str | None = None, strict_event_id: bool = False) -> bool:
         try:
             discarded = self.sessions.discard(station_id, event_id=event_id)
         except AnalysisBindingMismatch:
+            if strict_event_id:
+                raise
             # The browser may only know the photo event after an AI failure.
             # Clearing the station binding is safe here and must not prevent
             # the operator from dropping the failed local preview.
@@ -5678,6 +5680,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     discarded = service.discard_session(
                         str(payload.get("station_id", "")),
                         event_id=str(payload["event_id"]) if payload.get("event_id") else None,
+                        strict_event_id=payload.get("strict_event_id") is True,
                     )
                     self.send_json(200, {"ok": True, "discarded": discarded})
                     return

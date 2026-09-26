@@ -430,6 +430,7 @@ class StationSessionRegistry:
             return
         staging_root = self.staging_dir.resolve()
         with self._lock:
+            interrupted = False
             for item in items:
                 if not isinstance(item, dict):
                     continue
@@ -462,6 +463,9 @@ class StationSessionRegistry:
                 session = self._sessions[station_id]
                 if session.current_analysis_id is not None or analysis_id in self._bindings:
                     continue
+                # The worker that owned an in-flight analysis died with the old
+                # process. Keep its staged image, but do not report it as running.
+                restored_state = "error" if state == "analyzing" else state
                 binding = AnalysisBinding(
                     analysis_id=analysis_id,
                     event_id=event_id,
@@ -471,11 +475,16 @@ class StationSessionRegistry:
                     staged_path=staged_path,
                     captured_at=captured_at,
                     created_at=created_at,
-                    state=state,
+                    state=restored_state,
                 )
                 self._bindings[analysis_id] = binding
                 session.current_analysis_id = analysis_id
-                session.state = state
+                session.state = restored_state
+                if state == "analyzing":
+                    session.last_error = "Phân tích bị gián đoạn khi ứng dụng khởi động lại"
+                    interrupted = True
+            if interrupted:
+                self._persist_active_bindings_locked()
 
     def _persist_active_bindings_locked(self) -> None:
         staging_root = self.staging_dir.resolve()

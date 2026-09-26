@@ -145,6 +145,32 @@ def test_registry_automatically_restores_active_binding_after_restart(tmp_path) 
 
 
 
+def test_restart_marks_interrupted_analysis_as_error_without_losing_staged_image(tmp_path) -> None:
+    staging = tmp_path / "staging"
+    registry = StationSessionRegistry(staging, ["station-01"])
+    registry.configure_camera("station-01", "camera-01")
+    original = registry.stage(
+        np.full((480, 640, 3), 190, dtype=np.uint8),
+        event_id=str(uuid.uuid4()),
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+
+    restored_registry = StationSessionRegistry(staging, ["station-01"])
+    restored = restored_registry.binding(original.analysis_id)
+
+    assert restored is not None
+    assert restored.state == "error"
+    assert restored.staged_path.read_bytes() == original.staged_path.read_bytes()
+    status = restored_registry.statuses()[0]
+    assert status["event_id"] == original.event_id
+    assert status["state"] == "error"
+    assert "khởi động lại" in status["last_error"]
+
+    restarted_again = StationSessionRegistry(staging, ["station-01"])
+    assert restarted_again.statuses()[0]["state"] == "error"
+
+
 def test_pending_binding_does_not_expire_after_ten_minutes(tmp_path, monkeypatch) -> None:
     registry = StationSessionRegistry(tmp_path / "staging", ["station-01"])
     registry.configure_camera("station-01", "camera-01")

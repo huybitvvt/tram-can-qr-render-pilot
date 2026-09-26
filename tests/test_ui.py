@@ -11,6 +11,7 @@ import qrcode
 
 import roll_qr_scale.test_ui as test_ui_module
 from roll_qr_scale.scale import WeightReading
+from roll_qr_scale.station_session import AnalysisBindingMismatch
 from roll_qr_scale.gemini_weight import GeminiWeightSuggestion
 from roll_qr_scale.storage import MeasurementStore
 from roll_qr_scale.sync import OutboxSyncWorker
@@ -1034,6 +1035,26 @@ def test_discard_session_clears_failed_binding_even_if_browser_event_is_stale(tm
     status_row = service.sessions.statuses()[0]
     assert status_row["state"] == "idle"
     assert status_row["event_id"] is None
+    service.close()
+    store.close()
+
+
+def test_strict_discard_keeps_a_newer_binding(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    binding = service.sessions.stage(
+        make_qr_frame("QR-STRICT-DISCARD"),
+        event_id=str(uuid.uuid4()),
+        station_id="station-01",
+        camera_id="camera-01",
+    )
+
+    with pytest.raises(AnalysisBindingMismatch):
+        service.discard_session(
+            "station-01", event_id=str(uuid.uuid4()), strict_event_id=True
+        )
+
+    assert service.sessions.statuses()[0]["event_id"] == binding.event_id
     service.close()
     store.close()
 
