@@ -3376,6 +3376,7 @@ class StationUIService:
         capture_kind: str = "",
         client_qr_code: str = "",
         gemini_key_slot: str = "day",
+        qr_frame: np.ndarray | None = None,
     ) -> dict[str, object]:
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
@@ -3401,8 +3402,20 @@ class StationUIService:
                 "qr_roi": None,
             }
             if capture_kind == "core"
-            else self._decode_qr(frame)
+            else self._decode_qr(qr_frame if qr_frame is not None else frame)
         )
+        if decoded.get("qr_roi") and qr_frame is not None:
+            # The evidence appends a scale inset to the unchanged scene at (0, 0).
+            # Decode the original pixels, but return boxes in evidence coordinates.
+            source_height, source_width = qr_frame.shape[:2]
+            evidence_height, evidence_width = frame.shape[:2]
+            qr_roi = parse_normalized_roi(str(decoded["qr_roi"]))
+            decoded["qr_roi"] = self._roi_text(NormalizedROI(
+                qr_roi.x1 * source_width / evidence_width,
+                qr_roi.y1 * source_height / evidence_height,
+                qr_roi.x2 * source_width / evidence_width,
+                qr_roi.y2 * source_height / evidence_height,
+            ))
         client_qr = client_qr_code.strip()
         if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
             raise ValueError("Mã QR từ trình duyệt không hợp lệ")
@@ -3907,6 +3920,7 @@ class StationUIService:
         evidence_image: str | None = None
         evidence_zoom_applied = False
         evidence_zoom_method: str | None = None
+        qr_frame = None
         if self.weight_engine == "gemini" and capture_kind in {"core", "product", "inventory"}:
             located: tuple[NormalizedROI, str] | None
             if configured_roi is not None and auto_roi_requested:
@@ -3917,6 +3931,9 @@ class StationUIService:
                 located = self._find_scale_roi(frame)
             if located is not None:
                 source_roi, evidence_zoom_method = located
+                # Preserve QR modules before the evidence is JPEG-encoded again.
+                if capture_kind != "core":
+                    qr_frame = frame
                 composite, zoom_roi = self._zoomed_evidence(frame, source_roi)
                 frame, evidence_image = self._canonical_evidence(composite)
                 roi_text = self._roi_text(zoom_roi)
@@ -3940,6 +3957,7 @@ class StationUIService:
                 capture_kind,
                 client_qr_code,
                 gemini_key_slot,
+                qr_frame,
             )
             return {**result, **evidence_metadata}
         if not all(identities):
@@ -3965,6 +3983,7 @@ class StationUIService:
                 capture_kind,
                 client_qr_code,
                 gemini_key_slot,
+                qr_frame,
             )
             binding = self.sessions.mark_ready(binding.analysis_id)
         except Exception as exc:

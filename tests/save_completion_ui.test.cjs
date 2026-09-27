@@ -11,11 +11,11 @@ function setup(items=[]){
   selectedRoundCount:()=>1,coreWeightOverLimit:()=>false,productWeightOverLimit:()=>false,
   $:id=>nodes[id]??=( {classList:{toggle(){}},setAttribute(){}} ),
   status:(_,message,tone)=>messages.push({message,tone}),captureStatus:{},
-  syncCameraStatusPill:()=>{},
+  syncCameraStatusPill:()=>{},renderEvidence:()=>{},
   sourceQuery:()=>'',api:async()=>({items}),syncCaptureProductCodes:()=>{},
   statusForPartialWeights:()=> 'Continue capturing',
  });
- const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasPhoto','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
+ const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasPhoto','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundQrNotice','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
  vm.runInContext('let productionQrByCode={};',ctx);
  for(const name of names){const line=script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'('));assert.ok(line,name);vm.runInContext(line,ctx)}
  ctx.renderControls=()=>{nodes.saveBtn={disabled:!ctx.savableRoundIndexes(session).length}};
@@ -65,6 +65,28 @@ test('server duplicate rejection clears QR but still permits photo-backed save',
  assert.equal(await ctx.verifyQrAgainstServer(code,session,0),true);
  assert.equal(session.rounds[0].qr,'');
  assert.equal(nodes.saveBtn.disabled,false);assert.match(messages.at(-1).message,/TRÙNG MÃ QR/);
+ ctx.refreshCompletionState(session);
+ assert.match(messages.at(-1).message,/Đã đọc QR:.*TRÙNG MÃ QR/);
+});
+
+test('late duplicate response cannot clear a replacement QR',async()=>{
+ const {ctx,session}=setup(),code=session.rounds[0].qr;
+ let respond;ctx.api=()=>new Promise(resolve=>{respond=resolve});
+ const pending=ctx.verifyQrAgainstServer(code,session,0);
+ session.rounds[0].qr='NEW-CODE';
+ respond({items:[{event_id:'saved',qr_code:code}]});
+ assert.equal(await pending,false);
+ assert.equal(session.rounds[0].qr,'NEW-CODE');
+});
+
+test('late duplicate response cannot clear the same code in a new round object',async()=>{
+ const {ctx,session}=setup(),code=session.rounds[0].qr;
+ let respond;ctx.api=()=>new Promise(resolve=>{respond=resolve});
+ const pending=ctx.verifyQrAgainstServer(code,session,0);
+ session.rounds[0]={...session.rounds[0],eventId:'new-round'};
+ respond({items:[{event_id:'saved',qr_code:code}]});
+ assert.equal(await pending,false);
+ assert.equal(session.rounds[0].qr,code);
 });
 test('one photo with no QR or readable weights enables official save',()=>{
  const {ctx,session,nodes,messages}=setup();const round=session.rounds[0],code=round.qr;

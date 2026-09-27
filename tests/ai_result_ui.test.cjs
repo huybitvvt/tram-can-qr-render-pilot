@@ -5,13 +5,13 @@ const vm=require('node:vm');
 
 const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 
-async function analyzeWith(result){
+async function analyzeWith(result,kind='core',clientQr=''){
  const messages=[],round={saved:false,weight:'',coreImage:''};
  const session={state:'review',rounds:[round],selectedSlot:{kind:'core',round:0},unit:'kg',stationId:'station-01',cameraId:'camera-01',preview:{},setState(state){this.state=state}};
  const ctx=vm.createContext({
   current:()=>session,persistSourceFromFields(){},ensureRounds:()=>session.rounds,nextCoreRound:()=>0,nextProductRound:()=>0,captureSlot:()=>session.selectedSlot,
   roundCoreReady:()=>false,renderControls(){},status:(_node,message)=>messages.push(message),captureStatus:{},
-  captureVideo:()=>null,drawSession:()=> 'image',newEventId:()=> 'event-01',captureWeightBurst:async()=>[],showPreview(){},
+  captureVideo:()=>null,drawSession:()=> 'image',drawQrSession:()=> 'image',decodeClientQr:async()=>clientQr,newEventId:()=> 'event-01',captureWeightBurst:async()=>[],showPreview(){},
   weightKindLabel:()=> 'cân lõi',appStatus:{weight_engine:'gemini'},recognitionProfile:{value:'fast'},recognitionProvider:{value:'gemini'},sourceContext:{shift:'HC1'},
   api:async()=>({...result,event_id:'event-01'}),parseBox:()=>null,qrDuplicateMessage:()=>'',captureQr:{value:''},weight:{value:''},productWeight:{value:''},unit:{value:'kg'},
   $:()=>null,renderRoundParams(){},updateBoxes(){},syncCaptureProductCodes(){},persistAiMissPhoto:async()=>({saved:true,synced:false}),
@@ -24,9 +24,16 @@ async function analyzeWith(result){
  }
  const start=script.indexOf("async function analyzeCurrent(kind='core')");
  vm.runInContext(script.slice(start,script.indexOf('\nasync function discardSlot(',start)),ctx);
- await ctx.analyzeCurrent('core');
+ await ctx.analyzeCurrent(kind);
  return{session,round,messages};
 }
+
+test('conflicting backend and browser QR stays blank instead of restoring browser value',async()=>{
+ const {round,messages}=await analyzeWith({qr_found:false,qr_conflict:true,qr_decoder:'dedicated-decoder-conflict',weight_found:false,quality_pass:true,step_saved:false,unit:'kg'},'product','BROWSER-CODE');
+ assert.equal(round.qr||'','');
+ assert.equal(round.productAnalysis.qr_conflict,true);
+ assert.ok(!messages.some(message=>message.startsWith('LỖI NHẬN DIỆN:')));
+});
 
 test('an AI weight remains visible when image quality fails',async()=>{
  const {session,round,messages}=await analyzeWith({weight_found:true,weight:7.03,quality_pass:false,step_saved:false,quality:{issues:['ảnh tối']},unit:'kg'});
