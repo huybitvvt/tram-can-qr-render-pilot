@@ -1027,7 +1027,12 @@ def _manual_sync_filters(payload: dict[str, object]) -> dict[str, str]:
         raise ValueError("Đến ngày phải sau hoặc bằng Từ ngày")
     if any(len(value) > 200 for value in filters.values()):
         raise ValueError("Bộ lọc đồng bộ quá dài")
-    return {**filters, "scope": scope}
+    skip_cloudinary = payload.get("skip_cloudinary")
+    if skip_cloudinary is None:
+        skip_flag = "1"
+    else:
+        skip_flag = "1" if skip_cloudinary not in {False, 0, "0", "false", "False"} else "0"
+    return {**filters, "scope": scope, "skip_cloudinary": skip_flag}
 
 
 def _manual_sync_matches(item: dict[str, object], filters: dict[str, str]) -> bool:
@@ -1787,16 +1792,20 @@ def _persist_measurement_edit(
 
 
 class ManualSyncController:
-    """Run one explicitly requested, filtered outbox upload at a time."""
+    """Push pending local rows one-by-one, with a job queue and end-of-pass rescan."""
 
     MAX_SCAN = 100_000
     MAX_JOB = 5_000
+    MAX_QUEUE = 20
+    MAX_RESCANS = 8
+    KIND_ORDER = {"measurement": 0, "inventory": 1, "photo_draft": 2, "weigh_batch": 3}
 
     def __init__(self, store: MeasurementStore, worker: OutboxSyncWorker):
         self.store = store
         self.worker = worker
         self._lock = threading.Lock()
-        self._job: dict[str, object] = {"state": "idle"}
+        self._job: dict[str, object] = {"state": "idle", "queue_length": 0}
+        self._queue: list[dict[str, str]] = []
 
     def _plan(self, filters: dict[str, str]) -> tuple[list[tuple[str, object]], dict[str, int]]:
         selected: list[tuple[str, object, str, int]] = []
@@ -1813,10 +1822,11 @@ class ManualSyncController:
                 if _manual_sync_matches(vars(item), filters):
                     selected.append(("measurement", item.event_id, item.captured_at, item.id))
                     counts["measurements"] += 1
-            for item in candidates(self.store.pending_photo_drafts):
-                if _manual_sync_matches(vars(item), filters):
-                    selected.append(("photo_draft", item.event_id, item.captured_at, item.id))
-                    counts["photo_drafts"] += 1
+            if filters.get("skip_cloudinary") != "1":
+                for item in candidates(self.store.pending_photo_drafts):
+                    if _manual_sync_matches(vars(item), filters):
+                        selected.append(("photo_draft", item.event_id, item.captured_at, item.id))
+                        counts["photo_drafts"] += 1
             if not filters["qr_code"]:
                 for batch in candidates(self.store.pending_weigh_batches):
                     if _manual_sync_matches(batch, filters):
@@ -1830,80 +1840,211 @@ class ManualSyncController:
                     counts["inventory_checks"] += 1
         if len(selected) > self.MAX_JOB:
             raise ValueError("Có hơn 5.000 dòng khớp bộ lọc; hãy thu hẹp khoảng ngày")
-        selected.sort(key=lambda row: (row[0] == "weigh_batch", row[2], row[3]))
+        selected.sort(
+            key=lambda row: (self.KIND_ORDER.get(row[0], 9), row[2], row[3])
+        )
         return [(kind, value) for kind, value, _, _ in selected], counts
 
     def preview(self, payload: dict[str, object]) -> dict[str, object]:
         filters = _manual_sync_filters(payload)
         plan, counts = self._plan(filters)
-        return {"ok": True, "filters": filters, "counts": counts, "total": len(plan)}
+        with self._lock:
+            queue_length = len(self._queue)
+            running = self._job.get("state") == "running"
+        return {
+            "ok": True,
+            "filters": filters,
+            "counts": counts,
+            "total": len(plan),
+            "queue_length": queue_length,
+            "running": running,
+        }
 
     def status(self) -> dict[str, object]:
         with self._lock:
-            return dict(self._job)
+            payload = dict(self._job)
+            payload["queue_length"] = len(self._queue)
+            return payload
+
+    def _job_snapshot(
+        self,
+        *,
+        filters: dict[str, str],
+        counts: dict[str, int],
+        total: int,
+        queued: bool = False,
+        message: str = "",
+    ) -> dict[str, object]:
+        return {
+            "ok": True,
+            "job_id": str(uuid.uuid4()),
+            "state": "running",
+            "filters": filters,
+            "counts": counts,
+            "total": total,
+            "done": 0,
+            "synced": 0,
+            "failed": 0,
+            "deferred": 0,
+            "last_error": "",
+            "pass": 1,
+            "current": "",
+            "queue_length": len(self._queue),
+            "queued": queued,
+            "message": message,
+        }
 
     def start(self, payload: dict[str, object]) -> dict[str, object]:
         filters = _manual_sync_filters(payload)
         with self._lock:
             if self._job.get("state") == "running":
-                raise ValueError("Đã có lượt đồng bộ đang chạy trên máy này")
+                current = self._job.get("filters") or {}
+                if current == filters:
+                    snapshot = dict(self._job)
+                    snapshot["queue_length"] = len(self._queue)
+                    snapshot["queued"] = False
+                    snapshot["rescan_pending"] = True
+                    snapshot["message"] = (
+                        "Đang đẩy lần lượt bộ lọc này; cuối lượt sẽ quét lại để không miss dòng mới"
+                    )
+                    return snapshot
+                if self._queue and self._queue[-1] == filters:
+                    snapshot = dict(self._job)
+                    snapshot["queue_length"] = len(self._queue)
+                    snapshot["queued"] = True
+                    snapshot["message"] = "Bộ lọc này đã có trong hàng chờ"
+                    return snapshot
+                if len(self._queue) >= self.MAX_QUEUE:
+                    raise ValueError("Hàng chờ đẩy đã đầy; hãy đợi lượt hiện tại xong")
+                self._queue.append(filters)
+                snapshot = dict(self._job)
+                snapshot["queue_length"] = len(self._queue)
+                snapshot["queued"] = True
+                snapshot["message"] = f"Đã xếp hàng chờ (vị trí {len(self._queue)})"
+                return snapshot
             plan, counts = self._plan(filters)
             if not plan:
                 raise ValueError("Không có dữ liệu local chờ đồng bộ khớp bộ lọc")
-            self._job = {
-                "ok": True,
-                "job_id": str(uuid.uuid4()),
-                "state": "running",
-                "filters": filters,
-                "counts": counts,
-                "total": len(plan),
-                "done": 0,
-                "synced": 0,
-                "failed": 0,
-                "deferred": 0,
-                "last_error": "",
-            }
+            self._job = self._job_snapshot(filters=filters, counts=counts, total=len(plan))
             thread = threading.Thread(
-                target=self._run, args=(plan,), name="manual-cloud-sync", daemon=True
+                target=self._worker_loop,
+                args=(filters, plan),
+                name="manual-cloud-sync",
+                daemon=True,
             )
             thread.start()
             return dict(self._job)
 
-    def _run(self, plan: list[tuple[str, object]]) -> None:
-        try:
-            for kind, value in plan:
-                error = ""
-                try:
-                    if kind == "measurement":
-                        ok = self.worker.sync_event(str(value))
-                        row = self.store.get(str(value))
-                    elif kind == "photo_draft":
-                        ok = self.worker.sync_photo_draft_event(str(value))
-                        row = self.store.get_photo_draft(str(value))
-                    elif kind == "inventory":
-                        ok = self.worker.sync_inventory_event(str(value))
-                        row = self.store.get_inventory_check(str(value))
-                    else:
-                        batch = value
-                        ok = self.worker.sync_weigh_batch(batch)
-                        row = self.store.get_weigh_batch(int(batch["id"]))
-                    state = str(row["sync_status"] if kind == "weigh_batch" else row.sync_status) if row else "missing"
-                    error = str((row["sync_error"] if kind == "weigh_batch" else row.sync_error) or "") if row else "Dòng local không còn tồn tại"
-                    result = "synced" if ok and state == "synced" and not error else "deferred" if state in {"pending", "synced"} else "failed"
-                except Exception as exc:
-                    result = "failed"
-                    error = str(exc)
-                with self._lock:
-                    self._job["done"] = int(self._job["done"]) + 1
-                    self._job[result] = int(self._job[result]) + 1
-                    if error:
-                        self._job["last_error"] = error[:500]
+    def _classify(self, kind: str, ok: bool, row: object) -> tuple[str, str]:
+        if row is None:
+            return "failed", "Dòng local không còn tồn tại"
+        if kind == "weigh_batch":
+            state = str(row["sync_status"])
+            error = str(row["sync_error"] or "")
+        else:
+            state = str(row.sync_status)
+            error = str(row.sync_error or "")
+        if ok and state == "synced" and error not in {"cloudinary_pending"}:
+            return "synced", error
+        if state in {"pending", "synced"}:
+            return "deferred", error
+        return "failed", error
+
+    def _item_label(self, kind: str, value: object) -> str:
+        if kind == "weigh_batch":
+            return f"đợt #{value.get('id')}"
+        return f"{kind}:{value}"
+
+    def _run_plan(self, plan: list[tuple[str, object]]) -> None:
+        for kind, value in plan:
+            label = self._item_label(kind, value)
             with self._lock:
-                self._job["state"] = "complete"
+                self._job["current"] = label
+            error = ""
+            try:
+                if kind == "measurement":
+                    ok = self.worker.sync_event(str(value))
+                    row = self.store.get(str(value))
+                elif kind == "photo_draft":
+                    ok = self.worker.sync_photo_draft_event(str(value))
+                    row = self.store.get_photo_draft(str(value))
+                elif kind == "inventory":
+                    ok = self.worker.sync_inventory_event(str(value))
+                    row = self.store.get_inventory_check(str(value))
+                else:
+                    ok = self.worker.sync_weigh_batch(value)
+                    row = self.store.get_weigh_batch(int(value["id"]))
+                result, error = self._classify(kind, ok, row)
+            except Exception as exc:
+                result = "failed"
+                error = str(exc)
+            with self._lock:
+                self._job["done"] = int(self._job["done"]) + 1
+                self._job[result] = int(self._job[result]) + 1
+                if error:
+                    self._job["last_error"] = error[:500]
+                self._job["current"] = ""
+
+    def _worker_loop(self, filters: dict[str, str], plan: list[tuple[str, object]]) -> None:
+        try:
+            active_filters = filters
+            active_plan = plan
+            while True:
+                self._run_plan(active_plan)
+                # Quét lại cùng bộ lọc để bắt dòng mới lưu trong lúc đang đẩy.
+                for pass_no in range(2, self.MAX_RESCANS + 2):
+                    more, more_counts = self._plan(active_filters)
+                    if not more:
+                        break
+                    with self._lock:
+                        self._job["pass"] = pass_no
+                        self._job["total"] = int(self._job["total"]) + len(more)
+                        counts = dict(self._job.get("counts") or {})
+                        for key, value in more_counts.items():
+                            counts[key] = int(counts.get(key) or 0) + int(value)
+                        self._job["counts"] = counts
+                    self._run_plan(more)
+                with self._lock:
+                    if not self._queue:
+                        self._job["state"] = "complete"
+                        self._job["current"] = ""
+                        self._job["queue_length"] = 0
+                        return
+                    active_filters = self._queue.pop(0)
+                    queue_length = len(self._queue)
+                next_plan, next_counts = self._plan(active_filters)
+                if not next_plan:
+                    continue
+                with self._lock:
+                    done = int(self._job.get("done") or 0)
+                    synced = int(self._job.get("synced") or 0)
+                    failed = int(self._job.get("failed") or 0)
+                    deferred = int(self._job.get("deferred") or 0)
+                    self._job = {
+                        "ok": True,
+                        "job_id": str(uuid.uuid4()),
+                        "state": "running",
+                        "filters": active_filters,
+                        "counts": next_counts,
+                        "total": done + len(next_plan),
+                        "done": done,
+                        "synced": synced,
+                        "failed": failed,
+                        "deferred": deferred,
+                        "last_error": str(self._job.get("last_error") or ""),
+                        "pass": 1,
+                        "current": "",
+                        "queue_length": queue_length,
+                        "queued": False,
+                        "message": "Đang đẩy lượt tiếp theo trong hàng chờ",
+                    }
+                active_plan = next_plan
         except Exception as exc:
             with self._lock:
                 self._job["state"] = "error"
                 self._job["last_error"] = str(exc)[:500]
+                self._job["current"] = ""
+                self._job["queue_length"] = len(self._queue)
 
 
 class StationUIService:
@@ -4833,6 +4974,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             args.api_url,
             args.api_token,
             args.gateway_id,
+            require_remote_image=False,
+            include_images=False,
             maintenance_enabled=False,
             local_retention_days=args.local_retention_days,
         )
@@ -5169,7 +5312,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         "ocr_min_confidence": service.ocr_min_confidence,
                         "sync_enabled": service.sync_worker is not None,
                         "sync_mode": "manual",
-                        "image_provider": "cloudinary" if service.sync_worker is not None else "local",
+                        "image_provider": "supabase" if service.sync_worker is not None else "local",
                         "release": os.environ.get("RENDER_GIT_COMMIT", "local")[:12],
                         "quality_settings": service.quality_settings,
                         **identity_status,

@@ -1479,6 +1479,10 @@ Deno.serve(async (request: Request) => {
   const productImageBase64 = typeof body.product_image_base64 === "string"
     ? body.product_image_base64
     : "";
+  const skipCloudinary = body.skip_cloudinary === true;
+  if (photoDraft && skipCloudinary) {
+    return json(422, { ok: false, error: "skip_cloudinary_not_supported_for_photo_draft" });
+  }
   const imageRole = typeof body.image_role === "string" ? body.image_role : "";
   const weightSource = typeof body.weight_source === "string"
     ? body.weight_source.slice(0, 100)
@@ -1625,23 +1629,27 @@ Deno.serve(async (request: Request) => {
     return json(422, { ok: false, error: "invalid_image_role" });
   }
 
-  let image: Uint8Array;
-  try {
-    image = decodeBase64(imageBase64);
-  } catch {
-    return json(422, { ok: false, error: "invalid_image_base64" });
-  }
-  if (
-    image.length < 4 || image.length > MAX_IMAGE_BYTES ||
-    image[0] !== 0xff || image[1] !== 0xd8
-  ) {
-    return json(422, { ok: false, error: "invalid_jpeg" });
-  }
-  if (frameSha256 && await sha256Hex(image) !== frameSha256) {
-    return json(422, { ok: false, error: "frame_sha256_mismatch" });
+  let image: Uint8Array = new Uint8Array();
+  if (skipCloudinary && !imageBase64) {
+    // Metadata-only ingest: station keeps JPEG evidence locally and skips Cloudinary.
+  } else {
+    try {
+      image = decodeBase64(imageBase64);
+    } catch {
+      return json(422, { ok: false, error: "invalid_image_base64" });
+    }
+    if (
+      image.length < 4 || image.length > MAX_IMAGE_BYTES ||
+      image[0] !== 0xff || image[1] !== 0xd8
+    ) {
+      return json(422, { ok: false, error: "invalid_jpeg" });
+    }
+    if (frameSha256 && await sha256Hex(image) !== frameSha256) {
+      return json(422, { ok: false, error: "frame_sha256_mismatch" });
+    }
   }
   let productImage: Uint8Array | null = null;
-  if (productImageBase64) {
+  if (!skipCloudinary && productImageBase64) {
     try {
       productImage = decodeBase64(productImageBase64);
     } catch {
@@ -1935,6 +1943,7 @@ Deno.serve(async (request: Request) => {
         ? existingRow.image_path.trim()
         : "";
       if (
+        !skipCloudinary &&
         existingInventoryLocal &&
         (!existingInventoryUrl || !existingInventoryPublicId) &&
         pendingInventoryPublicId
@@ -1989,9 +1998,10 @@ Deno.serve(async (request: Request) => {
         event_id: eventId,
         image_url: existingRow.image_url,
         image_public_id: existingRow.image_public_id,
-        local_backup_committed: existingInventoryLocal,
+        local_backup_committed: true,
+        cloudinary_skipped: skipCloudinary,
         cloudinary_uploaded: Boolean(existingInventoryUrl && existingInventoryPublicId),
-        cloudinary_pending: metadataCloudinaryPending(existingRow.metadata),
+        cloudinary_pending: skipCloudinary ? false : metadataCloudinaryPending(existingRow.metadata),
         gateway_id: existingRow.gateway_id,
         station_id: existingRow.station_id,
         camera_id: existingRow.camera_id,
@@ -2027,14 +2037,16 @@ Deno.serve(async (request: Request) => {
       `inventory-check/${eventId}`;
     let inventoryUploaded: CloudinaryUpload | null = null;
     let inventoryCloudinaryError = "";
-    try {
-      inventoryUploaded = await uploadToCloudinary(image, inventoryPublicId);
-    } catch (error) {
-      inventoryCloudinaryError = error instanceof Error
-        ? error.message.split(":", 1)[0]
-        : "upload_failed";
+    if (!skipCloudinary) {
+      try {
+        inventoryUploaded = await uploadToCloudinary(image, inventoryPublicId);
+      } catch (error) {
+        inventoryCloudinaryError = error instanceof Error
+          ? error.message.split(":", 1)[0]
+          : "upload_failed";
+      }
     }
-    const inventoryCloudinaryPending = !inventoryUploaded;
+    const inventoryCloudinaryPending = !skipCloudinary && !inventoryUploaded;
     const { data: insertedInventory, error: inventoryInsertError } = await supabase
       .from(INVENTORY_TABLE)
       .insert({
@@ -2045,7 +2057,7 @@ Deno.serve(async (request: Request) => {
         khoi_luong_bi: inventoryTareWeight,
         don_vi: unit,
         captured_at: capturedAt,
-        image_path: inventoryPublicId,
+        image_path: skipCloudinary ? null : inventoryPublicId,
         image_url: inventoryUploaded?.secureUrl ?? null,
         image_public_id: inventoryUploaded?.publicId ?? null,
         gateway_id: gatewayId,
@@ -2066,10 +2078,11 @@ Deno.serve(async (request: Request) => {
           shift: shift || null,
           machine: machine || null,
           production_order: productionOrder || null,
+          cloudinary_skipped: skipCloudinary,
           cloudinary_uploaded: Boolean(inventoryUploaded),
           cloudinary_pending: inventoryCloudinaryPending,
-          local_backup_only: inventoryCloudinaryPending,
-          cloudinary_error: inventoryCloudinaryError || null,
+          local_backup_only: skipCloudinary || inventoryCloudinaryPending,
+          cloudinary_error: skipCloudinary ? null : (inventoryCloudinaryError || null),
         }, capturedAt),
       })
       .select(inventorySelect)
@@ -2126,9 +2139,10 @@ Deno.serve(async (request: Request) => {
       image_url: inventoryUploaded?.secureUrl ?? null,
       image_public_id: inventoryUploaded?.publicId ?? null,
       local_backup_committed: true,
+      cloudinary_skipped: skipCloudinary,
       cloudinary_uploaded: Boolean(inventoryUploaded),
       cloudinary_pending: inventoryCloudinaryPending,
-      cloudinary_error: inventoryCloudinaryError || null,
+      cloudinary_error: skipCloudinary ? null : (inventoryCloudinaryError || null),
       gateway_id: gatewayId,
       station_id: stationId,
       camera_id: cameraId,
@@ -2197,7 +2211,7 @@ Deno.serve(async (request: Request) => {
       (!existingProductUrl || !existingProductPublicId);
     let retryCoreUploaded: CloudinaryUpload | null = null;
     let retryProductUploaded: CloudinaryUpload | null = null;
-    if (existingLocalBackup && coreNeedsUpload) {
+    if (!skipCloudinary && existingLocalBackup && coreNeedsUpload && image.length >= 4) {
       try {
         retryCoreUploaded = await uploadToCloudinary(image, deterministicCorePublicId);
       } catch {
@@ -2205,7 +2219,7 @@ Deno.serve(async (request: Request) => {
         // evidence remains available.
       }
     }
-    if (productNeedsUpload) {
+    if (!skipCloudinary && productNeedsUpload) {
       try {
         retryProductUploaded = await uploadToCloudinary(
           productImage as Uint8Array,
@@ -2214,6 +2228,31 @@ Deno.serve(async (request: Request) => {
       } catch {
         // A partial retry must not erase the successful core or product row.
       }
+    }
+    if (skipCloudinary) {
+      return json(200, {
+        ok: true,
+        id: existingRow.id,
+        event_id: eventId,
+        image_url: existingRow.image_url,
+        image_public_id: existingRow.image_public_id,
+        core_image_url: existingRow.core_image_url ?? existingRow.image_url,
+        core_image_public_id: existingRow.core_image_public_id ?? existingRow.image_public_id,
+        product_image_url: existingRow.product_image_url,
+        product_image_public_id: existingRow.product_image_public_id,
+        local_backup_committed: true,
+        cloudinary_skipped: true,
+        cloudinary_core_uploaded: Boolean(existingCoreUrl && existingCorePublicId),
+        cloudinary_product_uploaded: Boolean(existingProductUrl && existingProductPublicId),
+        cloudinary_pending: false,
+        gateway_id: existingRow.gateway_id ?? existingRow.device_id,
+        station_id: existingRow.station_id,
+        camera_id: existingRow.camera_id,
+        analysis_id: existingRow.analysis_id,
+        frame_sha256: existingRow.frame_sha256,
+        payload_hash: existingRow.payload_hash,
+        duplicate: true,
+      });
     }
     if (retryCoreUploaded || retryProductUploaded) {
       const existingMetadata = existingRow.metadata !== null &&
@@ -2324,27 +2363,31 @@ Deno.serve(async (request: Request) => {
   const productImagePublicId = `roll-captures/${gatewayId}/${year}/${month}/${day}/product-weight/${eventId}`;
   let cloudinaryCoreError = "";
   let cloudinaryProductError = "";
-  const [uploaded, productUploaded] = await Promise.all([
-    uploadToCloudinary(image, imagePublicId).catch((error) => {
-      cloudinaryCoreError = error instanceof Error
-        ? error.message.split(":", 1)[0]
-        : "upload_failed";
-      return null;
-    }),
-    productImage
-      ? uploadToCloudinary(
-        productImage,
-        productImagePublicId,
-      ).catch((error) => {
-        cloudinaryProductError = error instanceof Error
+  let uploaded: CloudinaryUpload | null = null;
+  let productUploaded: CloudinaryUpload | null = null;
+  if (!skipCloudinary) {
+    [uploaded, productUploaded] = await Promise.all([
+      uploadToCloudinary(image, imagePublicId).catch((error) => {
+        cloudinaryCoreError = error instanceof Error
           ? error.message.split(":", 1)[0]
           : "upload_failed";
         return null;
-      })
-      : Promise.resolve(null),
-  ]);
-  const cloudinaryCorePending = !uploaded;
-  const cloudinaryProductPending = productImage !== null && !productUploaded;
+      }),
+      productImage
+        ? uploadToCloudinary(
+          productImage,
+          productImagePublicId,
+        ).catch((error) => {
+          cloudinaryProductError = error instanceof Error
+            ? error.message.split(":", 1)[0]
+            : "upload_failed";
+          return null;
+        })
+        : Promise.resolve(null),
+    ]);
+  }
+  const cloudinaryCorePending = !skipCloudinary && !uploaded;
+  const cloudinaryProductPending = !skipCloudinary && productImage !== null && !productUploaded;
   const cloudinaryPending = cloudinaryCorePending || cloudinaryProductPending;
 
   const { data: inserted, error: insertError } = await supabase
@@ -2358,10 +2401,10 @@ Deno.serve(async (request: Request) => {
       tare_weight: weight,
       unit,
       captured_at: capturedAt,
-      image_path: uploaded?.publicId ?? imagePublicId,
+      image_path: skipCloudinary ? null : (uploaded?.publicId ?? imagePublicId),
       image_url: uploaded?.secureUrl ?? null,
       image_public_id: uploaded?.publicId ?? null,
-      core_image_path: uploaded?.publicId ?? imagePublicId,
+      core_image_path: skipCloudinary ? null : (uploaded?.publicId ?? imagePublicId),
       core_image_url: uploaded?.secureUrl ?? null,
       core_image_public_id: uploaded?.publicId ?? null,
       product_image_path: productImage ? productUploaded?.publicId ?? productImagePublicId : null,
@@ -2392,11 +2435,15 @@ Deno.serve(async (request: Request) => {
         machine: machine || null,
         production_order: productionOrder || null,
         bi_weight: biWeight,
+        cloudinary_skipped: skipCloudinary,
         cloudinary_core_uploaded: Boolean(uploaded),
         cloudinary_product_uploaded: Boolean(productUploaded),
         cloudinary_pending: cloudinaryPending,
-        local_backup_only: cloudinaryPending && !uploaded && !productUploaded,
-        cloudinary_error: cloudinaryPending
+        local_backup_only: skipCloudinary ||
+          (cloudinaryPending && !uploaded && !productUploaded),
+        cloudinary_error: skipCloudinary
+          ? null
+          : cloudinaryPending
           ? [cloudinaryCoreError, cloudinaryProductError].filter(Boolean).join(",") ||
             "upload_pending"
           : null,
@@ -2478,10 +2525,13 @@ Deno.serve(async (request: Request) => {
     product_image_url: productUploaded?.secureUrl ?? null,
     product_image_public_id: productUploaded?.publicId ?? null,
     local_backup_committed: true,
+    cloudinary_skipped: skipCloudinary,
     cloudinary_core_uploaded: Boolean(uploaded),
     cloudinary_product_uploaded: Boolean(productUploaded),
     cloudinary_pending: cloudinaryPending,
-    cloudinary_error: cloudinaryPending
+    cloudinary_error: skipCloudinary
+      ? null
+      : cloudinaryPending
       ? [cloudinaryCoreError, cloudinaryProductError].filter(Boolean).join(",") ||
         "upload_pending"
       : null,

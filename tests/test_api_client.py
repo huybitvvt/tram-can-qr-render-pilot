@@ -331,6 +331,50 @@ def test_ingest_ack_accepts_explicit_local_persistent_evidence_without_cloudinar
     assert response["local_backup_committed"] is True
 
 
+def test_post_measurement_omits_images_when_include_images_false(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    class FakeResponse:
+        status = 201
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return (
+                b'{"ok":true,"id":9,"event_id":"event-skip","local_backup_committed":true,'
+                b'"cloudinary_skipped":true,"cloudinary_pending":false}'
+            )
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    img = tmp_path / "skip.jpg"
+    img.write_bytes(b"\xff\xd8skip\xff\xd9")
+    response = post_measurement(
+        "https://example.test/ingest",
+        {
+            "event_id": "event-skip",
+            "qr_code": "ROLL-SKIP",
+            "product_image_base64": base64.b64encode(b"\xff\xd8p\xff\xd9").decode("ascii"),
+        },
+        img,
+        "token",
+        include_images=False,
+    )
+    assert response["cloudinary_skipped"] is True
+    assert "image_base64" not in captured["body"]
+    assert "product_image_base64" not in captured["body"]
+    assert captured["body"]["skip_cloudinary"] is True
+    assert captured["body"]["image_role"] == "core_weight"
+
+
 def test_ingest_ack_rejects_image_less_response_without_local_evidence() -> None:
     try:
         validate_ingest_response(

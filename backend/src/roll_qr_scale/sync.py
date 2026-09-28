@@ -21,8 +21,12 @@ def _default_send(
     payload: dict[str, object],
     image_path: str,
     token: str,
+    *,
+    include_images: bool = True,
 ) -> dict[str, object]:
-    return post_measurement(url, payload, image_path, token)
+    return post_measurement(
+        url, payload, image_path, token, include_images=include_images
+    )
 
 
 def _default_maintenance(
@@ -63,6 +67,7 @@ class OutboxSyncWorker:
         *,
         gateway_id: str | None = None,
         require_remote_image: bool = True,
+        include_images: bool = True,
         maintenance_enabled: bool = False,
         maintenance_interval: float = 24 * 60 * 60,
         maintenance: MaintenanceFunction = _default_maintenance,
@@ -76,6 +81,7 @@ class OutboxSyncWorker:
         # captures carry their gateway identity in the outbox row itself.
         self.device_id = gateway_id if gateway_id is not None else device_id
         self.require_remote_image = require_remote_image
+        self.include_images = include_images
         self.interval = interval
         self.send = send
         self.maintenance_enabled = bool(maintenance_enabled)
@@ -200,32 +206,49 @@ class OutboxSyncWorker:
             "result": dict(self._maintenance_result),
         }
 
+    def _invoke_send(
+        self, payload: dict[str, object], image_path: str
+    ) -> dict[str, object]:
+        body = dict(payload)
+        if not self.include_images:
+            body.pop("product_image_base64", None)
+            body["skip_cloudinary"] = True
+        params: dict[str, object] = {}
+        try:
+            signature = inspect.signature(self.send)
+            if "include_images" in signature.parameters:
+                params["include_images"] = self.include_images
+        except (TypeError, ValueError):
+            pass
+        return self.send(self.api_url, body, image_path, self.device_token, **params)
+
+    def _should_mark_cloudinary_pending(self, response: dict[str, object]) -> bool:
+        if not self.include_images or response.get("cloudinary_skipped") is True:
+            return False
+        return response.get("cloudinary_pending") is True
+
     def _sync_measurement(self, measurement: Measurement) -> bool:
         try:
             payload = measurement.api_payload(self.device_id)
-            if measurement.product_image_path:
+            if self.include_images and measurement.product_image_path:
                 payload["product_image_base64"] = base64.b64encode(
                     Path(measurement.product_image_path).read_bytes()
                 ).decode("ascii")
-            response = self.send(
-                self.api_url,
-                payload,
-                measurement.image_path,
-                self.device_token,
-            )
+            response = self._invoke_send(payload, measurement.image_path)
             validate_ingest_response(
                 response,
                 measurement.event_id,
-                require_remote_image=self.require_remote_image,
-                require_product_image=bool(measurement.product_image_path),
+                require_remote_image=self.require_remote_image and self.include_images,
+                require_product_image=bool(
+                    self.include_images and measurement.product_image_path
+                ),
             )
             remote_id = response.get("id")
             remote_image_url = response.get("core_image_url") or response.get("image_url")
             remote_image_public_id = (
                 response.get("core_image_public_id") or response.get("image_public_id")
             )
-            mark_pending = response.get("cloudinary_pending") is True
-            if mark_pending:
+            if self._should_mark_cloudinary_pending(response):
                 self.store.mark_cloudinary_pending(
                     measurement.event_id,
                     int(remote_id) if remote_id is not None else None,
@@ -246,24 +269,21 @@ class OutboxSyncWorker:
 
     def _sync_inventory_check(self, check: InventoryCheck) -> bool:
         try:
-            response = self.send(
-                self.api_url,
+            response = self._invoke_send(
                 check.api_payload(self.device_id),
                 check.image_path,
-                self.device_token,
             )
             validate_ingest_response(
                 response,
                 check.event_id,
-                require_remote_image=self.require_remote_image,
+                require_remote_image=self.require_remote_image and self.include_images,
             )
             remote_id = response.get("id")
             remote_image_url = response.get("image_url") or response.get("core_image_url")
             remote_image_public_id = (
                 response.get("image_public_id") or response.get("core_image_public_id")
             )
-            mark_pending = response.get("cloudinary_pending") is True
-            if mark_pending:
+            if self._should_mark_cloudinary_pending(response):
                 self.store.mark_inventory_check_cloudinary_pending(
                     check.event_id,
                     int(remote_id) if remote_id is not None else None,
@@ -284,11 +304,15 @@ class OutboxSyncWorker:
 
     def _sync_photo_draft(self, draft: PhotoDraft) -> bool:
         try:
-            response = self.send(
-                self.api_url,
+            if not self.include_images:
+                self.store.mark_photo_draft_failed(
+                    draft.event_id,
+                    "skip_cloudinary: ảnh lỗi không đẩy khi tắt Cloudinary",
+                )
+                return False
+            response = self._invoke_send(
                 draft.api_payload(self.device_id),
                 draft.image_path,
-                self.device_token,
             )
             validate_ingest_response(
                 response,
@@ -300,8 +324,7 @@ class OutboxSyncWorker:
             remote_image_public_id = (
                 response.get("image_public_id") or response.get("core_image_public_id")
             )
-            mark_pending = response.get("cloudinary_pending") is True
-            if mark_pending:
+            if self._should_mark_cloudinary_pending(response):
                 self.store.mark_photo_draft_cloudinary_pending(
                     draft.event_id,
                     int(remote_id) if remote_id is not None else None,

@@ -614,28 +614,35 @@ def post_measurement(
     image_path: str | Path,
     token: str,
     timeout: float | None = None,
+    *,
+    include_images: bool = True,
 ) -> dict[str, object]:
     effective_timeout = _effective_sync_timeout(timeout)
     body = dict(payload)
-    original_image = Path(image_path).read_bytes()
-    expected_hash = str(body.get("frame_sha256") or "").strip().lower()
-    if expected_hash and hashlib.sha256(original_image).hexdigest() != expected_hash:
-        raise ValueError("Local capture SHA-256 does not match the saved image")
-    # The Edge Function checks frame_sha256 against the uploaded JPEG bytes.
-    # Re-encoding a hashed capture makes every large upload fail with 422.
-    core_image = original_image if expected_hash else _compact_upload_image(original_image)
-    body["image_base64"] = base64.b64encode(core_image).decode("ascii")
-    product_image_base64 = body.get("product_image_base64")
-    if isinstance(product_image_base64, str) and product_image_base64:
-        try:
-            product_image = base64.b64decode(product_image_base64, validate=True)
-            compact_product_image = _compact_upload_image(product_image)
-            if len(compact_product_image) < len(product_image):
-                body["product_image_base64"] = base64.b64encode(
-                    compact_product_image
-                ).decode("ascii")
-        except (ValueError, TypeError):
-            pass
+    if not include_images:
+        body.pop("image_base64", None)
+        body.pop("product_image_base64", None)
+        body["skip_cloudinary"] = True
+    else:
+        original_image = Path(image_path).read_bytes()
+        expected_hash = str(body.get("frame_sha256") or "").strip().lower()
+        if expected_hash and hashlib.sha256(original_image).hexdigest() != expected_hash:
+            raise ValueError("Local capture SHA-256 does not match the saved image")
+        # The Edge Function checks frame_sha256 against the uploaded JPEG bytes.
+        # Re-encoding a hashed capture makes every large upload fail with 422.
+        core_image = original_image if expected_hash else _compact_upload_image(original_image)
+        body["image_base64"] = base64.b64encode(core_image).decode("ascii")
+        product_image_base64 = body.get("product_image_base64")
+        if isinstance(product_image_base64, str) and product_image_base64:
+            try:
+                product_image = base64.b64decode(product_image_base64, validate=True)
+                compact_product_image = _compact_upload_image(product_image)
+                if len(compact_product_image) < len(product_image):
+                    body["product_image_base64"] = base64.b64encode(
+                        compact_product_image
+                    ).decode("ascii")
+            except (ValueError, TypeError):
+                pass
     # The shared ingest endpoint routes one-photo inventory checks separately
     # while preserving the established core-weight role for production slips.
     workflow = body.get("workflow")

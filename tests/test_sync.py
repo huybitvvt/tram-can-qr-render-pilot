@@ -542,6 +542,56 @@ def test_outbox_keeps_local_ack_cloudinary_pending_for_retry(tmp_path) -> None:
     store.close()
 
 
+def test_outbox_skips_cloudinary_when_include_images_disabled(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    measurement = store.save(
+        "ROLL-SKIP-CLOUDINARY",
+        3,
+        "kg",
+        np.zeros((20, 20, 3), dtype=np.uint8),
+        "manual",
+        needs_sync=True,
+    )
+    sent: dict = {}
+
+    def fake_send(url, payload, image_path, token, *, include_images=True):
+        sent.update(
+            url=url,
+            payload=dict(payload),
+            image_path=image_path,
+            token=token,
+            include_images=include_images,
+        )
+        return {
+            "ok": True,
+            "event_id": measurement.event_id,
+            "id": 42,
+            "local_backup_committed": True,
+            "cloudinary_skipped": True,
+            "cloudinary_pending": False,
+        }
+
+    worker = OutboxSyncWorker(
+        store,
+        "https://example.test",
+        "token",
+        "gateway-skip",
+        send=fake_send,
+        require_remote_image=False,
+        include_images=False,
+    )
+    assert worker.sync_once() == 1
+    saved = store.get(measurement.event_id)
+    assert saved is not None
+    assert saved.sync_status == "synced"
+    assert saved.sync_error in {"", None}
+    assert sent["include_images"] is False
+    assert sent["payload"].get("skip_cloudinary") is True
+    assert "product_image_base64" not in sent["payload"]
+    assert store.pending_count() == 0
+    store.close()
+
+
 def test_http_client_sends_image_and_device_token(tmp_path) -> None:
     received: dict = {}
 
