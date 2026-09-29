@@ -106,6 +106,8 @@ SESSION_TTL_SECONDS = 7 * 24 * 3600
 LOGIN_HTML = """<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Đăng nhập · Cân kiểm kho</title>
+<link rel="icon" href="/logo.jpg" type="image/jpeg">
+<link rel="shortcut icon" href="/favicon.ico">
 <style>
 body{margin:0;font:16px/1.45 Roboto,sans-serif;background:#f1f2f4;color:#151517;padding:24px 16px calc(24px + env(safe-area-inset-bottom))}
 .card{max-width:420px;margin:12vh auto 0;background:#fff;border:1px solid #d9dadd;border-radius:14px;padding:22px;box-shadow:0 8px 28px #15151712}
@@ -478,6 +480,40 @@ def _project_root() -> Path:
     if (cwd / ".env").is_file() or (cwd / "frontend" / "index.html").is_file():
         return cwd
     return candidate
+
+
+def _resolve_logo_path(configured: str | Path) -> Path | None:
+    """Find the station logo even when cwd is not the repo root (packaged / service)."""
+    raw = Path(configured)
+    candidates = [
+        raw,
+        Path.cwd() / raw,
+        _project_root() / raw,
+        _project_root() / "data" / "viet_nhat_ipt_logo.jpg",
+        Path.cwd() / "data" / "viet_nhat_ipt_logo.jpg",
+    ]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        root = Path(meipass)
+        candidates.extend(
+            (
+                root / raw,
+                root / "data" / "viet_nhat_ipt_logo.jpg",
+                root / "assets" / "data" / "viet_nhat_ipt_logo.jpg",
+            )
+        )
+    seen: set[Path] = set()
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if resolved.is_file():
+            return resolved
+    return None
 
 
 def _load_local_dotenv() -> None:
@@ -1792,12 +1828,11 @@ def _persist_measurement_edit(
 
 
 class ManualSyncController:
-    """Push pending local rows one-by-one, with a job queue and end-of-pass rescan."""
+    """Push pending local rows one-by-one for one filter snapshot; optional job queue."""
 
     MAX_SCAN = 100_000
     MAX_JOB = 5_000
     MAX_QUEUE = 20
-    MAX_RESCANS = 8
     KIND_ORDER = {"measurement": 0, "inventory": 1, "photo_draft": 2, "weigh_batch": 3}
 
     def __init__(self, store: MeasurementStore, worker: OutboxSyncWorker):
@@ -1903,9 +1938,8 @@ class ManualSyncController:
                     snapshot = dict(self._job)
                     snapshot["queue_length"] = len(self._queue)
                     snapshot["queued"] = False
-                    snapshot["rescan_pending"] = True
                     snapshot["message"] = (
-                        "Đang đẩy lần lượt bộ lọc này; cuối lượt sẽ quét lại để không miss dòng mới"
+                        "Đang đẩy lần lượt đúng bộ lọc đã chọn; hãy đợi xong rồi bấm lại nếu cần"
                     )
                     return snapshot
                 if self._queue and self._queue[-1] == filters:
@@ -1990,20 +2024,8 @@ class ManualSyncController:
             active_filters = filters
             active_plan = plan
             while True:
+                # Chỉ đẩy đúng snapshot khớp bộ lọc lúc bấm; không quét lại để tránh total tăng dần.
                 self._run_plan(active_plan)
-                # Quét lại cùng bộ lọc để bắt dòng mới lưu trong lúc đang đẩy.
-                for pass_no in range(2, self.MAX_RESCANS + 2):
-                    more, more_counts = self._plan(active_filters)
-                    if not more:
-                        break
-                    with self._lock:
-                        self._job["pass"] = pass_no
-                        self._job["total"] = int(self._job["total"]) + len(more)
-                        counts = dict(self._job.get("counts") or {})
-                        for key, value in more_counts.items():
-                            counts[key] = int(counts.get(key) or 0) + int(value)
-                        self._job["counts"] = counts
-                    self._run_plan(more)
                 with self._lock:
                     if not self._queue:
                         self._job["state"] = "complete"
@@ -2016,27 +2038,23 @@ class ManualSyncController:
                 if not next_plan:
                     continue
                 with self._lock:
-                    done = int(self._job.get("done") or 0)
-                    synced = int(self._job.get("synced") or 0)
-                    failed = int(self._job.get("failed") or 0)
-                    deferred = int(self._job.get("deferred") or 0)
                     self._job = {
                         "ok": True,
                         "job_id": str(uuid.uuid4()),
                         "state": "running",
                         "filters": active_filters,
                         "counts": next_counts,
-                        "total": done + len(next_plan),
-                        "done": done,
-                        "synced": synced,
-                        "failed": failed,
-                        "deferred": deferred,
-                        "last_error": str(self._job.get("last_error") or ""),
+                        "total": len(next_plan),
+                        "done": 0,
+                        "synced": 0,
+                        "failed": 0,
+                        "deferred": 0,
+                        "last_error": "",
                         "pass": 1,
                         "current": "",
                         "queue_length": queue_length,
                         "queued": False,
-                        "message": "Đang đẩy lượt tiếp theo trong hàng chờ",
+                        "message": "Đang đẩy lượt tiếp theo trong hàng chờ (đúng bộ lọc đã xếp)",
                     }
                 active_plan = next_plan
         except Exception as exc:
@@ -5016,7 +5034,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         weight_engine=weight_engine,
     )
     demo_path = Path(args.demo_image)
-    logo_path = Path(args.logo_image)
+    logo_path = _resolve_logo_path(args.logo_image)
 
     class Handler(BaseHTTPRequestHandler):
         def is_https(self) -> bool:
@@ -5078,6 +5096,15 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return False
             self.session_token = token
             self.session_cookie = self.cookie_header(token)
+            return True
+
+        def send_logo(self, *, include_body: bool = True) -> bool:
+            path = logo_path
+            if path is None or not path.is_file():
+                return False
+            content_type = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+            body = path.read_bytes()
+            self.send_bytes(200, content_type, body, include_body=include_body)
             return True
 
         def request_session_token(self) -> str:
@@ -5206,6 +5233,16 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     include_body=False,
                 )
                 return
+            if parsed.path in {"/logo.jpg", "/favicon.ico"}:
+                if self.send_logo(include_body=False):
+                    return
+                self.send_bytes(
+                    404,
+                    "application/json; charset=utf-8",
+                    b'{"ok":false,"error":"logo_image_missing"}',
+                    include_body=False,
+                )
+                return
             self.send_bytes(
                 404,
                 "application/json; charset=utf-8",
@@ -5248,12 +5285,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 content_type = "image/png" if demo_path.suffix.lower() == ".png" else "image/jpeg"
                 self.send_bytes(200, content_type, demo_path.read_bytes())
                 return
-            if parsed.path == "/logo.jpg":
-                if not logo_path.is_file():
-                    self.send_json(404, {"ok": False, "error": "logo_image_missing"})
+            if parsed.path in {"/logo.jpg", "/favicon.ico"}:
+                if self.send_logo():
                     return
-                content_type = "image/png" if logo_path.suffix.lower() == ".png" else "image/jpeg"
-                self.send_bytes(200, content_type, logo_path.read_bytes())
+                self.send_json(404, {"ok": False, "error": "logo_image_missing"})
                 return
             if not self.require_authorization():
                 return
