@@ -380,7 +380,7 @@ def test_ui_capture_without_qr_or_weights_creates_official_local_ticket(tmp_path
 def test_frontend_saves_photo_backed_rounds_in_separate_requests() -> None:
     assert "Lưu phần đã đủ" in TEST_UI_HTML
     assert "function savableRoundIndexes(session)" in TEST_UI_HTML
-    assert "round&&!round.saved&&roundHasPhoto(round)" in TEST_UI_HTML
+    assert "round&&!round.saved&&roundHasBothImages(round)" in TEST_UI_HTML
     assert "for(const index of indexes)" in TEST_UI_HTML
     assert "event_id:round.eventId" in TEST_UI_HTML
     assert "product_weight:productValue" in TEST_UI_HTML

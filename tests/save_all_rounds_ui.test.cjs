@@ -5,42 +5,92 @@ const vm=require('node:vm');
 
 const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 
+function load(ctx,name){
+ const line=script.split('\n').find(item=>item.startsWith('function '+name+'(')||item.startsWith('async function '+name+'('));
+ assert.ok(line,name);
+ vm.runInContext(line,ctx);
+}
+
 function setup(saveRoundEvidence){
- const session={state:'ready',rounds:[
-  {saved:false,coreImage:'core-1',productImage:'product-1',qr:'QR-1'},
-  {saved:false,coreImage:'core-2',productImage:'',qr:''},
+ const session={state:'ready',roundCount:2,rounds:[
+  {saved:false,coreImage:'core-1',productImage:'product-1',qr:'QR-1',weight:'1',productWeight:'2'},
+  {saved:false,coreImage:'core-2',productImage:'',qr:'',weight:'',productWeight:''},
  ]};
  const messages=[];
- const ctx=vm.createContext({current:()=>session,persistEditor(){},ensureRounds(){},sessionRoundCount:()=>2,
-  savableRoundIndexes:()=>session.rounds.flatMap((round,index)=>!round.saved&&(round.coreImage||round.productImage)?[index]:[]),roundHasPhoto:round=>Boolean(round.coreImage||round.productImage),
-  saveRoundEvidence,renderControls(){},status:(_node,message)=>messages.push(message),captureStatus:{},console});
+ const ctx=vm.createContext({
+  current:()=>session,persistEditor(){},renderControls(){},status:(_node,message)=>messages.push(message),captureStatus:{},console,newEventId:()=>'event-new',
+  MAX_WEIGH_ROUNDS:4,DEFAULT_WEIGH_ROUNDS:2,selectedRoundCount:()=>session.roundCount,
+  syncSessionAliases(){},nextCaptureStep:()=>({kind:'core',round:0}),renderEvidence(){},syncCaptureProductCodes(){},
+  roundHasDuplicateQr:()=>false,roundQualityReady:()=>true,roundOverWeightLimit:()=>false,
+  saveRoundEvidence,
+ });
+ for(const name of ['emptyWeighRound','roundHasData','roundHasPhoto','roundHasBothImages','roundIsOpen','sessionRoundCount','ensureRounds','roundReadyToSave','roundCanSave','savableRoundIndexes','compactUnsavedRounds'])load(ctx,name);
  const start=script.indexOf('async function saveAllRounds(');
  vm.runInContext(script.slice(start,script.indexOf('\nsaveCapture=saveValidatedCapture;',start)),ctx);
  return {ctx,session,messages};
 }
 
-test('Enter save handles each complete or photo-only round once and clears its images',async()=>{
+test('Enter saves only rounds with both images and moves the incomplete round to the top',async()=>{
  const calls=[];
  const {ctx,session,messages}=setup(async index=>{
   calls.push(index);
   assert.equal(session._saveAllLock,true);
   session.rounds[index].coreImage='';session.rounds[index].productImage='';session.rounds[index].qr='';
+  session.rounds[index].weight='';session.rounds[index].productWeight='';
  });
  await ctx.saveAllRounds();
- assert.deepEqual(calls,[0,1]);
+ assert.deepEqual(calls,[0]);
  assert.equal(session._saveAllLock,false);
- assert.match(messages.at(-1),/ĐÃ LƯU TẤT CẢ 2 LẦN/);
+ assert.equal(session.rounds[0].coreImage,'core-2');
+ assert.equal(session.rounds[0].productImage,'');
+ assert.equal(session.rounds[1].coreImage,'');
+ assert.equal(session.rounds[1].productImage,'');
+ assert.match(messages.at(-1),/ĐÃ LƯU 1 LẦN ĐỦ ẢNH/);
+ assert.match(messages.at(-1),/đã dồn lên thành lần 1 và 2/);
 });
 
-test('a failed round retains its image while the other round is saved',async()=>{
+test('a failed complete round stays at the top and the saved slot becomes empty below',async()=>{
  const calls=[];
  const {ctx,session,messages}=setup(async index=>{
   calls.push(index);
   if(index===1)return;
   session.rounds[index].coreImage='';session.rounds[index].productImage='';
+  session.rounds[index].weight='';session.rounds[index].productWeight='';session.rounds[index].qr='';
  });
+ session.rounds[1].productImage='product-2';
  await ctx.saveAllRounds();
  assert.deepEqual(calls,[0,1]);
- assert.equal(session.rounds[1].coreImage,'core-2');
+ assert.equal(session.rounds[0].coreImage,'core-2');
+ assert.equal(session.rounds[0].productImage,'product-2');
+ assert.equal(session.rounds[1].coreImage,'');
  assert.match(messages.at(-1),/CHƯA LƯU ĐỦ: lần 2/);
+});
+
+test('unsaved rounds 3 and 4 become rounds 1 and 2',async()=>{
+ const calls=[];
+ const {ctx,session,messages}=setup(async index=>{
+  calls.push(index);
+  session.rounds[index].coreImage='';session.rounds[index].productImage='';
+  session.rounds[index].weight='';session.rounds[index].productWeight='';session.rounds[index].qr='';
+ });
+ session.roundCount=4;
+ session.rounds=[
+  {saved:false,coreImage:'core-1',productImage:'product-1',qr:'QR-1',weight:'1',productWeight:'2'},
+  {saved:false,coreImage:'core-2',productImage:'product-2',qr:'QR-2',weight:'1',productWeight:'2'},
+  {saved:false,coreImage:'core-3',productImage:'',qr:'QR-3',weight:'3',productWeight:''},
+  {saved:false,coreImage:'',productImage:'product-4',qr:'QR-4',weight:'',productWeight:'8'},
+ ];
+ await ctx.saveAllRounds();
+ assert.deepEqual(calls,[0,1]);
+ assert.equal(session.roundCount,4);
+ assert.equal(session.rounds.length,4);
+ assert.equal(session.rounds[0].qr,'QR-3');
+ assert.equal(session.rounds[0].coreImage,'core-3');
+ assert.equal(session.rounds[1].qr,'QR-4');
+ assert.equal(session.rounds[1].productImage,'product-4');
+ assert.equal(session.rounds[2].coreImage,'');
+ assert.equal(session.rounds[2].productImage,'');
+ assert.equal(session.rounds[3].coreImage,'');
+ assert.equal(session.rounds[3].productImage,'');
+ assert.match(messages.at(-1),/ô trống vẫn hiện ở phía sau/);
 });

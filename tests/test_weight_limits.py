@@ -74,6 +74,7 @@ def test_frontend_can_save_unreadable_weights_with_one_image_and_no_qr():
     names = [
         "validWeightValue",
         "roundHasPhoto",
+        "roundHasBothImages",
         "roundCoreReady",
         "roundProductReady",
         "roundReadyToSave",
@@ -98,8 +99,10 @@ const session={unit:'kg',rounds:[round]};
 assert.equal(roundReadyToSave(session,0),true);
 assert.equal(roundCanSave(session,0),true);
 round.productImage='';
-assert.equal(roundCanSave(session,0),true);
-round.productImage='product';round.qr='';
+assert.equal(roundCanSave(session,0),false);
+round.coreImage='';round.productImage='product';
+assert.equal(roundCanSave(session,0),false);
+round.coreImage='core';round.productImage='product';round.qr='';
 assert.equal(roundCanSave(session,0),true);
 round.coreImage='';round.productImage='';
 assert.equal(roundCanSave(session,0),false);

@@ -2057,7 +2057,7 @@ Deno.serve(async (request: Request) => {
         khoi_luong_bi: inventoryTareWeight,
         don_vi: unit,
         captured_at: capturedAt,
-        image_path: skipCloudinary ? null : inventoryPublicId,
+        image_path: inventoryUploaded?.publicId ?? inventoryPublicId,
         image_url: inventoryUploaded?.secureUrl ?? null,
         image_public_id: inventoryUploaded?.publicId ?? null,
         gateway_id: gatewayId,
@@ -2129,7 +2129,12 @@ Deno.serve(async (request: Request) => {
           });
         }
       }
-      return json(500, { ok: false, error: "inventory_insert_failed" });
+      return json(500, {
+        ok: false,
+        error: "inventory_insert_failed",
+        detail: inventoryInsertError.message,
+        code: inventoryInsertError.code,
+      });
     }
     const insertedInventoryRow = insertedInventory as unknown as Record<string, unknown>;
     return json(201, {
@@ -2401,10 +2406,12 @@ Deno.serve(async (request: Request) => {
       tare_weight: weight,
       unit,
       captured_at: capturedAt,
-      image_path: skipCloudinary ? null : (uploaded?.publicId ?? imagePublicId),
+      // image_path is NOT NULL; when skip_cloudinary keep the planned public-id
+      // path as a local-only marker (urls/public_id stay null — no Cloudinary upload).
+      image_path: uploaded?.publicId ?? imagePublicId,
       image_url: uploaded?.secureUrl ?? null,
       image_public_id: uploaded?.publicId ?? null,
-      core_image_path: skipCloudinary ? null : (uploaded?.publicId ?? imagePublicId),
+      core_image_path: uploaded?.publicId ?? imagePublicId,
       core_image_url: uploaded?.secureUrl ?? null,
       core_image_public_id: uploaded?.publicId ?? null,
       product_image_path: productImage ? productUploaded?.publicId ?? productImagePublicId : null,
@@ -2511,7 +2518,12 @@ Deno.serve(async (request: Request) => {
         });
       }
     }
-    return json(500, { ok: false, error: "measurement_insert_failed" });
+    return json(500, {
+      ok: false,
+      error: "measurement_insert_failed",
+      detail: insertError.message,
+      code: insertError.code,
+    });
   }
 
   return json(201, {

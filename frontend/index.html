@@ -827,6 +827,9 @@ if($('roundCount'))$('roundCount').insertAdjacentHTML('beforeend','<option value
 function emptyWeighRound(){return{eventId:newEventId(),saved:false,syncStatus:'',syncError:'',corePhotoCaptureId:'',productPhotoCaptureId:'',corePhotoRequestId:'',productPhotoRequestId:'',coreImage:'',productImage:'',coreAnalysis:null,productAnalysis:null,weight:'',productWeight:'',qr:'',qrNotice:'',errorStatus:'ok',errorReason:'',analyzedWeight:null,analyzedRaw:'',productAnalyzedWeight:null,productAnalyzedRaw:''}}
 function roundHasData(round){return Boolean(round&&(round.coreImage||round.productImage||round.coreAnalysis||round.productAnalysis||String(round.weight||'')||String(round.productWeight||'')))}
 function roundHasPhoto(round){return Boolean(round&&(round.coreImage||round.productImage))}
+function roundHasBothImages(round){return Boolean(round&&round.coreImage&&round.productImage)}
+function roundIsOpen(round){return Boolean(round&&!round.saved&&(roundHasData(round)||round.corePhotoCaptureId||round.productPhotoCaptureId||String(round.qr||'').trim()||round.errorStatus==='error'||String(round.errorReason||'').trim()))}
+function compactUnsavedRounds(session){if(!session||!Array.isArray(session.rounds))return;ensureRounds(session);const count=sessionRoundCount(session),open=[];for(let i=0;i<count;i++)if(roundIsOpen(session.rounds[i]))open.push(session.rounds[i]);if(open.length>=count)return;const next=open.slice();while(next.length<count)next.push(emptyWeighRound());let changed=false;for(let i=0;i<count;i++)if(session.rounds[i]!==next[i])changed=true;if(!changed)return;session.rounds=next;syncSessionAliases(session);const step=nextCaptureStep(session);session.selectedSlot=step||{kind:'core',round:0};if(session===current()){renderEvidence(session);syncCaptureProductCodes(session)}}
 function slotHasData(round,kind){if(!round)return false;return kind==='product'?Boolean(round.productImage||round.productAnalysis||String(round.productWeight||'')):Boolean(round.coreImage||round.coreAnalysis||String(round.weight||''))}
 function resetWeighRound(round,keepQr=true){const qr=keepQr?String((round&&round.qr)||''):'';Object.assign(round||{},emptyWeighRound());if(round)round.qr=qr;return round}
 function selectedRoundCount(){return Math.max(1,Math.min(MAX_WEIGH_ROUNDS,Number($('roundCount')&&$('roundCount').value)||DEFAULT_WEIGH_ROUNDS))}
@@ -864,7 +867,7 @@ function handleQrFieldCommit(input){const session=current();if(!session||!input|
 function roundQrNotice(session,index){const round=session&&session.rounds&&session.rounds[index];if(!round||roundCode(session,index))return'';if(round.qrNotice)return round.qrNotice;const data=round.productAnalysis;if(!data)return'';if(data.qr_conflict)return'QR xung đột giữa hai bộ đọc. Hãy quét hoặc nhập lại mã.';const code=String(data.qr_code||'').trim();if(!data.qr_found||!code||String(data.qr_decoder||'').startsWith('gemini'))return'';const duplicate=qrDuplicateMessage(code,index,session);return duplicate?'Đã đọc QR: '+code+' · '+duplicate:''}
 function roundHasDuplicateQr(session,index){const code=roundCode(session,index);return Boolean(code&&qrDuplicateMessage(code,index,session))}
 function codesReady(session){if(!session)return false;ensureRounds(session);const count=sessionRoundCount(session);for(let i=0;i<count;i++)if(!roundCode(session,i))return false;return true}
-function roundReadyToSave(session,index){const round=session&&session.rounds&&session.rounds[index];return Boolean(round&&!round.saved&&roundHasPhoto(round)&&!roundHasDuplicateQr(session,index))}
+function roundReadyToSave(session,index){const round=session&&session.rounds&&session.rounds[index];return Boolean(round&&!round.saved&&roundHasBothImages(round)&&!roundHasDuplicateQr(session,index))}
 function roundQualityReady(round){if(!round)return false;return round.errorStatus!=='error'||Boolean(String(round.errorReason||'').trim())||!validWeightValue(round.weight)||!validWeightValue(round.productWeight)||!round.qr||!round.coreImage||!round.productImage}
 function roundOverWeightLimit(){return false}
 function sessionOverWeightLimit(){return false}
@@ -947,13 +950,14 @@ function refreshCompletionState(session=current()){
   const code=roundCode(session,i),duplicate=code?qrDuplicateMessage(code,i,session):'';
   if(session===current())markQrInputDuplicate($(roundQrId(i)),Boolean(duplicate));
   const qrNotice=roundQrNotice(session,i);if(duplicate||qrNotice)issues.push('Lần '+(i+1)+': '+(duplicate||qrNotice));
-   else if(!roundHasPhoto(round)&&!next)issues.push('Lần '+(i+1)+': cần ít nhất một ảnh cân.');
+   else if(roundHasPhoto(round)&&!roundHasBothImages(round))issues.push('Lần '+(i+1)+': cần đủ ảnh lõi và ảnh sản phẩm.');
+  else if(!roundHasPhoto(round)&&!next)issues.push('Lần '+(i+1)+': cần đủ ảnh lõi và ảnh sản phẩm.');
   if(!roundQualityReady(round))issues.push('Lần '+(i+1)+': đã chọn Có lỗi, hãy nhập Lý do lỗi.');
  }
  let message,tone='warn';
  if(saved===total){session.state='ready';message='ĐÃ LƯU ĐỦ '+total+'/'+total;tone='ok'}
  else if(issues.length){session.state=next?'awaiting-weight':'awaiting-code';message=issues.join('\n');if(savable.length)message+='\nCó '+savable.length+' lượt đủ dữ liệu có thể lưu.'}
-  else if(savable.length){session.state='ready';message='Có '+savable.length+' lượt đã có ảnh. Nhấn Lưu để ghi phiếu cân chính thức, kể cả khi AI hoặc QR chưa đọc được.';tone='ok'}
+  else if(savable.length){session.state='ready';message='Có '+savable.length+' lượt đủ ảnh lõi và ảnh sản phẩm. Nhấn Lưu hoặc Enter để ghi những lượt đó.';tone='ok'}
   else{session.state='awaiting-weight';message=statusForPartialWeights(session)}
   session.stateElement.textContent=saved===total?message:savable.length?'CÓ '+savable.length+' PHIẾU CÂN CÓ ẢNH · SẴN SÀNG LƯU':issues.length?'CHƯA THỂ LƯU · KIỂM TRA ẢNH / LÝ DO LỖI':'CHỜ ẢNH CÂN';
   if(next&&!issues.length&&!savable.length)session.stateElement.textContent=(saved?'ĐÃ LƯU '+saved+'/'+total+' · ':'')+(next.kind==='product'?(next.round===0?'CHỜ CÂN SẢN PHẨM':'CHỜ CÂN SẢN PHẨM LẦN '+(next.round+1)):'CHỜ CÂN LÕI LẦN '+(next.round+1));
@@ -1191,7 +1195,7 @@ async function saveValidatedCapture(){
  captureCount+=savedNow;session.captureCount+=savedNow;if(savedNow)void loadRecords();
  const savedMessage='Đã lưu '+savedNow+' lượt. ';
  if(savedNow>0&&!failed&&!hasPendingRoundData(session)){const stillSelected=session===current();session.setState('saved','ĐÃ LƯU '+savedNow+' LƯỢT','ready');prepareNextCapture('',session);if(stillSelected){const cloudMessage=!cloudEnabled?'Đã lưu cục bộ.':syncedAll?'Đã đồng bộ Supabase.':'Bản chưa đồng bộ cần bấm đồng bộ trong Danh sách.';status(captureStatus,savedMessage+cloudMessage+' Màn hình đã sẵn sàng cho cuộn tiếp theo.',syncedAll||!cloudEnabled?'ok':'warn');if($('autoAdvance').checked&&stations.length>1)selectStation((savedStationIndex+1)%stations.length)}return}
- if(savedNow){for(const index of indexes)if(session.rounds[index]&&session.rounds[index].saved)clearSavedRoundAfterLocalWrite(session,index)}
+ if(savedNow){for(const index of indexes)if(session.rounds[index]&&session.rounds[index].saved)clearSavedRoundAfterLocalWrite(session,index);if(!session._saveAllLock)compactUnsavedRounds(session)}
  else{syncSessionAliases(session);const next=nextCaptureStep(session);if(next)session.selectedSlot=next;session.state='awaiting-weight';session.stateElement.textContent='CHƯA LƯU · THỬ LẠI';session.stateElement.className='station-state bad';syncCameraStatusPill(session);if(session===current())renderEvidence(session)}
  if(session===current()){renderControls();if(failed)status(captureStatus,savedMessage+'Lần '+(failed.index+1)+' lỗi: '+failed.error.message+'\nBấm Lưu để thử lại; hệ thống giữ nguyên ID chống trùng.','bad');else status(captureStatus,savedMessage+'Ảnh lần vừa lưu đã dọn khỏi màn hình. Dữ liệu lần khác chưa lưu vẫn được giữ; vào Danh sách để đồng bộ thủ công.','ok')}
  }finally{session._saveLock=false;renderControls()}
@@ -1200,7 +1204,7 @@ async function saveRoundEvidence(index){
   const session=current();if(!session||session._saveLock||session.state==='analyzing'||session.state==='saving')return;
   ensureRounds(session);index=Number(index);if(!Number.isInteger(index)||index<0||index>=sessionRoundCount(session))return;
   persistEditor(session);const round=session.rounds[index];if(!round||round.saved)return;
-  if(!roundHasPhoto(round)){status(captureStatus,'Lần '+(index+1)+' cần ít nhất một ảnh cân để lưu phiếu chính thức.','warn');return}
+  if(!roundHasBothImages(round)){status(captureStatus,'Lần '+(index+1)+' cần đủ ảnh lõi và ảnh sản phẩm mới được lưu.','warn');return}
   if(roundHasDuplicateQr(session,index)){status(captureStatus,qrDuplicateMessage(roundCode(session,index),index,session),'bad');return}
   if(!roundQualityReady(round)){status(captureStatus,'Lần '+(index+1)+': hãy nhập Lý do lỗi trước khi lưu phiếu cân.','bad');return}
   return saveValidatedCapture(index);
@@ -1209,14 +1213,16 @@ async function saveAllRounds(){
  const session=current();if(!session||session._saveAllLock||session._saveLock||session.state==='analyzing'||session.state==='saving')return;
  persistEditor(session);ensureRounds(session);
   const indexes=savableRoundIndexes(session);
-  if(!indexes.length){status(captureStatus,'Cần ít nhất một ảnh cân; nếu chọn Có lỗi khi đã đủ dữ liệu, hãy nhập Lý do lỗi.','warn');return}
+  const skipped=[];for(let i=0;i<sessionRoundCount(session);i++){const round=session.rounds[i];if(!round||round.saved||indexes.includes(i))continue;if(roundHasPhoto(round)||roundHasData(round))skipped.push(i+1)}
+  if(!indexes.length){status(captureStatus,skipped.length?'Lần '+skipped.join(', ')+' chưa đủ ảnh lõi và ảnh sản phẩm nên chưa được lưu.':'Mỗi lần cần đủ ảnh lõi và ảnh sản phẩm mới được lưu.','warn');return}
  session._saveAllLock=true;renderControls();const failed=[];
  try{
   for(const index of indexes){
    try{await saveRoundEvidence(index)}catch(error){console.error('Không lưu được lần '+(index+1)+':',error)}
-   if(roundHasPhoto(session.rounds[index]))failed.push(index+1);
+   if(roundHasBothImages(session.rounds[index])&&!session.rounds[index].saved)failed.push(index+1);
   }
-  if(session===current())status(captureStatus,failed.length?'CHƯA LƯU ĐỦ: lần '+failed.join(', ')+'. Ảnh các lần này vẫn còn trên màn hình để thử lại.':'ĐÃ LƯU TẤT CẢ '+indexes.length+' LẦN CÓ DỮ LIỆU VÀO MÁY. Màn hình đã sẵn sàng cân tiếp; vào Danh sách để đồng bộ thủ công.',failed.length?'bad':'ok');
+  compactUnsavedRounds(session);
+  if(session===current())status(captureStatus,failed.length?'CHƯA LƯU ĐỦ: lần '+failed.join(', ')+'. Ảnh các lần này vẫn còn trên màn hình để thử lại.':skipped.length?'ĐÃ LƯU '+indexes.length+' LẦN ĐỦ ẢNH. Lần chưa lưu đã dồn lên thành lần 1 và 2; ô trống vẫn hiện ở phía sau.':'ĐÃ LƯU TẤT CẢ '+indexes.length+' LẦN ĐỦ ẢNH. Màn hình đã sẵn sàng cân tiếp; vào Danh sách để đồng bộ thủ công.',failed.length?'bad':skipped.length?'warn':'ok');
  }finally{session._saveAllLock=false;renderControls()}
 }
 saveCapture=saveValidatedCapture;

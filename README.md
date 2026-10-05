@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc36`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc36/TramCanQR-Setup-0.2.0-rc36.exe).
+>    Bản `0.2.0-rc37`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc37/TramCanQR-Setup-0.2.0-rc37.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc36.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc37.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -668,3 +668,5 @@ Bản 0.2.0-rc34 giữ ảnh QR tới 2K, đọc QR trước khi ghép/nén ản
 Bản 0.2.0-rc35 thêm lọc Ngày/Ca/Máy và nút Đẩy Supabase (không Cloudinary), đẩy lần lượt có hàng chờ và quét lại để không miss data. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc35.md).
 
 Bản 0.2.0-rc36 đẩy đúng snapshot theo bộ lọc (không quét lại làm tổng tăng dần) và sửa 404 favicon. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc36.md).
+
+Bản 0.2.0-rc37 chỉ lưu lần cân khi đủ ảnh lõi và ảnh sản phẩm; Enter lưu các lần đủ ảnh rồi dồn lần chưa lưu lên đầu, ô trống vẫn hiện phía sau. Đẩy Supabase bỏ qua Cloudinary không còn lỗi `measurement_insert_failed`. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc37.md).

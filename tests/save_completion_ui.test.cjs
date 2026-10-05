@@ -15,7 +15,7 @@ function setup(items=[]){
   sourceQuery:()=>'',api:async()=>({items}),syncCaptureProductCodes:()=>{},
   statusForPartialWeights:()=> 'Continue capturing',
  });
- const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasPhoto','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundQrNotice','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
+ const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasData','roundHasPhoto','roundHasBothImages','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundQrNotice','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
  vm.runInContext('let productionQrByCode={};',ctx);
  for(const name of names){const line=script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'('));assert.ok(line,name);vm.runInContext(line,ctx)}
  ctx.renderControls=()=>{nodes.saveBtn={disabled:!ctx.savableRoundIndexes(session).length}};
@@ -88,12 +88,14 @@ test('late duplicate response cannot clear the same code in a new round object',
  assert.equal(await pending,false);
  assert.equal(session.rounds[0].qr,code);
 });
-test('one photo with no QR or readable weights enables official save',()=>{
+test('save stays disabled until both core and product images exist',()=>{
  const {ctx,session,nodes,messages}=setup();const round=session.rounds[0],code=round.qr;
  round.qr='';round.productImage='';round.weight='';round.productWeight='';round.errorStatus='error';
  ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);assert.deepEqual(Array.from(ctx.savableRoundIndexes(session)),[]);
+ assert.match(messages.at(-1).message,/ảnh lõi và ảnh sản phẩm/);
+ round.productImage='product';ctx.refreshCompletionState(session);
  assert.equal(nodes.saveBtn.disabled,false);assert.deepEqual(Array.from(ctx.savableRoundIndexes(session)),[0]);
- assert.match(messages.at(-1).message,/phiếu cân chính thức/);
  round.coreImage='';ctx.refreshCompletionState(session);
  assert.equal(nodes.saveBtn.disabled,true);
  round.coreImage='core';round.productImage='product';round.qr=code;round.weight='1.18';round.productWeight='12.96';ctx.refreshCompletionState(session);
