@@ -28,3 +28,30 @@ test('scanner targets the selected round 3 or 4 instead of the first empty QR',(
 test('AI capture stays on the selected round even when the button kind differs',()=>{
  assert.match(script,/selectedIndex>=0\?selectedIndex/);
 });
+
+test('capture stays on the chosen roll instead of walking 1-2-3-4',()=>{
+ const session={roundCount:4,selectedSlot:{kind:'product',round:2},rounds:[{},{},{},{}]};
+ const ctx=vm.createContext({
+  current:()=>session,
+  ensureRounds:item=>item.rounds,
+  sessionRoundCount:()=>4,
+  captureSlot:()=>session.selectedSlot,
+  showPostCaptureSource(){},
+  renderEvidence(){},
+  requestAnimationFrame(){},
+  $:()=>null,
+ });
+ const line=script.split('\n').find(item=>item.startsWith('function stayOnSelectedRound('));
+ vm.runInContext(line,ctx);
+ const advance=script.split('\n').find(item=>item.startsWith('function advanceToNextCapture('));
+ vm.runInContext(advance,ctx);
+ const kept=ctx.stayOnSelectedRound(session);
+ assert.equal(kept.kind,'product');
+ assert.equal(kept.round,2);
+ session.selectedSlot={kind:'core',round:3};
+ const stayed=ctx.advanceToNextCapture(session);
+ assert.equal(stayed.kind,'core');
+ assert.equal(stayed.round,3);
+ assert.match(advance,/stayOnSelectedRound\(session\)/);
+ assert.doesNotMatch(script.slice(script.indexOf('async function capturePhotoOnly('),script.indexOf('async function persistAiMissPhoto(')),/round:slot\.round\+1/);
+});
