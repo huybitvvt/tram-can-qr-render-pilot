@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc39`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc39/TramCanQR-Setup-0.2.0-rc39.exe).
+>    Bản `0.2.0-rc40`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc40/TramCanQR-Setup-0.2.0-rc40.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc39.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc40.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -674,3 +674,5 @@ Bản 0.2.0-rc37 chỉ lưu lần cân khi đủ ảnh lõi và ảnh sản ph�
 Bản 0.2.0-rc38 mở được app đóng gói (OpenCV không giao diện, hết lỗi DLL lúc khởi động) và đưa QR cùng AI vào đúng lần đang chọn, kể cả lần 3 và lần 4. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc38.md).
 
 Bản 0.2.0-rc39 đổi tên ô cân thành Cuộn trong, Cuộn ngoài và Cuộn chờ. Khi đã lưu cả hai cuộn trên, ảnh ở ô chờ đẩy lên đúng hai ô đó. Đạt tối đa cuộn/đợt thì hiện popup; cả Xác nhận và Bỏ qua đều ghi lịch sử kèm ngày, giờ và số lượng. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc39.md).
+
+Bản 0.2.0-rc40 đọc mã QR ngay trên ảnh camera, cả lúc cân lõi và cân SP. Khi đang zoom, ảnh gửi đi đọc là đúng vùng đang nhìn thấy. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc40.md).

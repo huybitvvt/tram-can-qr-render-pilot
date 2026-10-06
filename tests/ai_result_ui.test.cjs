@@ -9,7 +9,7 @@ async function analyzeWith(result,kind='core',clientQr=''){
  const messages=[],round={saved:false,weight:'',coreImage:''};
  const session={state:'review',rounds:[round],selectedSlot:{kind:'core',round:0},unit:'kg',stationId:'station-01',cameraId:'camera-01',preview:{},setState(state){this.state=state}};
  const ctx=vm.createContext({
-  current:()=>session,persistSourceFromFields(){},ensureRounds:()=>session.rounds,nextCoreRound:()=>0,nextProductRound:()=>0,captureSlot:()=>session.selectedSlot,
+  current:()=>session,persistSourceFromFields(){},ensureRounds:()=>session.rounds,sessionRoundCount:()=>session.rounds.length,nextCoreRound:()=>0,nextProductRound:()=>0,captureSlot:()=>session.selectedSlot,
   roundCoreReady:()=>false,renderControls(){},status:(_node,message)=>messages.push(message),captureStatus:{},
   captureVideo:()=>null,drawSession:()=> 'image',drawQrSession:()=> 'image',decodeClientQr:async()=>clientQr,newEventId:()=> 'event-01',captureWeightBurst:async()=>[],showPreview(){},
   weightKindLabel:()=> 'cân lõi',appStatus:{weight_engine:'gemini'},recognitionProfile:{value:'fast'},recognitionProvider:{value:'gemini'},sourceContext:{shift:'HC1'},

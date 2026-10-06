@@ -3550,19 +3550,9 @@ class StationUIService:
             raise ValueError("capture_kind phải là core, product hoặc inventory")
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
-        # QR belongs to the product step. Avoid spending CPU decoding unrelated
-        # pixels while the operator is capturing the core weight.
-        decoded = (
-            {
-                "ok": True,
-                "found": False,
-                "qr_code": None,
-                "decoder": "not-requested-core-step",
-                "qr_roi": None,
-            }
-            if capture_kind == "core"
-            else self._decode_qr(qr_frame if qr_frame is not None else frame)
-        )
+        # The station camera shows the roll label and the scale together, so
+        # both the core shot and the product shot can carry the QR.
+        decoded = self._decode_qr(qr_frame if qr_frame is not None else frame)
         if decoded.get("qr_roi") and qr_frame is not None:
             # The evidence appends a scale inset to the unchanged scene at (0, 0).
             # Decode the original pixels, but return boxes in evidence coordinates.
@@ -4091,8 +4081,7 @@ class StationUIService:
             if located is not None:
                 source_roi, evidence_zoom_method = located
                 # Preserve QR modules before the evidence is JPEG-encoded again.
-                if capture_kind != "core":
-                    qr_frame = frame
+                qr_frame = frame
                 composite, zoom_roi = self._zoomed_evidence(frame, source_roi)
                 frame, evidence_image = self._canonical_evidence(composite)
                 roi_text = self._roi_text(zoom_roi)

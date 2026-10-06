@@ -27,7 +27,7 @@ test('camera frame waits three seconds after Space countdown begins',async()=>{
   assert.equal(finished,true);
   assert.deepEqual(calls.at(-1),['stop']);
   const production=script.slice(script.indexOf("async function analyzeCurrent(kind='core')"),script.indexOf('async function discardSlot('));
-  assert.match(production,/await waitBeforeCameraCapture\(session,weightKindLabel\(kind\)\);await waitForVideoFrame\(video\)\}image=isProduct\?drawQrSession\(session\):drawSession\(session\)/);
+  assert.match(production,/await waitBeforeCameraCapture\(session,weightKindLabel\(kind\)\);await waitForVideoFrame\(video\)\}image=drawQrSession\(session\)/);
 });
 
 test('camera change during countdown aborts capture',async()=>{

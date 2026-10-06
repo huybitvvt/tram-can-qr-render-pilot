@@ -16,7 +16,7 @@ for(const [width,height] of [[1920,1080],[2560,1440],[3840,2160]]){
   const draws=[],encodes=[],source={};
   const canvas={getContext:()=>({drawImage:(...args)=>draws.push(args)}),toDataURL:(...args)=>{encodes.push(args);return'image'}};
   const ctx=vm.createContext({captureSource:()=>source,sourceSize:()=>[width,height],CAPTURE_JPEG_QUALITY:.9,CAPTURE_MAX_EDGE:1600});
-  load(ctx,['drawSession','drawQrSession']);
+  load(ctx,['visibleFrameRect','drawSession','drawQrSession']);
   ctx.drawQrSession({canvas});
   assert.equal(canvas.width,Math.min(width,2560));
   assert.equal(canvas.height,Math.round(height*Math.min(1,2560/width)));
@@ -24,6 +24,20 @@ for(const [width,height] of [[1920,1080],[2560,1440],[3840,2160]]){
   assert.deepEqual(draws[0],[source,0,0,canvas.width,canvas.height]);
  });
 }
+
+test('zoomed camera capture uses the visible frame so the QR is larger',()=>{
+ const draws=[];
+ const canvas={getContext:()=>({drawImage:(...args)=>draws.push(args)}),toDataURL:()=>'image'};
+ const ctx=vm.createContext({captureSource:()=>({}),sourceSize:()=>[1920,1080],CAPTURE_JPEG_QUALITY:.9,CAPTURE_MAX_EDGE:1600,panelMode:false});
+ load(ctx,['visibleFrameRect','drawSession','drawQrSession']);
+ ctx.drawQrSession({canvas,viewZoom:1.5,viewZoomX:.5,viewZoomY:.5});
+ assert.equal(draws[0][0]&&draws[0].length,9);
+ assert.equal(draws[0][1],320);
+ assert.equal(draws[0][2],180);
+ assert.equal(draws[0][3],1280);
+ assert.equal(draws[0][4],720);
+ assert.ok(canvas.width>1280);
+});
 
 test('live camera hides boxes measured on previous composite evidence',()=>{
  const positions=[],session={preview:{},video:{},qrBox:{},roiBox:{},roi:{inset:true},qrRoi:{old:true},configuredRoi:null};

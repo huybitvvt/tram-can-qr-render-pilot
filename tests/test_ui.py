@@ -1824,7 +1824,7 @@ def test_distant_portrait_scale_gets_side_by_side_context_zoom() -> None:
     assert zoom_roi.x2 > zoom_roi.x1
 
 
-def test_core_capture_skips_unrelated_qr_decode(tmp_path, monkeypatch) -> None:
+def test_core_capture_reads_qr_in_the_same_frame(tmp_path, monkeypatch) -> None:
     class FakeGeminiReader:
         def read(self, frames, *, unit):
             return GeminiWeightSuggestion(7.02, unit, True, True, "GEMINI:test", 0.1)
@@ -1848,7 +1848,13 @@ def test_core_capture_skips_unrelated_qr_decode(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         service,
         "_decode_qr",
-        lambda frame: (_ for _ in ()).throw(AssertionError("core must not decode QR")),
+        lambda frame: {
+            "ok": True,
+            "found": True,
+            "qr_code": "ROLL-693",
+            "decoder": "zxing",
+            "qr_roi": "0.1000,0.2000,0.3000,0.5000",
+        },
     )
 
     result = service.analyze(
@@ -1861,8 +1867,9 @@ def test_core_capture_skips_unrelated_qr_decode(tmp_path, monkeypatch) -> None:
     service.close()
     store.close()
     assert result["weight"] == pytest.approx(7.02)
-    assert result["qr_found"] is False
-    assert result["qr_decoder"] == "not-requested-core-step"
+    assert result["qr_found"] is True
+    assert result["qr_code"] == "ROLL-693"
+    assert result["qr_decoder"] == "zxing"
 
 
 def test_unreadable_gemini_full_frame_retries_one_led_crop(tmp_path, monkeypatch) -> None:
