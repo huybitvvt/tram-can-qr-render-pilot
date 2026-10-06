@@ -93,4 +93,38 @@ test('unsaved rounds 3 and 4 become rounds 1 and 2',async()=>{
  assert.equal(session.rounds[3].coreImage,'');
  assert.equal(session.rounds[3].productImage,'');
  assert.match(messages.at(-1),/ô trống vẫn hiện ở phía sau/);
+ assert.match(messages.at(-1),/Cuộn trong và Cuộn ngoài/);
+});
+
+test('Cuộn chờ stays in place while Cuộn ngoài still has data',()=>{
+ const {ctx,session}=setup(async()=>{});
+ session.roundCount=4;
+ session.rounds=[
+  {saved:false},
+  {saved:false,coreImage:'ngoai',productImage:'',qr:'N',weight:'',productWeight:''},
+  {saved:false,coreImage:'cho3',productImage:'',qr:'C3',weight:'',productWeight:''},
+  {saved:false,coreImage:'cho4',productImage:'',qr:'C4',weight:'',productWeight:''},
+ ];
+ ctx.compactUnsavedRounds(session);
+ assert.equal(session.rounds[0].coreImage,undefined);
+ assert.equal(session.rounds[1].qr,'N');
+ assert.equal(session.rounds[2].qr,'C3');
+ assert.equal(session.rounds[3].qr,'C4');
+});
+
+test('clearing Cuộn trong and Cuộn ngoài promotes Cuộn chờ into those two slots',()=>{
+ const {ctx,session}=setup(async()=>{});
+ session.roundCount=4;
+ session.rounds=[
+  {saved:false},
+  {saved:false},
+  {saved:false,coreImage:'cho3',productImage:'',qr:'C3',weight:'',productWeight:''},
+  {saved:false,coreImage:'cho4',productImage:'',qr:'C4',weight:'',productWeight:''},
+ ];
+ ctx.compactUnsavedRounds(session);
+ assert.equal(session.rounds[0].qr,'C3');
+ assert.equal(session.rounds[1].qr,'C4');
+ assert.equal(session.rounds[2].coreImage,'');
+ assert.equal(session.rounds[3].coreImage,'');
+ assert.equal(session.roundCount,4);
 });

@@ -1855,7 +1855,7 @@ class MeasurementStore:
     def save_weigh_batch(
         self, work_date: str, shift: str, machine: str, production_order: str,
         milestone: int, batch_size: int, candidates: list[dict[str, object]],
-        *, needs_sync: bool,
+        *, needs_sync: bool, decision: str = "confirmed", quantity: int | None = None,
     ) -> tuple[dict[str, object], bool]:
         source = (work_date, shift, machine, production_order)
         with self._lock:
@@ -1879,28 +1879,32 @@ class MeasurementStore:
                 for product in json.loads(row["item_json"]).get("danh_sach_san_pham", [])
             }
             products = [item for item in candidates if str(item.get("event_id") or "") not in used][:batch_size]
-            if not products:
+            recorded = "skipped" if decision == "skipped" else "confirmed"
+            confirmed_at = datetime.now().astimezone().isoformat(timespec="seconds")
+            if not products and recorded != "skipped":
                 raise ValueError("Chưa có cuộn mới đã lưu trên máy cho đợt này")
             numbered = [{**item, "stt": index} for index, item in enumerate(products, 1)]
+            recorded_quantity = len(numbered) if numbered else max(0, int(quantity if quantity is not None else 0))
             item = {
                 "dot_can": len(previous) + 1,
-                "ma_san_pham": str(numbered[0].get("ma_san_pham") or ""),
-                "so_luong": len(numbered), "ngay_can": work_date,
-                "gio_bat_dau": numbered[0].get("can_luc"),
-                "gio_ket_thuc": numbered[-1].get("can_luc"),
+                "ma_san_pham": str(numbered[0].get("ma_san_pham") or "") if numbered else "--",
+                "so_luong": recorded_quantity, "ngay_can": work_date,
+                "gio_bat_dau": numbered[0].get("can_luc") if numbered else confirmed_at,
+                "gio_ket_thuc": numbered[-1].get("can_luc") if numbered else confirmed_at,
                 "ca": shift, "may": machine, "lenh_san_xuat": production_order,
-                "moc_so_luong": milestone, "trang_thai": "confirmed",
+                "moc_so_luong": milestone, "trang_thai": recorded,
+                "xac_nhan_luc": confirmed_at,
                 "danh_sach_san_pham": numbered,
             }
+            sync_status = "pending" if needs_sync and recorded == "confirmed" else "local"
             self.connection.execute(
                 "INSERT INTO weigh_batches (work_date,shift,machine,production_order,"
                 "milestone,batch_size,item_json,sync_status) VALUES (?,?,?,?,?,?,?,?)",
                 (*source, milestone, batch_size, json.dumps(item, ensure_ascii=False),
-                 "pending" if needs_sync else "local"),
+                 sync_status),
             )
             self.connection.commit()
-        return {**item, "sync_status": "pending" if needs_sync else "local",
-                "sync_error": None}, False
+        return {**item, "sync_status": sync_status, "sync_error": None}, False
 
     def pending_weigh_batches(
         self, *, limit: int = 20, include_deferred: bool = False,

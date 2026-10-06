@@ -17,7 +17,7 @@ function setup(api){
   writeRollBatchConfirmed:(...args)=>saved.push(args),
   printWeighBatch:()=>{throw Error('Unexpected automatic print')},
  });
- vm.runInContext('let rollBatchPendingMilestone=10,rollBatchPendingCount=9,rollBatchPendingSize=10,rollBatchSaving=false;',ctx);
+ vm.runInContext('let rollBatchPendingMilestone=10,rollBatchPendingCount=9,rollBatchPendingSize=10,rollBatchPendingQuantity=10,rollBatchSaving=false;',ctx);
  const start=script.indexOf('async function requestRollBatchConfirm(');
  vm.runInContext(script.slice(start,script.indexOf('\nlet weighBatchRows',start)),ctx);
  const confirm=script.indexOf('async function confirmRollBatchCount(');
@@ -59,20 +59,33 @@ test('confirmation permits a partial batch while retaining the configured target
  assert.equal(sent.milestone,17);
  assert.equal(sent.batch_size,10);
  assert.equal(sent.allow_partial,true);
+ assert.equal(sent.decision,'confirmed');
+ assert.equal(sent.quantity,10);
+});
+
+test('skip writes the same history payload with decision skipped',async()=>{
+ let sent;
+ const {ctx}=setup(async(_url,options)=>{sent=JSON.parse(options.body);return{item:{dot_can:1,so_luong:10,ngay_can:'2026-09-15',xac_nhan_luc:'2026-10-06T08:40:00'}}});
+ await ctx.confirmRollBatchCount('skipped');
+ assert.equal(sent.decision,'skipped');
+ assert.equal(sent.milestone,10);
+ assert.equal(sent.quantity,10);
 });
 
 test('confirmation preview shows estimated new rolls rather than the target milestone',()=>{
  const nodes=new Map();
  const node=id=>{if(!nodes.has(id))nodes.set(id,{hidden:true,textContent:'',checked:false,classList:{add(){},remove(){}},setAttribute(){},focus(){}});return nodes.get(id)};
  const ctx=vm.createContext({$:node,weighBatchRows:[{dot_can:7,so_luong:4},{dot_can:8,so_luong:0}],rollBatchSize:()=>16,sourceLabel:()=> 'Ca A',status(){},syncRollBatchConfirmButton(){},renderControls(){}});
- vm.runInContext('let rollBatchPendingMilestone=0,rollBatchPendingCount=0,rollBatchPendingSize=0;',ctx);
+ vm.runInContext('let rollBatchPendingMilestone=0,rollBatchPendingCount=0,rollBatchPendingSize=0,rollBatchPendingQuantity=0;',ctx);
  const start=script.indexOf('function openRollBatchModal(');
  vm.runInContext(script.slice(start,script.indexOf('\nfunction nextRollBatchMilestone(',start)),ctx);
  ctx.openRollBatchModal(144,20);
- assert.equal(node('rollBatchCount').textContent,'Ước tính 16 cuộn mới');
- assert.match(node('rollBatchNote').textContent,/Mốc 144 là mốc dự kiến/);
+ assert.equal(node('rollBatchCount').textContent,'Số lượng xác nhận: 16 cuộn');
+ assert.match(node('rollBatchNote').textContent,/Đã đạt tối đa 16 cuộn\/đợt/);
+ assert.notEqual(node('rollBatchDate').textContent,'--');
+ assert.notEqual(node('rollBatchTime').textContent,'--');
  ctx.openRollBatchModal(144,null);
- assert.equal(node('rollBatchCount').textContent,'--');
+ assert.equal(node('rollBatchCount').textContent,'Số lượng xác nhận: 16 cuộn');
 });
 
 test('machine limits default to thermal 30, packaging 16, Da Nang 10 and can be changed separately',()=>{

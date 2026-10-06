@@ -6034,10 +6034,20 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "trang_thai_loi": item.get("error_status"),
                             "ly_do_loi": item.get("error_reason"),
                         })
+                    decision = str(payload.get("decision") or "confirmed").strip().lower()
+                    if decision not in {"confirmed", "skipped"}:
+                        decision = "confirmed"
+                    try:
+                        quantity = max(0, int(payload.get("quantity") or 0))
+                    except (TypeError, ValueError):
+                        quantity = 0
                     item, duplicate = store.save_weigh_batch(
                         work_date, shift[:80], machine[:80],
                         production_order[:80], milestone, batch_size,
-                        candidates, needs_sync=service.sync_worker is not None,
+                        candidates,
+                        needs_sync=service.sync_worker is not None and decision == "confirmed",
+                        decision=decision,
+                        quantity=quantity,
                     )
                     self.send_json(200, {"ok": True, "item": item, "duplicate": duplicate})
                     return
