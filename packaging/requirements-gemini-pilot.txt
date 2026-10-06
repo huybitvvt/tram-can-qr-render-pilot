@@ -1,5 +1,5 @@
 google-genai==2.16.0
 numpy==2.3.5
-opencv-python==5.0.0.93
+opencv-python-headless==5.0.0.93
 pydantic==2.13.4
 zxing-cpp==3.1.1
