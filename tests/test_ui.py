@@ -150,6 +150,49 @@ def image_data_url(frame: np.ndarray) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii")
 
 
+def test_reread_qr_reads_the_camera_scene_inside_the_saved_photo() -> None:
+    scene = make_qr_frame("ROLL-SCENE-1")
+    side_by_side = np.full((scene.shape[0], scene.shape[1] * 2, 3), 24, dtype=np.uint8)
+    side_by_side[:, : scene.shape[1]] = scene
+    seen: list[tuple[int, int]] = []
+
+    class Service:
+        def _decode_qr(self, frame: np.ndarray) -> dict[str, object]:
+            seen.append((frame.shape[1], frame.shape[0]))
+            if frame.shape[1] == scene.shape[1] and frame.shape[0] == scene.shape[0]:
+                return {"found": True, "qr_code": "ROLL-SCENE-1", "decoder": "zxing"}
+            return {"found": False}
+
+    result = test_ui_module._decode_product_qr_for_reread(Service(), side_by_side, "OTHER-CODE")
+    assert result["qr_found"] is True
+    assert result["qr_code"] == "ROLL-SCENE-1"
+    assert result["qr_conflict"] is False
+    assert "browser-confirmed" not in result["qr_decoder"]
+    assert seen[0] == (side_by_side.shape[1], side_by_side.shape[0])
+    assert seen[1] == (scene.shape[1], scene.shape[0])
+
+    stacked = np.full((scene.shape[0] + 180, scene.shape[1], 3), 24, dtype=np.uint8)
+    stacked[: scene.shape[0]] = scene
+    cropped = test_ui_module._saved_photo_scene(stacked)
+    assert cropped is not None
+    assert cropped.shape == scene.shape
+
+
+def test_saved_zoom_photo_qr_uses_the_camera_reader(tmp_path) -> None:
+    scene = make_qr_frame("ROLL-SCENE-2")
+    photo = np.full((scene.shape[0], scene.shape[1] * 2, 3), 24, dtype=np.uint8)
+    photo[:, : scene.shape[1]] = scene
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = test_ui_module.StationUIService(store, None, None, None)
+    try:
+        result = test_ui_module._decode_product_qr_for_reread(service, photo)
+    finally:
+        service.close()
+        store.close()
+    assert result["qr_found"] is True
+    assert result["qr_code"] == "ROLL-SCENE-2"
+
+
 def test_decode_image_accepts_browser_data_url() -> None:
     frame = make_qr_frame("ROLL-WEB-IMAGE")
     decoded = decode_image(image_data_url(frame))

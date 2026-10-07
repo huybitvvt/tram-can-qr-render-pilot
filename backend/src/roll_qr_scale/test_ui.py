@@ -1645,6 +1645,49 @@ def _resolve_measurement_image_bytes(
     )
 
 
+def _saved_photo_scene(frame: np.ndarray) -> np.ndarray | None:
+    """Return the original camera scene inside a saved zoom-evidence photo."""
+
+    if frame.ndim != 3 or frame.shape[2] != 3:
+        return None
+    height, width = frame.shape[:2]
+    if height < 80 or width < 80:
+        return None
+    panel = np.all(np.abs(frame.astype(np.int16) - 24) <= 6, axis=2)
+    mid = width // 2
+    right_ratio = float(panel[:, mid:].mean())
+    left_ratio = float(panel[:, :mid].mean())
+    if right_ratio >= 0.30 and right_ratio > left_ratio + 0.20:
+        return frame[:, :mid].copy()
+    row_ratio = panel.mean(axis=1)
+    for split in range(int(height * 0.45), height - 36):
+        if (
+            float(row_ratio[split]) >= 0.85
+            and float(row_ratio[split : split + 8].mean()) >= 0.55
+            and float(row_ratio[max(0, split - 8) : split].mean()) <= 0.20
+            and float(row_ratio[split:].mean()) >= 0.28
+        ):
+            return frame[:split].copy()
+    return None
+
+
+def _decode_saved_image_qr(service: object, frame: np.ndarray) -> dict[str, object]:
+    """Run the camera QR reader on a saved photo, including its original scene."""
+
+    decode = getattr(service, "_decode_qr")
+    decoded = decode(frame)
+    if decoded.get("found") and str(decoded.get("qr_code") or "").strip():
+        return decoded
+    scene = _saved_photo_scene(frame)
+    if scene is None:
+        return decoded
+    scene_decoded = decode(scene)
+    if scene_decoded.get("found") and str(scene_decoded.get("qr_code") or "").strip():
+        decoder = str(scene_decoded.get("decoder") or "local")
+        return {**scene_decoded, "decoder": f"scene+{decoder}"}
+    return decoded
+
+
 def _decode_product_qr_for_reread(
     service: object,
     frame: np.ndarray,
@@ -1655,23 +1698,15 @@ def _decode_product_qr_for_reread(
     client_qr = str(client_qr or "").strip()
     if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
         raise ValueError("Mã QR từ trình duyệt không hợp lệ")
-    decode = getattr(service, "_decode_qr")
-    decoded = decode(frame)
+    decoded = _decode_saved_image_qr(service, frame)
     local_qr = (
         str(decoded.get("qr_code") or "").strip()
         if decoded.get("found")
         else ""
     )
-    if client_qr and local_qr and client_qr != local_qr:
-        return {
-            "qr_code": "",
-            "qr_found": False,
-            "qr_conflict": True,
-            "qr_decoder": "browser+backend-conflict",
-        }
     if local_qr:
         decoder = f"camera:{decoded.get('decoder', 'local')}"
-        if client_qr:
+        if client_qr and client_qr == local_qr:
             decoder += "+browser-confirmed"
         return {
             "qr_code": local_qr,
