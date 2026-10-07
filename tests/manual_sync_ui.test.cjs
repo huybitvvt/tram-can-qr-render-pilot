@@ -66,6 +66,8 @@ test('manual sync previews and sends the complete selected filter without Cloudi
   assert.deepEqual(requests[1][1],requests[0][1]);
   assert.equal(nodes.manualSyncStartBtn.disabled,true);
   assert.match(confirmText,/Supabase/);
+  assert.match(confirmText,/Dòng lỗi không được đẩy/);
+  assert.match(confirmText,/Đang chờ theo bộ lọc/);
   assert.match(confirmText,/Không đẩy ảnh lên Cloudinary/);
   assert.doesNotMatch(confirmText,/Supabase \/ Cloudinary/);
 });

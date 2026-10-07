@@ -1071,6 +1071,13 @@ def _manual_sync_filters(payload: dict[str, object]) -> dict[str, str]:
     return {**filters, "scope": scope, "skip_cloudinary": skip_flag}
 
 
+def _sync_row_has_error(item: object) -> bool:
+    source = item if isinstance(item, dict) else {
+        "weight_raw": getattr(item, "weight_raw", "") or "",
+    }
+    return _item_error_status(source) == "error"
+
+
 def _manual_sync_matches(item: dict[str, object], filters: dict[str, str]) -> bool:
     item_date = _item_source_date(item)
     if not item_date or not filters["date_from"] <= item_date <= filters["date_to"]:
@@ -1961,18 +1968,33 @@ class ManualSyncController:
         self._job: dict[str, object] = {"state": "idle", "queue_length": 0}
         self._queue: list[dict[str, str]] = []
 
-    def _plan(self, filters: dict[str, str]) -> tuple[list[tuple[str, object]], dict[str, int]]:
+    def _plan(
+        self,
+        filters: dict[str, str],
+        *,
+        include_local: bool = True,
+        waiting_only: bool = False,
+    ) -> tuple[list[tuple[str, object]], dict[str, int]]:
         selected: list[tuple[str, object, str, int]] = []
         counts = {"measurements": 0, "photo_drafts": 0, "inventory_checks": 0, "weigh_batches": 0}
 
-        def candidates(load: object) -> list[object]:
-            rows = load(limit=self.MAX_SCAN + 1, include_deferred=True, include_local=True)
+        def candidates(load: object, **extra: object) -> list[object]:
+            rows = load(
+                limit=self.MAX_SCAN + 1,
+                include_deferred=True,
+                include_local=include_local,
+                **extra,
+            )
             if len(rows) > self.MAX_SCAN:
                 raise ValueError("Quá nhiều dữ liệu chờ đồng bộ; hãy thu hẹp khoảng ngày")
             return rows
 
         if filters["scope"] in {"production", "all"}:
             for item in candidates(self.store.pending):
+                if _sync_row_has_error(item):
+                    continue
+                if waiting_only and item.sync_status not in {"pending", "failed"}:
+                    continue
                 if _manual_sync_matches(vars(item), filters):
                     selected.append(("measurement", item.event_id, item.captured_at, item.id))
                     counts["measurements"] += 1
@@ -2143,8 +2165,15 @@ class ManualSyncController:
             active_filters = filters
             active_plan = plan
             while True:
-                # Chỉ đẩy đúng snapshot khớp bộ lọc lúc bấm; không quét lại để tránh total tăng dần.
                 self._run_plan(active_plan)
+                retry_plan, _retry_counts = self._plan(
+                    active_filters, include_local=False, waiting_only=True,
+                )
+                if retry_plan:
+                    with self._lock:
+                        self._job["total"] = int(self._job["total"]) + len(retry_plan)
+                        self._job["pass"] = int(self._job.get("pass") or 1) + 1
+                    self._run_plan(retry_plan)
                 with self._lock:
                     if not self._queue:
                         self._job["state"] = "complete"

@@ -562,6 +562,53 @@ def test_manual_sync_sends_only_rows_matching_all_selected_filters(tmp_path) -> 
         store.close()
 
 
+def test_manual_sync_skips_error_rows_and_retries_waiting_rows(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    frame = np.zeros((80, 100, 3), dtype=np.uint8)
+    tags = "SOURCE_DATE=2026-09-26; SOURCE_SHIFT=12C1; SOURCE_MACHINE=Máy 11"
+    error_row = store.save(
+        "SP-ERR", 1.0, "kg", frame, "manual", needs_sync=True,
+        weight_raw=tags + "; ERROR_STATUS=error; ERROR_REASON=AI",
+    )
+    waiting = store.save(
+        "SP-WAIT", 2.0, "kg", frame, "manual", needs_sync=True, weight_raw=tags,
+    )
+    sent: list[str] = []
+
+    def flaky_send(_url, payload, _image_path, _token):
+        event_id = str(payload["event_id"])
+        sent.append(event_id)
+        if sent.count(event_id) == 1:
+            raise OSError("mang tam")
+        return {"ok": True, "event_id": event_id, "id": 77,
+                "image_url": "https://images.example/evidence.jpg",
+                "image_public_id": "roll-captures/evidence"}
+
+    worker = OutboxSyncWorker(store, "https://example.test/ingest", "token", send=flaky_send)
+    controller = ManualSyncController(store, worker)
+    filters = {
+        "scope": "production", "date_from": "2026-09-26", "date_to": "2026-09-26",
+        "shift": "12C1", "machine": "Máy 11", "production_order": "", "qr_code": "",
+        "skip_cloudinary": "1",
+    }
+    try:
+        preview = controller.preview(filters)
+        assert preview["total"] == 1
+        assert preview["counts"]["measurements"] == 1
+        controller.start(filters)
+        deadline = time.monotonic() + 3
+        while controller.status()["state"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        status = controller.status()
+        assert status["state"] == "complete", status
+        assert error_row.event_id not in sent
+        assert sent == [waiting.event_id, waiting.event_id]
+        assert store.get(waiting.event_id).sync_status == "synced"
+        assert store.get(error_row.event_id).sync_status == "pending"
+    finally:
+        store.close()
+
+
 def test_ui_save_retries_cloud_failure_from_durable_outbox(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
 
