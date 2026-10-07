@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc43`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc43/TramCanQR-Setup-0.2.0-rc43.exe).
+>    Bản `0.2.0-rc44`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc44/TramCanQR-Setup-0.2.0-rc44.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc43.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc44.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -682,3 +682,5 @@ Bản 0.2.0-rc41 cho chụp và xử lý từng ô cân riêng, không bắt th�
 Bản 0.2.0-rc42 hiện lại nút Bỏ trên thanh Thao tác camera. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc42.md).
 
 Bản 0.2.0-rc43 cho chọn đọc lại ảnh lõi hoặc ảnh SP. Trong ảnh SP chọn quét QR hoặc đọc số cân. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc43.md).
+
+Bản 0.2.0-rc44 quét lại QR trong danh sách bằng bộ đọc QR lúc chụp, trên khung camera nằm trong ảnh SP đã lưu. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc44.md).
