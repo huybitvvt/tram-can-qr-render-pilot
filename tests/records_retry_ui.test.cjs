@@ -11,7 +11,7 @@ function setup(response){
   let reloads=0;
   const ctx=vm.createContext({
     $:()=>host,
-    document:{createElement:tag=>({tag,children:[],appendChild(child){this.children.push(child)},addEventListener(_name,handler){this.click=handler}})},
+    document:{createElement(){return {children:[],hidden:false,dataset:{},classList:{toggle(){}},appendChild(child){this.children.push(child)},addEventListener(_name,handler){this.click=handler}}}},
     recordErrorStatus:()=> 'error',
     api:async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return response(calls.length)},
     status:(_host,message,tone)=>messages.push({message,tone}),
@@ -32,28 +32,53 @@ function setup(response){
   return {ctx,calls,messages,get reloads(){return reloads}};
 }
 
-test('retry button rereads a saved photo and leaves an incomplete row marked as error',async()=>{
+function rereadButtons(row){
+  const wrap=row.children[0].children[0];
+  return {
+    core:wrap.children[0].children[0],
+    product:wrap.children[0].children[1],
+    qr:wrap.children[1].children[0],
+    weight:wrap.children[1].children[1],
+    panel:wrap.children[1],
+  };
+}
+
+test('core reread uses the saved core photo and leaves an incomplete row as an error',async()=>{
   const fixture=setup(()=>({promoted:false,core_weight:0.16,product_weight:null,qr_code:'',errors:{}}));
   const item={event_id:'draft-1',captured_at:'2026-09-25T03:31:12Z',error_only:true,reread_available:true,core_image_url:'/api/photo-draft-image?event_id=photo-1'};
   const row={children:[],appendChild(child){this.children.push(child)}};
   fixture.ctx.appendProductionDeleteAction(row,item,'error');
-  const retry=row.children[0].children[0].children[0];
-  assert.equal(retry.textContent,'Đọc lại');
-  await retry.click();
+  const buttons=rereadButtons(row);
+  assert.equal(buttons.core.textContent,'Ảnh lõi');
+  assert.equal(buttons.product.textContent,'Ảnh SP');
+  assert.equal(buttons.product.disabled,true);
+  assert.equal(buttons.panel.hidden,true);
+  await buttons.core.click();
   assert.equal(fixture.calls[0].url,'/api/measurements/retry-error');
   assert.equal(fixture.calls[0].body.event_id,'draft-1');
+  assert.equal(fixture.calls[0].body.only,'core');
   assert.equal(fixture.reloads,1);
   assert.equal(fixture.messages.at(-1).tone,'warn');
-  assert.equal(retry.disabled,false);
+  assert.equal(buttons.core.disabled,false);
+  assert.equal(buttons.core.textContent,'Ảnh lõi');
 });
 
-test('retry button reads both missing weights on an existing measurement',async()=>{
-  const fixture=setup(call=>({item:{core_weight:0.16,product_weight:call===1?null:0.40,qr_code:'SP-001'}}));
-  const item={event_id:'measurement-1',captured_at:'2026-09-25T03:31:12Z',error_only:false,qr_code:'SP-001',core_weight:null,product_weight:null,core_image_url:'/core',product_image_url:'/product',unit:'kg'};
+test('product image opens QR or weight choices and each choice rereads only that field',async()=>{
+  const fixture=setup(()=>({item:{core_weight:0.16,product_weight:0.40,qr_code:'SP-001'},read_qr_code:'ROLL-9'}));
+  const item={event_id:'measurement-1',captured_at:'2026-09-25T03:31:12Z',error_only:false,qr_code:'SP-001',core_weight:0.16,product_weight:0.40,core_image_url:'/core',product_image_url:'/product',unit:'kg'};
   const row={children:[],appendChild(child){this.children.push(child)}};
   fixture.ctx.appendProductionDeleteAction(row,item,'error');
-  await row.children[0].children[0].children[0].click();
-  assert.deepEqual(fixture.calls.map(call=>call.body.kind),['core','product']);
-  assert.equal(fixture.reloads,1);
-  assert.equal(fixture.messages.at(-1).tone,'ok');
+  const buttons=rereadButtons(row);
+  assert.equal(buttons.qr.textContent,'Quét QR');
+  assert.equal(buttons.weight.textContent,'Đọc số cân');
+  assert.equal(buttons.panel.hidden,true);
+  await buttons.product.click();
+  assert.equal(fixture.calls.length,0);
+  assert.equal(buttons.panel.hidden,false);
+  await buttons.weight.click();
+  await buttons.qr.click();
+  assert.deepEqual(fixture.calls.map(call=>call.body.kind),['product','qr']);
+  assert.equal(fixture.calls[0].body.image_url,'/product');
+  assert.equal(fixture.calls[1].body.image_url,'/product');
+  assert.equal(fixture.reloads,2);
 });

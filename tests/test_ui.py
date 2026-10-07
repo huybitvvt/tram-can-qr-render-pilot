@@ -3134,6 +3134,9 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "'/api/measurements/reread'" in TEST_UI_HTML
     assert "reread-core" in TEST_UI_HTML
     assert "reread-product" in TEST_UI_HTML
+    assert "function showListProductReread(" in TEST_UI_HTML
+    assert "Quét QR" in TEST_UI_HTML
+    assert "Đọc số cân" in TEST_UI_HTML
     assert "function decodeQrFromImageUrl(" in TEST_UI_HTML
     assert "client_qr_code:clientQr" in TEST_UI_HTML
     assert "QR local" in TEST_UI_HTML or "decoder local" in TEST_UI_HTML

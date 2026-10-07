@@ -1694,6 +1694,90 @@ def _decode_product_qr_for_reread(
     }
 
 
+def _reread_saved_qr(
+    service: object,
+    store: MeasurementStore,
+    *,
+    event_id: str,
+    image_url: str,
+    client_qr: str,
+    core_weight: float | None,
+    product_weight: float | None,
+    work_date: str,
+    shift: str,
+    machine: str,
+    production_order: str,
+    weight_raw: str,
+    previous_qr: str,
+) -> dict[str, object]:
+    """Decode the saved product photo and update only the QR code."""
+
+    try:
+        image_bytes, image_source = _resolve_measurement_image_bytes(
+            store,
+            event_id=event_id,
+            kind="product",
+            image_url=image_url,
+        )
+    except ValueError as exc:
+        raise ValueError("Không có ảnh SP để đọc lại QR") from exc
+    frame = decode_image_bytes(image_bytes)
+    qr_result = _decode_product_qr_for_reread(service, frame, client_qr)
+    if qr_result.get("qr_conflict"):
+        raise ValueError(
+            "Mã QR xung đột giữa ảnh đã lưu và máy đọc trên trình duyệt"
+        )
+    read_qr = str(qr_result.get("qr_code") or "").strip()
+    if not qr_result.get("qr_found") or not read_qr:
+        raise ValueError("Không đọc được mã QR từ ảnh đã lưu")
+    qr_decoder = str(qr_result.get("qr_decoder") or "")
+    weight_raw = _upsert_raw_tag(weight_raw, "PRODUCT_ENTRY_CODE", read_qr)
+    weight_raw = _upsert_raw_tag(weight_raw, "REREAD_QR", read_qr)
+    weight_raw = _upsert_raw_tag(weight_raw, "REREAD_QR_DECODER", qr_decoder[:80])
+    persisted = _persist_measurement_edit(
+        store,
+        event_id=event_id,
+        qr_code=read_qr,
+        core_weight=core_weight,
+        product_weight=product_weight,
+        work_date=work_date,
+        shift=shift,
+        machine=machine,
+        production_order=production_order,
+        error_status="ok",
+        error_reason="",
+        weight_raw=weight_raw,
+    )
+    if "_" in read_qr:
+        product_code = read_qr.split("_", 1)[0].strip()
+    elif "-" in read_qr:
+        product_code = read_qr.split("-", 1)[0].strip()
+    else:
+        product_code = read_qr
+    persisted.update(
+        {
+            "kind": "qr",
+            "previous_core_weight": core_weight,
+            "previous_product_weight": product_weight,
+            "previous_qr_code": previous_qr,
+            "read_weight": None,
+            "read_qr_code": read_qr,
+            "qr_found": True,
+            "qr_conflict": False,
+            "qr_decoder": qr_decoder or None,
+            "product_code": product_code or None,
+            "image_source": image_source,
+            "weight_found": False,
+            "weight_error": None,
+            "quality_pass": False,
+            "recognition_source": None,
+            "recognition_provider": None,
+            "weight_raw_ai": None,
+        }
+    )
+    return persisted
+
+
 def _persist_measurement_edit(
     store: MeasurementStore,
     *,
@@ -3399,6 +3483,7 @@ class StationUIService:
         *,
         recognition_profile: str = "fast",
         recognition_provider: str = "gemini",
+        only: str = "",
     ) -> dict[str, object]:
         """Read saved error photos and promote a complete pair to a measurement."""
         try:
@@ -3417,6 +3502,9 @@ class StationUIService:
         }
         if not any(chosen.values()):
             raise ValueError("Dòng lỗi không có ảnh cân lõi hoặc cân sản phẩm")
+        only = str(only or "").strip().lower()
+        if only and only not in {"core", "product", "qr"}:
+            raise ValueError("Loại đọc lại phải là ảnh lõi, ảnh SP hoặc QR")
         frames: dict[str, np.ndarray] = {}
         readings: dict[str, float | None] = {}
         errors: dict[str, str] = {}
@@ -3424,6 +3512,8 @@ class StationUIService:
             if draft is None:
                 continue
             readings[kind] = draft.reread_weight
+            if only == "qr" or (only in {"core", "product"} and kind != only):
+                continue
             path = Path(draft.image_path)
             if not path.is_file():
                 errors[kind] = "Ảnh local không còn trên máy"
@@ -3454,7 +3544,32 @@ class StationUIService:
         product = chosen["product"]
         qr_code = next((draft.qr_code for draft in drafts if draft.qr_code), "")
         qr_source = next((draft.qr_source for draft in drafts if draft.qr_code), "none")
-        if product is not None and not qr_code and "product" in frames:
+        if only == "qr":
+            draft = chosen["product"]
+            found_qr = False
+            if draft is None:
+                errors["qr"] = "Không có ảnh SP để đọc QR"
+            else:
+                path = Path(draft.image_path)
+                if not path.is_file():
+                    errors["qr"] = "Ảnh SP không còn trên máy"
+                else:
+                    try:
+                        frames["product"] = decode_image_bytes(path.read_bytes())
+                        decoded = _decode_product_qr_for_reread(self, frames["product"])
+                        found = str(decoded.get("qr_code") or "").strip()
+                        if decoded.get("qr_found") and found:
+                            qr_code = found
+                            qr_source = str(decoded.get("qr_decoder") or "none")
+                            self.store.set_photo_draft_qr(draft.event_id, qr_code, qr_source)
+                            found_qr = True
+                        else:
+                            errors["qr"] = "Không đọc được mã QR từ ảnh SP"
+                    except Exception as exc:
+                        errors["qr"] = str(exc)[:240]
+            if not found_qr and "qr" not in errors:
+                errors["qr"] = "Không đọc được mã QR từ ảnh SP"
+        elif only == "" and product is not None and not qr_code and "product" in frames:
             try:
                 decoded = _decode_product_qr_for_reread(self, frames["product"])
                 qr_code = str(decoded.get("qr_code") or "").strip()
@@ -6186,8 +6301,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     )
                     if not event_id:
                         raise ValueError("Thiếu event_id")
-                    if kind not in {"core", "product"}:
-                        raise ValueError("kind phải là core hoặc product")
+                    if kind not in {"core", "product", "qr"}:
+                        raise ValueError("kind phải là core, product hoặc qr")
                     local = store.get(event_id)
                     previous_core: float | None = None
                     previous_product: float | None = None
@@ -6240,6 +6355,28 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         raise ValueError(
                             "Thiếu khối lượng hiện tại để đọc lại"
                         ) from exc
+                    if kind == "qr":
+                        self.send_json(
+                            200,
+                            _reread_saved_qr(
+                                service,
+                                store,
+                                event_id=event_id,
+                                image_url=image_url,
+                                client_qr=str(
+                                    payload.get("client_qr_code") or ""
+                                ).strip(),
+                                core_weight=previous_core,
+                                product_weight=previous_product,
+                                work_date=work_date,
+                                shift=shift,
+                                machine=machine,
+                                production_order=production_order,
+                                weight_raw=weight_raw,
+                                previous_qr=previous_qr,
+                            ),
+                        )
+                        return
                     image_bytes, image_source = _resolve_measurement_image_bytes(
                         store,
                         event_id=event_id,
@@ -6247,17 +6384,12 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         image_url=image_url,
                     )
                     frame = decode_image_bytes(image_bytes)
-                    client_qr = str(payload.get("client_qr_code") or "").strip()
-                    qr_result = (
-                        _decode_product_qr_for_reread(service, frame, client_qr)
-                        if kind == "product"
-                        else {
-                            "qr_code": "",
-                            "qr_found": False,
-                            "qr_conflict": False,
-                            "qr_decoder": "",
-                        }
-                    )
+                    qr_result = {
+                        "qr_code": "",
+                        "qr_found": False,
+                        "qr_conflict": False,
+                        "qr_decoder": "",
+                    }
                     # QR is decoded first and outside the AI queue, so a Gemini
                     # quota/network failure cannot discard a reliable QR result.
                     analysis: dict[str, object] = {}
@@ -6400,6 +6532,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             str(payload.get("event_id") or "").strip(),
                             recognition_profile=str(payload.get("recognition_profile") or "fast"),
                             recognition_provider=str(payload.get("recognition_provider") or "gemini"),
+                            only=str(payload.get("only") or "").strip().lower(),
                         ),
                     )
                     return

@@ -1053,6 +1053,24 @@ class MeasurementStore:
                 raise KeyError(f"Unknown photo draft: {event_id}")
             self.connection.commit()
 
+    def set_photo_draft_qr(self, event_id: str, qr_code: str, qr_source: str) -> None:
+        qr_code = str(qr_code or "").strip()
+        qr_source = str(qr_source or "none").strip()[:80] or "none"
+        if (
+            not qr_code
+            or len(qr_code) > 512
+            or any(ord(character) < 32 for character in qr_code)
+        ):
+            raise ValueError("Mã QR đọc lại không hợp lệ")
+        with self._lock:
+            cursor = self.connection.execute(
+                "UPDATE photo_drafts SET qr_code = ?, qr_source = ? WHERE event_id = ?",
+                (qr_code, qr_source, event_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(f"Unknown photo draft: {event_id}")
+            self.connection.commit()
+
     def attach_product_image(self, event_id: str, frame: np.ndarray) -> str:
         """Persist the product-weight evidence beside its core-weight event."""
         encoded_ok, encoded_frame = cv2.imencode(".jpg", frame)
