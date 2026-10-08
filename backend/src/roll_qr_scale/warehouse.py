@@ -181,14 +181,23 @@ def fetch_finished_goods_warehouses(
     *,
     timeout: float = 15.0,
 ) -> list[str]:
-    rows = _postgrest_request(
-        "GET",
-        supabase_url,
-        api_key,
-        "quan_ly_kho",
-        params={"select": "ten_kho", "order": "ten_kho.asc", "limit": 1000},
-        timeout=timeout,
-    )
+    name_field = "ten_kho"
+    try:
+        rows = _postgrest_request(
+            "GET", supabase_url, api_key, "quan_ly_kho",
+            params={"select": "ten_kho", "order": "ten_kho.asc", "limit": 1000},
+            timeout=timeout,
+        )
+    except RuntimeError as exc:
+        if "quan_ly_kho" not in str(exc) or "schema cache" not in str(exc):
+            raise
+        # Some warehouse projects only expose intake tables to the desktop key.
+        name_field = "kho"
+        rows = _postgrest_request(
+            "GET", supabase_url, api_key, "phieu_nhap",
+            params={"select": "kho", "order": "created_at.desc", "limit": 1000},
+            timeout=timeout,
+        )
     if not isinstance(rows, list):
         raise RuntimeError("Không đọc được danh sách kho")
     names: list[str] = []
@@ -196,7 +205,7 @@ def fetch_finished_goods_warehouses(
     for row in rows:
         if not isinstance(row, dict):
             continue
-        name = str(row.get("ten_kho") or "").strip()
+        name = str(row.get(name_field) or "").strip()
         if not name or not is_finished_goods_warehouse_name(name):
             continue
         key = normalize_product_code_key(name)
@@ -329,6 +338,7 @@ def write_nhap_kho_batch(
             "fullCode": full_code,
             "tenSp": str(raw.get("ten_sp") or "").strip(),
             "donVi": str(raw.get("don_vi") or "").strip(),
+            "eventId": str(raw.get("event_id") or "").strip(),
         }
     unique_items = list(items_by_code.values())
     if not ma_phieu or not unique_items:
@@ -336,12 +346,46 @@ def write_nhap_kho_batch(
     if len(unique_items) > 2000:
         raise ValueError("Mỗi đợt chỉ hỗ trợ tối đa 2000 mã QR")
 
-    saved_by_code: dict[str, dict[str, str]] = {}
+    saved_by_code: dict[str, dict[str, object]] = {}
     duplicate_codes: set[str] = set()
     codes = [item["fullCode"] for item in unique_items]
     existing = _load_existing_nhap_kho(
         supabase_url, api_key, codes, timeout=timeout
     )
+    receipts: dict[str, dict[str, str]] = {}
+
+    def recover(item: dict[str, str], row: dict[str, str]) -> bool:
+        """Resume only receipts belonging to this exact weighing event."""
+        receipt = row.get("ma_phieu") or ""
+        if not receipt or not item["eventId"]:
+            return False
+        if receipt not in receipts:
+            headers = _postgrest_request(
+                "GET", supabase_url, api_key, "phieu_nhap",
+                params={"select": "ghi_chu", "ma_phieu": f"eq.{receipt}", "limit": 1},
+                timeout=timeout,
+            )
+            events: dict[str, str] = {}
+            if isinstance(headers, list) and headers and isinstance(headers[0], dict):
+                try:
+                    note = json.loads(str(headers[0].get("ghi_chu") or ""))
+                    if isinstance(note, dict) and note.get("source") == "TramCanQR":
+                        tagged = note.get("events")
+                        if isinstance(tagged, dict):
+                            events = tagged
+                except (ValueError, TypeError):
+                    pass
+            receipts[receipt] = events
+        if receipts[receipt].get(item["fullCode"]) != item["eventId"]:
+            return False
+        saved_by_code[item["fullCode"]] = {
+            "ma_sp_quet": item["fullCode"],
+            "ma_phieu": receipt,
+            "created_at": row.get("created_at") or "",
+            "recovered": True,
+        }
+        return True
+
     pending: list[dict[str, str]] = []
     for item in unique_items:
         row = existing.get(item["fullCode"])
@@ -351,9 +395,10 @@ def write_nhap_kho_batch(
         if row.get("ma_phieu") == ma_phieu:
             saved_by_code[item["fullCode"]] = {
                 "ma_sp_quet": item["fullCode"],
+                "ma_phieu": ma_phieu,
                 "created_at": row.get("created_at") or datetime.now(timezone.utc).isoformat(),
             }
-        else:
+        elif not recover(item, row):
             duplicate_codes.add(item["fullCode"])
 
     header: dict[str, object] | None = None
@@ -361,7 +406,10 @@ def write_nhap_kho_batch(
         "ngay": ngay or None,
         "nhan_su": nhan_su or None,
         "kho": kho or None,
-        "ghi_chu": None,
+        "ghi_chu": json.dumps({
+            "source": "TramCanQR",
+            "events": {item["fullCode"]: item["eventId"] for item in unique_items if item["eventId"]},
+        }, ensure_ascii=False),
     }
     if ca:
         header_fields["ca"] = ca
@@ -370,7 +418,7 @@ def write_nhap_kho_batch(
     if nguoi_lap:
         header_fields["nguoi_lap"] = nguoi_lap
 
-    if pending or saved_by_code:
+    if pending or any(row.get("ma_phieu") == ma_phieu for row in saved_by_code.values()):
         existing_header = _postgrest_request(
             "GET",
             supabase_url,
@@ -459,6 +507,7 @@ def write_nhap_kho_batch(
             for item in pending:
                 saved_by_code[item["fullCode"]] = {
                     "ma_sp_quet": item["fullCode"],
+                    "ma_phieu": ma_phieu,
                     "created_at": saved_at,
                 }
             pending = []
@@ -483,10 +532,11 @@ def write_nhap_kho_batch(
                 if row.get("ma_phieu") == ma_phieu:
                     saved_by_code[item["fullCode"]] = {
                         "ma_sp_quet": item["fullCode"],
+                        "ma_phieu": ma_phieu,
                         "created_at": row.get("created_at")
                         or datetime.now(timezone.utc).isoformat(),
                     }
-                else:
+                elif not recover(item, row):
                     duplicate_codes.add(item["fullCode"])
             pending = next_pending
 
@@ -546,16 +596,9 @@ def update_can_tu_dong_nhap_kho(
     rows = fetch_can_tu_dong_by_event_ids(
         supabase_url, api_key, event_ids, timeout=timeout
     )
-    if not rows:
-        return {
-            "success": True,
-            "updated": 0,
-            "requested": len(event_ids),
-            "nhap_kho_trang_thai": trang_thai,
-            "nhap_kho_luc": luc,
-            "nhap_kho_boi": nguoi,
-            "missing": True,
-        }
+    found = {str(row.get("event_id") or "") for row in rows}
+    if set(event_ids) - found:
+        raise RuntimeError("Chưa đủ phiếu trên Supabase cân AI; hãy đồng bộ rồi nhập kho lại")
     updated = 0
     for row in rows:
         metadata = row.get("metadata")
@@ -580,21 +623,24 @@ def update_can_tu_dong_nhap_kho(
             params = {"event_id": f"eq.{event_id}"}
         else:
             continue
-        _postgrest_request(
+        result = _postgrest_request(
             "PATCH",
             supabase_url,
             api_key,
             "can_tu_dong",
             params=params,
             body={"metadata": next_meta},
-            prefer="return=minimal",
+            prefer="return=representation",
             timeout=timeout,
         )
+        if not isinstance(result, list) or not result:
+            raise RuntimeError("Không cập nhật được trạng thái cân AI; kiểm tra quyền ghi Supabase")
         updated += 1
     return {
         "success": True,
         "updated": updated,
         "requested": len(event_ids),
+        "confirmed_count": len(found),
         "nhap_kho_trang_thai": trang_thai,
         "nhap_kho_luc": luc,
         "nhap_kho_boi": nguoi,
@@ -676,6 +722,7 @@ def confirm_nhap_kho(
     weigh_supabase_url: str,
     weigh_supabase_key: str,
     update_local_row: Callable[[str, str, str, str, str], None] | None = None,
+    weigh_request: Callable[[list[str], str], dict[str, object]] | None = None,
 ) -> dict[str, object]:
     if not kho_configured():
         raise RuntimeError(f"Chưa cấu hình DB kho ({kho_db_label()})")
@@ -685,6 +732,8 @@ def confirm_nhap_kho(
         raise ValueError("Chưa có kho thành phẩm để lập phiếu nhập")
     if not ca.strip() or not may.strip() or not ma_sp.strip():
         raise ValueError("Chọn ca, máy và Mã SP để lọc mã QR nhập kho")
+    if weigh_request is None and not (weigh_supabase_url and weigh_supabase_key):
+        raise RuntimeError("Chưa cấu hình Supabase cân AI; cần ROLL_SCALE_API_URL và ROLL_SCALE_DEVICE_TOKEN")
 
     waiting = filter_waiting_candidates(
         items, work_date=ngay, shift=ca, machine=may, ma_sp=ma_sp
@@ -692,10 +741,30 @@ def confirm_nhap_kho(
     preview = waiting[:so_cuon]
     if not preview:
         raise ValueError("Không còn mã QR chờ nhập kho cho Mã SP này")
+    event_ids = [str(row.get("event_id") or "").strip() for row in preview]
+    if not all(event_ids):
+        raise ValueError("Phiếu cân thiếu event_id; chưa thể đẩy kho")
 
     sync_summary: dict[str, object] = {"skipped": True}
     if run_manual_sync is not None:
         sync_summary = run_manual_sync()
+    if sync_summary.get("state") == "error":
+        raise RuntimeError("Đồng bộ cân AI lỗi: " + str(sync_summary.get("last_error") or "Hãy thử lại"))
+    if set(event_ids).intersection(sync_summary.get("unsynced_event_ids") or []):
+        raise RuntimeError("Chưa đồng bộ xong phiếu cân AI; chưa ghi kho. " + str(sync_summary.get("last_error") or "Hãy thử lại"))
+
+    if weigh_request is not None:
+        checked = weigh_request(event_ids, "")
+        remote_rows = checked.get("items") or []
+    else:
+        remote_rows = fetch_can_tu_dong_by_event_ids(weigh_supabase_url, weigh_supabase_key, event_ids)
+    remote_qrs = {
+        str(row.get("event_id") or ""): normalize_qr_key(str(row.get("qr_code") or ""))
+        for row in remote_rows if isinstance(row, dict)
+    }
+    if any(remote_qrs.get(event_id) != normalize_qr_key(str(row.get("qr_code") or ""))
+           for event_id, row in zip(event_ids, preview)):
+        raise RuntimeError("Chưa đồng bộ đủ QR lên Supabase cân AI; chưa ghi kho. Hãy kiểm tra kết nối và bấm lại")
 
     ma_phieu = new_phieu_nhap_code(may)
     warehouse_items = [
@@ -703,6 +772,7 @@ def confirm_nhap_kho(
             "ma_sp_quet": str(row.get("qr_code") or "").strip(),
             "ten_sp": str(row.get("ten_sp") or "").strip(),
             "don_vi": str(row.get("don_vi") or row.get("unit") or "").strip(),
+            "event_id": str(row.get("event_id") or "").strip(),
         }
         for row in preview
         if str(row.get("qr_code") or "").strip()
@@ -741,39 +811,47 @@ def confirm_nhap_kho(
             else "Không ghi được mã QR vào nhap_kho."
         )
 
-    event_ids = [
-        str(row.get("event_id") or "").strip()
-        for row in saved_rows
-        if str(row.get("event_id") or "").strip()
-    ]
-    status_update: dict[str, object] = {
-        "updated": 0,
-        "nhap_kho_luc": datetime.now(timezone.utc).isoformat(),
-        "nhap_kho_boi": nguoi or "Không rõ",
+    receipts_by_code = {
+        normalize_qr_key(str(row.get("ma_sp_quet") or "")): str(row.get("ma_phieu") or ma_phieu)
+        for row in (batch.get("saved") or []) if isinstance(row, dict)
     }
-    if weigh_supabase_url and weigh_supabase_key and event_ids:
-        status_update = update_can_tu_dong_nhap_kho(
-            weigh_supabase_url,
-            weigh_supabase_key,
-            event_ids,
-            nguoi=nguoi or "Không rõ",
-            ma_phieu=ma_phieu,
-        )
-    luc = str(status_update.get("nhap_kho_luc") or datetime.now(timezone.utc).isoformat())
-    boi = str(status_update.get("nhap_kho_boi") or nguoi or "Không rõ")
-    if update_local_row is not None:
-        for row in saved_rows:
-            event_id = str(row.get("event_id") or "").strip()
-            if event_id:
-                update_local_row(event_id, NHAP_KHO_DA, luc, boi, ma_phieu)
+    groups: dict[str, list[dict[str, object]]] = {}
+    for row in saved_rows:
+        receipt = receipts_by_code[normalize_qr_key(str(row.get("qr_code") or ""))]
+        groups.setdefault(receipt, []).append(row)
+    status_update: dict[str, object] = {}
+    for receipt, group in groups.items():
+        group_ids = [str(row["event_id"]) for row in group]
+        try:
+            if weigh_request is not None:
+                status_update = weigh_request(group_ids, receipt)
+            else:
+                status_update = update_can_tu_dong_nhap_kho(
+                    weigh_supabase_url, weigh_supabase_key, group_ids,
+                    nguoi=nguoi or "Không rõ", ma_phieu=receipt,
+                )
+            if status_update.get("confirmed_count") != len(set(group_ids)):
+                raise RuntimeError("Supabase cân AI chưa xác nhận đủ trạng thái nhập kho")
+        except Exception as exc:
+            raise RuntimeError(
+                f"Đã ghi kho chờ, phiếu {receipt}, nhưng cập nhật cân AI lỗi: {exc}. "
+                "Bấm Nhập kho lại để hoàn tất; QR đã ghi sẽ được dùng lại, không tạo trùng"
+            ) from exc
+        luc = str(status_update.get("nhap_kho_luc") or datetime.now(timezone.utc).isoformat())
+        boi = str(status_update.get("nhap_kho_boi") or nguoi or "Không rõ")
+        if update_local_row is not None:
+            for row in group:
+                update_local_row(str(row["event_id"]), NHAP_KHO_DA, luc, boi, receipt)
 
     return {
         "ok": True,
-        "ma_phieu": ma_phieu,
+        "ma_phieu": next(iter(groups)),
+        "ma_phieu_list": list(groups),
         "saved": [str(row.get("qr_code") or "") for row in saved_rows],
         "saved_count": len(saved_rows),
         "duplicateCodes": duplicates,
         "duplicate_count": len(duplicates),
+        "recovered_count": sum(bool(row.get("recovered")) for row in (batch.get("saved") or []) if isinstance(row, dict)),
         "nhap_kho_trang_thai": NHAP_KHO_DA,
         "nhap_kho_luc": luc,
         "nhap_kho_boi": boi,

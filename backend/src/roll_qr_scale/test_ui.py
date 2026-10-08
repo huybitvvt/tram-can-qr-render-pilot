@@ -2254,6 +2254,13 @@ class ManualSyncController:
                 self._job["queue_length"] = len(self._queue)
                 snapshot = dict(self._job)
             snapshot["empty"] = not bool(plan)
+            snapshot["unsynced_event_ids"] = []
+            for kind, value in plan:
+                if kind != "measurement":
+                    continue
+                row = self.store.get(str(value))
+                if row is None or row.sync_status != "synced":
+                    snapshot["unsynced_event_ids"].append(str(value))
             return snapshot
         except Exception as exc:
             with self._lock:
@@ -3044,17 +3051,28 @@ class StationUIService:
         }
         supabase_url = _supabase_project_url()
         supabase_key = _supabase_read_key()
-        if supabase_url and supabase_key:
+        api_url = self.manual_sync.worker.api_url if self.manual_sync else _ingest_api_url()
+        api_token = self.manual_sync.worker.device_token if self.manual_sync else _ingest_api_token()
+        if (supabase_url and supabase_key) or (api_url and api_token):
             try:
-                remote_rows = fetch_supabase_table(
-                    supabase_url,
-                    supabase_key,
-                    limit=200,
-                    offset=0,
-                    work_date=work_date,
-                    shift=shift,
-                    machine=machine,
-                )
+                remote_rows = []
+                offset = 0
+                while offset < 100000:
+                    if api_url and api_token:
+                        page, total = fetch_remote_measurement_page(
+                            api_url, api_token, limit=200, offset=offset,
+                            work_date=work_date, shift=shift, machine=machine,
+                        )
+                    else:
+                        page = fetch_supabase_table(
+                            supabase_url, supabase_key, limit=200, offset=offset,
+                            work_date=work_date, shift=shift, machine=machine,
+                        )
+                        total = None
+                    remote_rows.extend(page)
+                    offset += len(page)
+                    if len(page) < 200 or (total is not None and offset >= total):
+                        break
             except Exception:
                 remote_rows = []
             for row in remote_rows:
@@ -3215,6 +3233,18 @@ class StationUIService:
                 weight_raw=raw,
             )
 
+        api_url = self.manual_sync.worker.api_url if self.manual_sync else _ingest_api_url()
+        api_token = self.manual_sync.worker.device_token if self.manual_sync else _ingest_api_token()
+
+        def weigh_request(event_ids: list[str], receipt: str) -> dict[str, object]:
+            return post_remote_action(
+                api_url, api_token, timeout=120.0,
+                body={
+                    "action": "warehouse_import_status", "event_ids": event_ids,
+                    "check_only": not bool(receipt), "ma_phieu": receipt, "nguoi": nguoi,
+                },
+            )
+
         return confirm_nhap_kho(
             items=pool,
             kho=kho,
@@ -3228,6 +3258,7 @@ class StationUIService:
             weigh_supabase_url=_supabase_project_url(),
             weigh_supabase_key=_supabase_read_key(),
             update_local_row=update_local,
+            weigh_request=weigh_request if api_url and api_token else None,
         )
 
     def status(self) -> dict[str, object]:

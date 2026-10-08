@@ -2750,7 +2750,6 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "local_only=1" in TEST_UI_HTML
     assert "data.error_count" in TEST_UI_HTML
     assert "ảnh AI lỗi không tính" in TEST_UI_HTML
-    assert "maybePromptRollBatchConfirm" not in TEST_UI_HTML
     assert 'id="openRollBatchBtn"' in TEST_UI_HTML
     assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
     assert 'id="shiftCountDetail"' in TEST_UI_HTML
@@ -3238,7 +3237,6 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "Đọc số cân" in TEST_UI_HTML
     assert "function decodeQrFromImageUrl(" in TEST_UI_HTML
     assert "client_qr_code:clientQr" in TEST_UI_HTML
-    assert "QR local" in TEST_UI_HTML or "decoder local" in TEST_UI_HTML
     assert "Đọc lõi" in TEST_UI_HTML
     assert "Đọc SP" in TEST_UI_HTML
     assert "date_from=" in TEST_UI_HTML

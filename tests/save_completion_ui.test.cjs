@@ -159,7 +159,7 @@ test('discarding a failed image preserves the other image and selects the discar
  const {ctx,session}=setup();const round=session.rounds[0],requests=[];
  Object.assign(ctx,{persistEditor(){},syncSessionAliases(){},renderEvidence(){},showVideo(){},console,
   api:async(path)=>{requests.push(path)},selectCaptureSlot(){},confirm:()=>true});
- for(const name of ['roundHasData','slotHasData','discardSlot'])vm.runInContext(script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'(')),ctx);
+ for(const name of ['roundSlotName','weighSlotLabel','roundHasData','slotHasData','discardSlot'])vm.runInContext(script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'(')),ctx);
  session.setState=(state)=>{session.state=state};session.eventId='current';
  round.weight='';round.coreAnalysis=null;round.corePhotoCaptureId='failed-core';round.errorStatus='error';round.errorReason='Cân lõi lỗi';
  await ctx.discardSlot('core',0);

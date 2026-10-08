@@ -35,6 +35,30 @@ def test_runtime_config_loads_only_desktop_keys_and_preserves_process_env(
         _read_runtime_config(config)
 
 
+def test_runtime_config_accepts_supported_warehouse_aliases(tmp_path, monkeypatch) -> None:
+    from roll_qr_scale.warehouse import kho_configured, kho_db_label, kho_supabase_url
+
+    config = tmp_path / "config.env"
+    config.write_text(
+        'SUPABASE_KHO_DB_LABEL="kho"\n'
+        "SUPABASE_KHO_URL=https://warehouse.example\n"
+        "SUPABASE_KHO_KEY=warehouse-anon-key\n", encoding="utf-8",
+    )
+    for name in ("ROLL_SCALE_KHO_SUPABASE_URL", "SUPABASE_KHO_URL", "NEXT_PUBLIC_SUPABASE_KHO_URL",
+                 "ROLL_SCALE_KHO_SUPABASE_SERVICE_KEY", "SUPABASE_KHO_SERVICE_KEY", "SUPABASE_KHO_KEY",
+                 "ROLL_SCALE_KHO_DB_LABEL", "SUPABASE_KHO_DB_LABEL"):
+        monkeypatch.delenv(name, raising=False)
+    for name in _read_runtime_config(config):
+        monkeypatch.delenv(name, raising=False)
+    assert load_runtime_config(tmp_path) == config
+    assert kho_configured()
+    assert kho_supabase_url() == "https://warehouse.example"
+    assert kho_db_label() == "kho"
+    config.write_text("SUPABASE_KHO_UNKNOWN=value\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        _read_runtime_config(config)
+
+
 @pytest.mark.parametrize(
     "content",
     [

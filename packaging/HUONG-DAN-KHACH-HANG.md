@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc47` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc48` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc47.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc48.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -87,6 +87,32 @@ trùng danh tính và gửi dữ liệu sang sai Supabase.
 Mỗi camera chỉ được gán cho một trạm. Trên giao diện, chọn đúng camera ở từng
 thẻ trạm rồi bấm **Mở camera đã gán**. Trình duyệt lưu ánh xạ này trên chính
 máy khách.
+
+### Đẩy cân AI và kho chờ
+
+Giữ nguyên `ROLL_SCALE_API_URL` và `ROLL_SCALE_DEVICE_TOKEN` của Supabase cân
+AI. Thêm ba dòng sau vào `config.env`, thay URL và key kho bằng giá trị được cấp:
+
+```dotenv
+SUPABASE_KHO_DB_LABEL="kho"
+SUPABASE_KHO_URL=https://YOUR_KHO_PROJECT_REF.supabase.co
+SUPABASE_KHO_KEY=replace-with-kho-anon-or-publishable-key
+```
+
+Đóng ứng dụng rồi mở lại. Tại **Đẩy kho**, chọn kho thành phẩm, ngày, ca, máy,
+mã SP và số cuộn; kiểm tra QR rồi bấm **Nhập kho**. Phần mềm xác nhận các QR
+đã có trên Supabase cân AI trước khi tạo phiếu kho. `phieu_nhap` có trạng thái
+`chua_chot`, các dòng `nhap_kho` là **Đang chờ**. Trạng thái **Đã nhập kho**
+bên cân AI nghĩa là đã chuyển sang kho chờ; thao tác này chưa chốt phiếu kho.
+
+Nếu kho đã nhận nhưng cập nhật cân AI lỗi, giữ bộ lọc và bấm **Nhập kho** lại.
+Phần mềm dùng lại phiếu gắn với đúng lần cân đó, không thêm QR trùng.
+Nếu key kho bị chặn quyền ghi, đơn vị triển khai cần kiểm tra RLS/quyền của
+key trên `phieu_nhap` và `nhap_kho`.
+
+Supabase cân AI cần Edge Function `ingest-measurement` bản rc48 trở lên để
+cập nhật trạng thái bằng token thiết bị; đơn vị triển khai cập nhật API một
+lần trước khi dùng bộ cài mới. Không cần thêm service-role key cân AI vào máy khách.
 
 Với `local`/`hybrid`, mặc định mỗi lần chụp dùng 5 frame và PaddleOCR chọn 3
 frame đầu–giữa–cuối. Với `gemini`, mỗi lần chụp gửi một ảnh bằng chứng đã nén;

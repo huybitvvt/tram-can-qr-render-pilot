@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
+import { warehouseImportStatus } from "./warehouse_import.ts";
 
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const UNITS = new Set(["kg", "g", "lb"]);
@@ -1009,6 +1010,18 @@ Deno.serve(async (request: Request) => {
     body = await request.json();
   } catch {
     return json(400, { ok: false, error: "invalid_json" });
+  }
+
+  if (body.action === "warehouse_import_status") {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceKey = getSupabaseAdminKey();
+    if (!supabaseUrl || !serviceKey) {
+      return json(500, { ok: false, error: "supabase_not_configured" });
+    }
+    const supabase = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    return await warehouseImportStatus(body, supabase);
   }
 
   if (body.action === "backup_maintenance") {

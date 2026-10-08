@@ -17,3 +17,44 @@ assert.match(html, /Đã nhập kho/);
 assert.doesNotMatch(html, /bindActionButton\('pushSupabaseBtn',\(\)=>startManualSync\(true\)\)/);
 
 console.log('warehouse_ui.test.cjs: ok');
+
+const vm = require('node:vm');
+const { test } = require('node:test');
+
+function confirmContext(api) {
+  const fields = {};
+  for (const [id, value] of Object.entries({ nhapKhoDate: '2026-10-08', nhapKhoCa: 'HC1',
+    nhapKhoMay: 'Máy 1', nhapKhoMaSp: 'SP01', nhapKhoWarehouse: 'Kho thành phẩm', nhapKhoSoCuon: '1' })) {
+    fields[id] = { value };
+  }
+  for (const id of ['confirmNhapKhoBtn', 'checkNhapKhoBtn', 'closeNhapKhoBtn', 'nhapKhoStatus', 'productionRecordsStatus']) {
+    fields[id] = { disabled: false };
+  }
+  const context = vm.createContext({ nhapKhoBusy: false, $: id => fields[id], api,
+    status: (field, message, kind) => Object.assign(field, { message, kind }),
+    setManualSyncRunning: () => {}, closeNhapKhoModal: () => {}, loadRecords: async () => {},
+    refreshNhapKhoCandidates: async () => { fields.nhapKhoStatus.message = 'Sẵn sàng'; },
+  });
+  vm.runInContext(html.match(/^async function confirmNhapKho\(\).*$/m)[0], context);
+  return { context, fields };
+}
+
+test('keeps warehouse failure visible after refreshing candidates', async () => {
+  const { context, fields } = confirmContext(async () => { throw new Error('Bấm Nhập kho lại để hoàn tất'); });
+  await context.confirmNhapKho();
+  assert.strictEqual(fields.nhapKhoStatus.message, 'Bấm Nhập kho lại để hoàn tất');
+  assert.strictEqual(fields.nhapKhoStatus.kind, 'bad');
+  assert.strictEqual(fields.closeNhapKhoBtn.disabled, false);
+  assert.strictEqual(context.nhapKhoBusy, false);
+});
+
+test('reports recovered receipts as warehouse waiting, not a newly created receipt', async () => {
+  const { context, fields } = confirmContext(async () => ({
+    saved_count: 1, recovered_count: 1, ma_phieu: 'PN1', ma_phieu_list: ['PN1', 'PN2'],
+  }));
+  await context.confirmNhapKho();
+  assert.match(fields.productionRecordsStatus.message, /kho chờ/);
+  assert.match(fields.productionRecordsStatus.message, /PN1, PN2/);
+  assert.match(fields.productionRecordsStatus.message, /dùng lại 1 QR/);
+  assert.strictEqual(fields.productionRecordsStatus.kind, 'ok');
+});

@@ -69,3 +69,16 @@ def test_local_nhap_kho_tags_round_trip() -> None:
     assert "NHAP_KHO_STATUS=Đã nhập kho" in raw
     assert "NHAP_KHO_MA_PHIEU=PN-1" in raw
     assert read_nhap_kho_status({"weight_raw": raw}) == NHAP_KHO_DA
+
+
+def test_warehouse_names_fall_back_to_receipts_if_catalog_is_unavailable(monkeypatch):
+    from roll_qr_scale import warehouse
+
+    def request(_method, _url, _key, table, **_kwargs):
+        if table == "quan_ly_kho":
+            raise RuntimeError("Could not find the table 'public.quan_ly_kho' in the schema cache")
+        assert table == "phieu_nhap"
+        return [{"kho": "Kho thành phẩm 1"}, {"kho": "Kho thành phẩm 1"}, {"kho": "Kho nguyên liệu"}]
+
+    monkeypatch.setattr(warehouse, "_postgrest_request", request)
+    assert warehouse.fetch_finished_goods_warehouses("url", "key") == ["Kho thành phẩm 1"]

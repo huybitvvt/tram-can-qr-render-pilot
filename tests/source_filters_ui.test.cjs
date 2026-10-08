@@ -37,7 +37,7 @@ function setup(){
   for(const name of [
     'function sanitizeMachine(', 'function pickListed(', 'function shiftOptionLabel(',
     'function setSourceShiftOptions(', 'function setSourceMachineOptions(',
-    'function readSourceFields(', 'function selectSourceOrder(', 'function fillSourceFields(',
+    'function readSourceFields(', 'function selectSourceOrder(', 'function fillRecordsFilterFields(', 'function fillSourceFields(',
     'function saveSourceContext(', 'function stationSourceKey(', 'function lockSourceMachine(',
   ])vm.runInContext(line(name),ctx);
   return {ctx,nodes,stations,storage,select:index=>{selected=index}};

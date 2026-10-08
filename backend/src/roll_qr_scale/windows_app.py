@@ -18,6 +18,13 @@ APP_NAME = "TramCanQR"
 CONFIG_NAME = "config.env"
 PADDLE_MODEL_NAME = "PP-OCRv6_medium_rec"
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_KHO_ENV_KEYS = {
+    "SUPABASE_KHO_URL",
+    "SUPABASE_KHO_KEY",
+    "SUPABASE_KHO_PUBLISHABLE_KEY",
+    "SUPABASE_KHO_SERVICE_KEY",
+    "SUPABASE_KHO_DB_LABEL",
+}
 
 
 def bundle_root() -> Path:
@@ -66,9 +73,10 @@ def _read_runtime_config(path: Path) -> dict[str, str]:
         key, value = (part.strip() for part in line.split("=", 1))
         if not _ENV_KEY.fullmatch(key):
             raise ValueError(f"{path.name}:{line_number}: tên cấu hình không hợp lệ")
-        if not key.startswith("ROLL_SCALE_"):
+        if not key.startswith("ROLL_SCALE_") and key not in _KHO_ENV_KEYS:
             raise ValueError(
-                f"{path.name}:{line_number}: chỉ chấp nhận cấu hình ROLL_SCALE_* trên máy trạm"
+                f"{path.name}:{line_number}: chỉ chấp nhận cấu hình ROLL_SCALE_* "
+                "và các biến SUPABASE_KHO_* được hỗ trợ trên máy trạm"
             )
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
