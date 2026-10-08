@@ -2407,6 +2407,10 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert "rollQrScale.stationNotes.v1" in TEST_UI_HTML
     assert 'id="stationNoteBoldBtn"' in TEST_UI_HTML
     assert 'id="stationNoteSize"' in TEST_UI_HTML
+    assert ">Đẩy kho<" in TEST_UI_HTML
+    assert 'id="nhapKhoModal"' in TEST_UI_HTML
+    assert "openNhapKhoModal" in TEST_UI_HTML
+    assert "/api/warehouse/nhap-kho/confirm" in TEST_UI_HTML
 
 
 def test_ui_records_table_shows_bi_and_nvl_weights() -> None:

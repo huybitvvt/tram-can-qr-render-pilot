@@ -70,6 +70,21 @@ from .quality import FrameQuality, assess_frame_quality
 from .qr_reader import QRReader
 from .scale import WeightReading
 from .weight_limits import validate_production_weights
+from .warehouse import (
+    check_nhap_kho_codes,
+    confirm_nhap_kho,
+    default_finished_goods_warehouse_name,
+    fetch_finished_goods_warehouses,
+    filter_waiting_candidates,
+    is_waiting_nhap_kho,
+    kho_configured,
+    kho_db_label,
+    kho_supabase_key,
+    kho_supabase_url,
+    normalize_product_code_key,
+    product_code_from_qr,
+    upsert_local_nhap_kho_tags,
+)
 from .station_session import (
     AnalysisBindingMismatch,
     AnalysisBindingNotFound,
@@ -2212,6 +2227,43 @@ class ManualSyncController:
                 self._job["current"] = ""
                 self._job["queue_length"] = len(self._queue)
 
+    def run_now(self, payload: dict[str, object]) -> dict[str, object]:
+        """Run one filtered sync pass synchronously (used by Đẩy kho confirm)."""
+
+        filters = _manual_sync_filters(payload)
+        with self._lock:
+            if self._job.get("state") == "running":
+                raise ValueError("Đang có lượt đẩy Supabase khác; hãy đợi xong rồi nhập kho lại")
+            plan, counts = self._plan(filters)
+            self._job = self._job_snapshot(filters=filters, counts=counts, total=len(plan))
+            self._job["message"] = "Đẩy kho · đồng bộ cân AI trước khi ghi nhap_kho"
+        try:
+            if plan:
+                self._run_plan(plan)
+                retry_plan, _retry_counts = self._plan(
+                    filters, include_local=False, waiting_only=True
+                )
+                if retry_plan:
+                    with self._lock:
+                        self._job["total"] = int(self._job["total"]) + len(retry_plan)
+                        self._job["pass"] = int(self._job.get("pass") or 1) + 1
+                    self._run_plan(retry_plan)
+            with self._lock:
+                self._job["state"] = "complete"
+                self._job["current"] = ""
+                self._job["queue_length"] = len(self._queue)
+                snapshot = dict(self._job)
+            snapshot["empty"] = not bool(plan)
+            return snapshot
+        except Exception as exc:
+            with self._lock:
+                self._job["state"] = "error"
+                self._job["last_error"] = str(exc)[:500]
+                self._job["current"] = ""
+                self._job["queue_length"] = len(self._queue)
+                snapshot = dict(self._job)
+            raise RuntimeError(str(exc)) from exc
+
 
 class StationUIService:
     def __init__(
@@ -2946,6 +2998,237 @@ class StationUIService:
             raise OSError("Không chuẩn hóa được ảnh zoom cân")
         data_url = "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii")
         return canonical, data_url
+
+    def warehouse_warehouses(self) -> dict[str, object]:
+        names: list[str] = []
+        source = "default"
+        if kho_configured():
+            try:
+                names = fetch_finished_goods_warehouses(
+                    kho_supabase_url(), kho_supabase_key()
+                )
+                source = kho_db_label()
+            except Exception:
+                names = []
+        if not names:
+            default_name = default_finished_goods_warehouse_name()
+            names = [default_name] if default_name else []
+            source = "default"
+        return {
+            "ok": True,
+            "warehouses": names,
+            "selected": names[0] if names else "",
+            "configured": kho_configured(),
+            "source": source,
+            "label": kho_db_label(),
+        }
+
+    def warehouse_measurement_pool(
+        self,
+        *,
+        work_date: str,
+        shift: str = "",
+        machine: str = "",
+    ) -> list[dict[str, object]]:
+        local_items = _local_measurement_items(
+            self.store,
+            100000,
+            work_date=work_date,
+            shift=shift,
+            machine=machine,
+        )
+        by_event = {
+            str(item.get("event_id") or ""): item
+            for item in local_items
+            if str(item.get("event_id") or "").strip()
+        }
+        supabase_url = _supabase_project_url()
+        supabase_key = _supabase_read_key()
+        if supabase_url and supabase_key:
+            try:
+                remote_rows = fetch_supabase_table(
+                    supabase_url,
+                    supabase_key,
+                    limit=200,
+                    offset=0,
+                    work_date=work_date,
+                    shift=shift,
+                    machine=machine,
+                )
+            except Exception:
+                remote_rows = []
+            for row in remote_rows:
+                event_id = str(row.get("event_id") or "").strip()
+                if not event_id:
+                    continue
+                metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+                payload = {
+                    "event_id": event_id,
+                    "id": row.get("id"),
+                    "qr_code": str(row.get("qr_code") or "").strip(),
+                    "unit": str(row.get("unit") or "").strip(),
+                    "captured_at": str(row.get("captured_at") or "").strip(),
+                    "work_date": str(metadata.get("work_date") or work_date).strip(),
+                    "shift": str(metadata.get("shift") or "").strip(),
+                    "machine": str(metadata.get("machine") or "").strip(),
+                    "production_order": str(metadata.get("production_order") or "").strip(),
+                    "metadata": metadata,
+                    "weight_raw": str(metadata.get("weight_raw") or ""),
+                }
+                existing = by_event.get(event_id)
+                if existing is None:
+                    by_event[event_id] = payload
+                else:
+                    existing_meta = existing.get("metadata")
+                    if not isinstance(existing_meta, dict):
+                        existing["metadata"] = metadata
+        return list(by_event.values())
+
+    def warehouse_candidates(self, payload: dict[str, object]) -> dict[str, object]:
+        work_date = str(payload.get("ngay") or payload.get("work_date") or "").strip()
+        shift = str(payload.get("ca") or payload.get("shift") or "").strip()
+        machine = str(payload.get("may") or payload.get("machine") or "").strip()
+        ma_sp = str(payload.get("ma_sp") or "").strip()
+        try:
+            so_cuon = max(0, int(payload.get("so_cuon") or 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Số cuộn không hợp lệ") from exc
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
+            raise ValueError("Ngày phiếu không hợp lệ")
+        pool = self.warehouse_measurement_pool(
+            work_date=work_date, shift=shift, machine=machine
+        )
+        waiting = filter_waiting_candidates(
+            pool, work_date=work_date, shift=shift, machine=machine, ma_sp=ma_sp
+        )
+        ma_sp_options: list[str] = []
+        seen_codes: set[str] = set()
+        for item in pool:
+            if not is_waiting_nhap_kho(item):
+                continue
+            if str(item.get("work_date") or "") != work_date:
+                continue
+            if shift and str(item.get("shift") or "").strip() != shift:
+                continue
+            if machine and str(item.get("machine") or "").strip() != machine:
+                continue
+            code = product_code_from_qr(str(item.get("qr_code") or ""))
+            key = normalize_product_code_key(code)
+            if not key or key in seen_codes:
+                continue
+            seen_codes.add(key)
+            ma_sp_options.append(code)
+        ma_sp_options.sort(key=lambda value: value.lower())
+        preview = waiting[:so_cuon] if so_cuon > 0 else []
+        return {
+            "ok": True,
+            "waiting_count": len(waiting),
+            "preview": [
+                {
+                    "event_id": item.get("event_id"),
+                    "qr_code": item.get("qr_code"),
+                    "ma_sp": product_code_from_qr(str(item.get("qr_code") or "")),
+                    "captured_at": item.get("captured_at"),
+                }
+                for item in preview
+            ],
+            "ma_sp_options": ma_sp_options,
+            "configured": kho_configured(),
+        }
+
+    def warehouse_check_codes(self, payload: dict[str, object]) -> dict[str, object]:
+        if not kho_configured():
+            raise RuntimeError(f"Chưa cấu hình DB kho ({kho_db_label()})")
+        codes_raw = payload.get("ma_sp_quet")
+        codes = (
+            [str(code or "").strip() for code in codes_raw]
+            if isinstance(codes_raw, list)
+            else []
+        )
+        codes = [code for code in codes if code]
+        if not codes:
+            raise ValueError("Chưa có mã QR để kiểm tra")
+        matches = check_nhap_kho_codes(kho_supabase_url(), kho_supabase_key(), codes)
+        return {
+            "ok": True,
+            "matches": matches,
+            "duplicateCodes": sorted(
+                {
+                    str(row.get("ma_sp_quet") or "").strip()
+                    for row in matches
+                    if str(row.get("ma_sp_quet") or "").strip()
+                }
+            ),
+            "source": kho_db_label(),
+        }
+
+    def warehouse_confirm(self, payload: dict[str, object]) -> dict[str, object]:
+        work_date = str(payload.get("ngay") or payload.get("work_date") or "").strip()
+        shift = str(payload.get("ca") or payload.get("shift") or "").strip()
+        machine = str(payload.get("may") or payload.get("machine") or "").strip()
+        ma_sp = str(payload.get("ma_sp") or "").strip()
+        kho = str(payload.get("kho") or "").strip()
+        nguoi = str(payload.get("nguoi") or payload.get("nhan_su") or "").strip() or "Không rõ"
+        try:
+            so_cuon = int(payload.get("so_cuon") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Số cuộn không hợp lệ") from exc
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
+            raise ValueError("Ngày phiếu không hợp lệ")
+
+        pool = self.warehouse_measurement_pool(
+            work_date=work_date, shift=shift, machine=machine
+        )
+
+        def run_sync() -> dict[str, object]:
+            if self.manual_sync is None:
+                return {"skipped": True, "reason": "Chưa cấu hình đồng bộ cân AI"}
+            return self.manual_sync.run_now(
+                {
+                    "date_from": work_date,
+                    "date_to": work_date,
+                    "shift": shift,
+                    "machine": machine,
+                    "production_order": "",
+                    "qr_code": "",
+                    "scope": "production",
+                    "skip_cloudinary": True,
+                }
+            )
+
+        def update_local(event_id: str, status: str, luc: str, boi: str, ma_phieu: str) -> None:
+            item = self.store.get(event_id)
+            if item is None:
+                return
+            raw = upsert_local_nhap_kho_tags(
+                item.weight_raw or "",
+                status=status,
+                luc=luc,
+                boi=boi,
+                ma_phieu=ma_phieu,
+            )
+            self.store.update_measurement_fields(
+                event_id,
+                qr_code=item.qr_code,
+                weight=item.weight,
+                product_weight=item.product_weight,
+                weight_raw=raw,
+            )
+
+        return confirm_nhap_kho(
+            items=pool,
+            kho=kho,
+            ca=shift,
+            may=machine,
+            ngay=work_date,
+            ma_sp=ma_sp,
+            so_cuon=so_cuon,
+            nguoi=nguoi,
+            run_manual_sync=run_sync,
+            weigh_supabase_url=_supabase_project_url(),
+            weigh_supabase_key=_supabase_read_key(),
+            update_local_row=update_local,
+        )
 
     def status(self) -> dict[str, object]:
         station_states = {item["station_id"]: item for item in self.sessions.statuses()}
@@ -5528,6 +5811,19 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 else:
                     self.send_json(200, {"ok": True, **service.manual_sync.status()})
                 return
+            if parsed.path == "/api/warehouse/kho-thanh-pham":
+                self.send_json(200, service.warehouse_warehouses())
+                return
+            if parsed.path == "/api/warehouse/nhap-kho/candidates":
+                query = {
+                    key: values[0] if values else ""
+                    for key, values in urllib.parse.parse_qs(parsed.query).items()
+                }
+                try:
+                    self.send_json(200, service.warehouse_candidates(query))
+                except ValueError as exc:
+                    self.send_json(400, {"ok": False, "message": str(exc)})
+                return
             if parsed.path == "/api/antigravity/usage":
                 if service.antigravity_reader is None:
                     self.send_json(
@@ -6150,6 +6446,28 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         else service.manual_sync.start(payload)
                     )
                     self.send_json(200, result)
+                    return
+                if self.path == "/api/warehouse/kiem-tra-ma":
+                    try:
+                        self.send_json(200, service.warehouse_check_codes(payload))
+                    except ValueError as exc:
+                        self.send_json(400, {"ok": False, "message": str(exc)})
+                    except RuntimeError as exc:
+                        self.send_json(503, {"ok": False, "message": str(exc)})
+                    return
+                if self.path == "/api/warehouse/nhap-kho/candidates":
+                    try:
+                        self.send_json(200, service.warehouse_candidates(payload))
+                    except ValueError as exc:
+                        self.send_json(400, {"ok": False, "message": str(exc)})
+                    return
+                if self.path == "/api/warehouse/nhap-kho/confirm":
+                    try:
+                        self.send_json(200, service.warehouse_confirm(payload))
+                    except ValueError as exc:
+                        self.send_json(400, {"ok": False, "message": str(exc)})
+                    except RuntimeError as exc:
+                        self.send_json(503, {"ok": False, "message": str(exc)})
                     return
                 if self.path == "/api/weighing-batches/confirm":
                     work_date = str(payload.get("work_date") or "").strip()
