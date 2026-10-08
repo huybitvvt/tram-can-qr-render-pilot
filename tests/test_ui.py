@@ -2402,6 +2402,11 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert 'class="capture-right"' in TEST_UI_HTML
     assert '<aside class="card lookup-card">' not in TEST_UI_HTML
     assert "main{width:100%" in TEST_UI_HTML
+    assert 'id="stationNotes"' in TEST_UI_HTML
+    assert 'id="stationNoteText"' in TEST_UI_HTML
+    assert "rollQrScale.stationNotes.v1" in TEST_UI_HTML
+    assert 'id="stationNoteBoldBtn"' in TEST_UI_HTML
+    assert 'id="stationNoteSize"' in TEST_UI_HTML
 
 
 def test_ui_records_table_shows_bi_and_nvl_weights() -> None:

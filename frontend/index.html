@@ -440,6 +440,91 @@ button.save:hover:not(:disabled){background:var(--primary-dark);border-color:var
   max-width:none;
   width:100%;
 }
+.station-notes{
+  flex:1 1 auto;
+  min-height:160px;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:4px;
+  padding:12px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#f8fafc;
+}
+.station-notes-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  flex-wrap:wrap;
+}
+.station-notes-head > strong{
+  font-size:13px;
+  font-weight:800;
+  color:#1f2937;
+}
+.station-notes-tools{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.station-notes-tools .station-note-bold{
+  min-width:34px;
+  min-height:32px;
+  padding:4px 10px;
+  font-size:14px;
+  font-weight:800;
+  font-family:Georgia, "Times New Roman", serif;
+  border-radius:8px;
+}
+.station-notes-tools .station-note-bold[aria-pressed="true"]{
+  background:#1f2937;
+  border-color:#1f2937;
+  color:#fff;
+}
+.station-note-size-label{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  margin:0;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:700;
+}
+.station-note-size-label select{
+  min-height:32px;
+  padding:4px 8px;
+  font-size:12px;
+  border-radius:8px;
+}
+.station-notes-editor{
+  flex:1 1 auto;
+  width:100%;
+  min-height:120px;
+  resize:vertical;
+  padding:10px 12px;
+  border:1px solid #d1d5db;
+  border-radius:10px;
+  background:#fff;
+  color:#111827;
+  line-height:1.45;
+  font-size:16px;
+  font-weight:400;
+  font-family:inherit;
+}
+.station-notes-editor.is-bold{font-weight:700}
+.station-notes-editor:focus{
+  outline:none;
+  border-color:#2563eb;
+  box-shadow:0 0 0 3px #2563eb22;
+}
+.station-notes-foot{
+  min-height:16px;
+  font-size:11px;
+  color:var(--muted);
+  font-weight:600;
+}
 .capture-right{
   min-width:0;
 }
@@ -540,6 +625,25 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
    <label class="auto-option" style="display:none"><input id="autoAdvance" type="checkbox" disabled>Tự chọn trạm kế tiếp</label>
    <div id="gatewayIdentity" class="identity" hidden style="margin-top:6px;color:var(--muted);font-size:12px">gateway: --</div>
    <div class="capture-path" hidden><div class="field"><label for="captureSavePath">Đường dẫn lưu ảnh</label><input id="captureSavePath" readonly value="data\\captures"></div><button type="button" id="openCapturesBtn" title="Thư mục ảnh local">Mở</button></div>
+   <section class="station-notes" id="stationNotes" aria-label="Ghi chú trạm">
+    <div class="station-notes-head">
+     <strong>Ghi chú</strong>
+     <div class="station-notes-tools">
+      <button type="button" id="stationNoteBoldBtn" class="station-note-bold" aria-pressed="false" title="Chữ đậm">B</button>
+      <label class="station-note-size-label" for="stationNoteSize">Cỡ
+       <select id="stationNoteSize" aria-label="Cỡ chữ ghi chú">
+        <option value="14">14</option>
+        <option value="16" selected>16</option>
+        <option value="18">18</option>
+        <option value="20">20</option>
+        <option value="24">24</option>
+       </select>
+      </label>
+     </div>
+    </div>
+    <textarea id="stationNoteText" class="station-notes-editor" rows="6" maxlength="4000" placeholder="Nhập ghi chú… (tự lưu, F5 không mất)" spellcheck="true"></textarea>
+    <div class="station-notes-foot" id="stationNoteSaved" aria-live="polite"></div>
+   </section>
   </div>
   <div class="capture-right">
   
@@ -732,7 +836,9 @@ const SOURCE_STATION_CONTEXT_KEY='rollQrScale.sourceStationContexts.v1';
  const STATION_ASSIGNMENT_KEY='rollQrScale.stationAssignment.v1';
 const ROLL_BATCH_CONFIRM_PREFIX='rollQrScale.rollBatchConfirm.v1:';
 const ROLL_BATCH_SIZE_PREFIX='rollQrScale.rollBatchSize.v1:';
+const STATION_NOTES_KEY='rollQrScale.stationNotes.v1';
 const LIST_PAGE_SIZE=50;
+const STATION_NOTE_SIZES=['14','16','18','20','24'];
 const SOURCE_SHIFT_LABELS={HC1:'HC1 · 06:00–14:00',HC2:'HC2 · 14:00–22:00',HC3:'HC3 · 22:00–06:00','12C1':'12C1 · 06:00–18:00','12C2':'12C2 · 18:00–06:00','Ca chuẩn Đà Nẵng':'Ca chuẩn Đà Nẵng'};
 const FALLBACK_SHIFTS=['HC1','HC2','HC3','12C1','12C2','Ca chuẩn Đà Nẵng'];
 const FALLBACK_MACHINES=['MÁY CÁCH NHIỆT 11','MÁY BAO BÌ 11','MÁY BAO BÌ 16','MÁY BAO BÌ 5','MÁY BAO BÌ 4'];
@@ -1624,7 +1730,24 @@ function isTextEditingTarget(target){if(!target)return false;if(target.isContent
 function isQrField(target){return Boolean(target&&(target.id==='inventoryProductCode'||target.id==='captureQr'||target.id==='listQrCode'||(target.classList&&target.classList.contains('round-qr'))))}
 let qrScanBuffer='',qrScanTimer=0,qrScanLast=0;
 function flushQrScanBuffer(force=false){const code=qrScanBuffer;qrScanBuffer='';clearTimeout(qrScanTimer);qrScanTimer=0;if(code.length>=3||(force&&code.length>=2)){applyScannedQr(code);return true}if(code.length===1&&['1','2','3'].includes(code)){const index=Number(code)-1;if(index<stations.length)selectStation(index);return true}return false}
-document.addEventListener('keydown',event=>{if(event.target.closest&&event.target.closest('.round-status-toggle'))return;if(event.repeat||event.ctrlKey||event.altKey||event.metaKey)return;const editing=isTextEditingTarget(event.target),typing=editing||event.target.tagName==='SELECT',captureEditor=isQrField(event.target)||event.target===$('biWeight'),now=performance.now(),printable=event.key.length===1&&event.key!==' ';if(!captureEditor&&!typing&&printable){event.preventDefault();event.stopPropagation();if(now-qrScanLast>160)qrScanBuffer='';qrScanBuffer+=event.key;qrScanLast=now;clearTimeout(qrScanTimer);qrScanTimer=setTimeout(()=>flushQrScanBuffer(false),140);return}if(event.key==='Enter'&&qrScanBuffer.length>=2){event.preventDefault();event.stopPropagation();flushQrScanBuffer(true);return}if(['1','2','3'].includes(event.key)&&!typing&&!qrScanBuffer){const index=Number(event.key)-1;if(index<stations.length){event.preventDefault();selectStation(index)}return}if(workflowMode==='list'){if(event.key==='Enter'&&(event.target===$('listQrCode')||event.target===$('listDateFrom')||event.target===$('listDateTo')||event.target===$('listShift'))){event.preventDefault();loadListRecords()}return}if(workflowMode==='inventory'){if(event.key==='Backspace'&&(!editing||!String(event.target.value||'').length)&&inventoryHasData(inventoryState(current()))){event.preventDefault();event.stopPropagation();$('inventoryDiscardBtn').click();return}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();$('inventoryCaptureBtn').click();return}if(event.key==='Enter'&&captureEditor){readInventoryFields(current());renderControls();if($('inventorySaveBtn').disabled){event.preventDefault();return}}if(event.key==='Enter'&&!$('inventorySaveBtn').disabled){event.preventDefault();$('inventorySaveBtn').click()}return}if(event.key==='Backspace'&&(!editing||!String(event.target.value||'').length)){const session=current(),slot=session&&captureSlot(session);if(session&&slot&&slotHasData((session.rounds||[])[slot.round],slot.kind)){event.preventDefault();event.stopPropagation();$('discardBtn').click();return}}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();captureNextWeight();return}if(event.key==='Enter'){if(event.target.closest&&event.target.closest('button'))return;event.preventDefault();saveAllRounds()}},true);
+document.addEventListener('keydown',event=>{if(event.target.closest&&event.target.closest('.round-status-toggle'))return;if(event.repeat||event.ctrlKey||event.altKey||event.metaKey)return;const editing=isTextEditingTarget(event.target),typing=editing||event.target.tagName==='SELECT',captureEditor=isQrField(event.target)||event.target===$('biWeight'),now=performance.now(),printable=event.key.length===1&&event.key!==' ';if(!captureEditor&&!typing&&printable){event.preventDefault();event.stopPropagation();if(now-qrScanLast>160)qrScanBuffer='';qrScanBuffer+=event.key;qrScanLast=now;clearTimeout(qrScanTimer);qrScanTimer=setTimeout(()=>flushQrScanBuffer(false),140);return}if(event.key==='Enter'&&qrScanBuffer.length>=2){event.preventDefault();event.stopPropagation();flushQrScanBuffer(true);return}if(['1','2','3'].includes(event.key)&&!typing&&!qrScanBuffer){const index=Number(event.key)-1;if(index<stations.length){event.preventDefault();selectStation(index)}return}if(workflowMode==='list'){if(event.key==='Enter'&&(event.target===$('listQrCode')||event.target===$('listDateFrom')||event.target===$('listDateTo')||event.target===$('listShift'))){event.preventDefault();loadListRecords()}return}if(workflowMode==='inventory'){if(event.key==='Backspace'&&(!editing||!String(event.target.value||'').length)&&inventoryHasData(inventoryState(current()))){event.preventDefault();event.stopPropagation();$('inventoryDiscardBtn').click();return}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();$('inventoryCaptureBtn').click();return}if(event.key==='Enter'&&captureEditor){readInventoryFields(current());renderControls();if($('inventorySaveBtn').disabled){event.preventDefault();return}}if(event.key==='Enter'&&!$('inventorySaveBtn').disabled){event.preventDefault();$('inventorySaveBtn').click()}return}if(event.key==='Backspace'&&event.target!==$('stationNoteText')&&(!editing||!String(event.target.value||'').length)){const session=current(),slot=session&&captureSlot(session);if(session&&slot&&slotHasData((session.rounds||[])[slot.round],slot.kind)){event.preventDefault();event.stopPropagation();$('discardBtn').click();return}}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();captureNextWeight();return}if(event.key==='Enter'){if(event.target.closest&&event.target.closest('button'))return;event.preventDefault();saveAllRounds()}},true);
 navigator.mediaDevices&&navigator.mediaDevices.addEventListener&&navigator.mediaDevices.addEventListener('devicechange',async()=>{await refreshCameraDevices(false);stations.forEach(session=>{if(session.deviceId&&!session.stream)scheduleReconnect(session,session.deviceId);if(panelMode&&session.panelDeviceId&&!session.panelStream)schedulePanelReconnect(session,session.panelDeviceId)})});window.addEventListener('resize',()=>stations.forEach(updateBoxes));window.addEventListener('beforeunload',()=>stations.forEach(session=>{session.stop();session.stopPanel()}));applyWorkflowLayout(workflowMode);fillSourceFields(sourceContext);if(workflowMode==='production')loadProductionOrders(sourceContext.date,sourceContext.order).then(()=>loadRecords());else if(workflowMode==='inventory')loadInventoryRecords();else loadListRecords();loadStatus().then(()=>{$('gatewayIdentity').textContent+=' · bản '+(appStatus.release||'local')}).finally(()=>{$('saveBtn').childNodes[0].nodeValue='Lưu ';if(wantsInventoryMode())status(captureStatus,'CÂN KIỂM KHO · bấm AI đọc ảnh; hệ thống tự mở camera khi cần.','ok')});
 setTimeout(()=>{if(appStatus?.sync_enabled)pollManualSync()},1000);
+(function setupStationNotes(){
+ const editor=$('stationNoteText'),boldBtn=$('stationNoteBoldBtn'),sizeSelect=$('stationNoteSize'),savedEl=$('stationNoteSaved');
+ if(!editor||!boldBtn||!sizeSelect)return;
+ let saveTimer=0,savedTimer=0;
+ function normalizeSize(value){const size=String(value||'16');return STATION_NOTE_SIZES.includes(size)?size:'16'}
+ function readNotes(){try{const raw=JSON.parse(localStorage.getItem(STATION_NOTES_KEY)||'null');if(raw&&typeof raw==='object')return{text:String(raw.text||'').slice(0,4000),bold:Boolean(raw.bold),fontSize:normalizeSize(raw.fontSize)}}catch{}return{text:'',bold:false,fontSize:'16'}}
+ function applyNotes(state){editor.value=state.text;editor.classList.toggle('is-bold',state.bold);editor.style.fontSize=state.fontSize+'px';boldBtn.setAttribute('aria-pressed',state.bold?'true':'false');sizeSelect.value=state.fontSize}
+ function currentNotes(){return{text:String(editor.value||'').slice(0,4000),bold:boldBtn.getAttribute('aria-pressed')==='true',fontSize:normalizeSize(sizeSelect.value)}}
+ function markSaved(){if(!savedEl)return;savedEl.textContent='Đã lưu trên máy này';clearTimeout(savedTimer);savedTimer=setTimeout(()=>{savedEl.textContent=''},1800)}
+ function saveNotes(immediate){const write=()=>{try{localStorage.setItem(STATION_NOTES_KEY,JSON.stringify(currentNotes()));markSaved()}catch{}};clearTimeout(saveTimer);if(immediate){write();return}saveTimer=setTimeout(write,220)}
+ applyNotes(readNotes());
+ editor.addEventListener('input',()=>saveNotes(false));
+ editor.addEventListener('change',()=>saveNotes(true));
+ boldBtn.addEventListener('click',()=>{const next=boldBtn.getAttribute('aria-pressed')!=='true';boldBtn.setAttribute('aria-pressed',next?'true':'false');editor.classList.toggle('is-bold',next);saveNotes(true);editor.focus()});
+ sizeSelect.addEventListener('change',()=>{editor.style.fontSize=normalizeSize(sizeSelect.value)+'px';saveNotes(true);editor.focus()});
+ window.addEventListener('beforeunload',()=>saveNotes(true));
+})();
 </script></body></html>
