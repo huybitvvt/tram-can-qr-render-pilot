@@ -440,91 +440,6 @@ button.save:hover:not(:disabled){background:var(--primary-dark);border-color:var
   max-width:none;
   width:100%;
 }
-.station-notes{
-  flex:1 1 auto;
-  min-height:160px;
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-  margin-top:4px;
-  padding:12px;
-  border:1px solid var(--line);
-  border-radius:12px;
-  background:#f8fafc;
-}
-.station-notes-head{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:10px;
-  flex-wrap:wrap;
-}
-.station-notes-head > strong{
-  font-size:13px;
-  font-weight:800;
-  color:#1f2937;
-}
-.station-notes-tools{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-.station-notes-tools .station-note-bold{
-  min-width:34px;
-  min-height:32px;
-  padding:4px 10px;
-  font-size:14px;
-  font-weight:800;
-  font-family:Georgia, "Times New Roman", serif;
-  border-radius:8px;
-}
-.station-notes-tools .station-note-bold[aria-pressed="true"]{
-  background:#1f2937;
-  border-color:#1f2937;
-  color:#fff;
-}
-.station-note-size-label{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  margin:0;
-  color:var(--muted);
-  font-size:12px;
-  font-weight:700;
-}
-.station-note-size-label select{
-  min-height:32px;
-  padding:4px 8px;
-  font-size:12px;
-  border-radius:8px;
-}
-.station-notes-editor{
-  flex:1 1 auto;
-  width:100%;
-  min-height:120px;
-  resize:vertical;
-  padding:10px 12px;
-  border:1px solid #d1d5db;
-  border-radius:10px;
-  background:#fff;
-  color:#111827;
-  line-height:1.45;
-  font-size:16px;
-  font-weight:400;
-  font-family:inherit;
-}
-.station-notes-editor.is-bold{font-weight:700}
-.station-notes-editor:focus{
-  outline:none;
-  border-color:#2563eb;
-  box-shadow:0 0 0 3px #2563eb22;
-}
-.station-notes-foot{
-  min-height:16px;
-  font-size:11px;
-  color:var(--muted);
-  font-weight:600;
-}
 .capture-right{
   min-width:0;
 }
@@ -642,26 +557,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
    <label class="auto-option" style="display:none"><input id="autoAdvance" type="checkbox" disabled>Tự chọn trạm kế tiếp</label>
    <div id="gatewayIdentity" class="identity" hidden style="margin-top:6px;color:var(--muted);font-size:12px">gateway: --</div>
    <div class="capture-path" hidden><div class="field"><label for="captureSavePath">Đường dẫn lưu ảnh</label><input id="captureSavePath" readonly value="data\\captures"></div><button type="button" id="openCapturesBtn" title="Thư mục ảnh local">Mở</button></div>
-   <section class="station-notes" id="stationNotes" aria-label="Ghi chú trạm">
-    <div class="station-notes-head">
-     <strong>Ghi chú</strong>
-     <div class="station-notes-tools">
-      <button type="button" id="stationNoteBoldBtn" class="station-note-bold" aria-pressed="false" title="Chữ đậm">B</button>
-      <label class="station-note-size-label" for="stationNoteSize">Cỡ
-       <select id="stationNoteSize" aria-label="Cỡ chữ ghi chú">
-        <option value="14">14</option>
-        <option value="16" selected>16</option>
-        <option value="18">18</option>
-        <option value="20">20</option>
-        <option value="24">24</option>
-       </select>
-      </label>
-     </div>
-    </div>
-    <textarea id="stationNoteText" class="station-notes-editor" rows="6" maxlength="4000" placeholder="Nhập ghi chú… (tự lưu, F5 không mất)" spellcheck="true"></textarea>
-    <div class="station-notes-foot" id="stationNoteSaved" aria-live="polite"></div>
-   </section>
-  </div>
+</div>
   <div class="capture-right">
   
   <div class="right-card">
@@ -714,7 +610,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;ba
   </div>
  </div>
 </section>
-<section id="productionRecordsCard" class="card records-card production-records"><div class="records-head"><h2>Danh sách lần cân</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="refreshRecordsBtn">Làm mới danh sách</button><button type="button" id="pushSupabaseBtn" class="primary" title="Đẩy các dòng đã chọn (hoặc cả bộ lọc) lên Supabase cân AI">Đẩy Supabase</button><button type="button" id="nhapKhoBtn" class="primary" title="Chọn dòng SP chờ đẩy kho rồi bấm Nhập kho">Nhập kho</button><button type="button" id="nhapKhoSummaryBtn" title="Xem tổng hợp các lần đẩy kho đã lưu trên máy này">Tổng hợp đẩy kho</button></div></div><div id="productionListFilters" class="list-filters production-list-filters" aria-label="Lọc danh sách lần cân theo ngày, ca, máy"><div class="field"><label for="recordsFilterDate">Ngày</label><input id="recordsFilterDate" type="date"></div><div class="field"><label for="recordsFilterShift">Ca</label><select id="recordsFilterShift"><option value="HC1">HC1 · 06:00–14:00</option><option value="HC2">HC2 · 14:00–22:00</option><option value="HC3">HC3 · 22:00–06:00</option><option value="12C1">12C1 · 06:00–18:00</option><option value="12C2">12C2 · 18:00–06:00</option><option value="Ca chuẩn Đà Nẵng">Ca chuẩn Đà Nẵng</option></select></div><div class="field"><label for="recordsFilterMachine">Máy</label><input id="recordsFilterMachine" list="sourceMachineList" autocomplete="off" maxlength="80" placeholder="Chọn hoặc nhập tên máy"></div><button type="button" id="recordsFilterBtn" class="primary apply">Lọc</button></div><div id="productionRecordsStatus" class="status" role="status" aria-live="polite" hidden></div><div class="records-wrap"><table class="records-table"><thead><tr><th class="record-select-col"><button type="button" id="selectAllNhapKho" title="Chọn tất cả dòng chờ đẩy kho">Chọn tất cả</button></th><th>Thời gian</th><th>Mã QR</th><th>Mã SP</th><th>Cân lõi</th><th>Cân sản phẩm</th><th>Trọng lượng bì</th><th>Trọng lượng NVL</th><th>Trạng thái lỗi</th><th>Lý do lỗi</th><th>Ảnh lõi + ảnh SP</th><th>Supabase</th><th>Đẩy kho</th><th>Chi tiết</th><th class="record-actions-col">Thao tác</th></tr></thead><tbody id="recordsBody"><tr><td colspan="15" class="records-empty">Đang tải…</td></tr></tbody></table></div></section>
+<section id="productionRecordsCard" class="card records-card production-records"><div class="records-head"><h2>Danh sách lần cân</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button id="refreshRecordsBtn">Làm mới danh sách</button><button type="button" id="pushSupabaseBtn" class="primary" title="Đẩy các dòng đã chọn (hoặc cả bộ lọc) lên Supabase cân AI">Đẩy Supabase</button><button type="button" id="nhapKhoBtn" class="primary" title="Chọn dòng SP chờ đẩy kho rồi bấm Nhập kho">Nhập kho</button><button type="button" id="nhapKhoSummaryBtn" title="Xem tổng hợp các lần đẩy kho đã lưu trên máy này">Tổng hợp đẩy kho</button></div></div><div id="productionListFilters" class="list-filters production-list-filters" aria-label="Lọc danh sách lần cân theo ngày, ca, máy, mã SP"><div class="field"><label for="recordsFilterDate">Ngày</label><input id="recordsFilterDate" type="date"></div><div class="field"><label for="recordsFilterShift">Ca</label><select id="recordsFilterShift"><option value="HC1">HC1 · 06:00–14:00</option><option value="HC2">HC2 · 14:00–22:00</option><option value="HC3">HC3 · 22:00–06:00</option><option value="12C1">12C1 · 06:00–18:00</option><option value="12C2">12C2 · 18:00–06:00</option><option value="Ca chuẩn Đà Nẵng">Ca chuẩn Đà Nẵng</option></select></div><div class="field"><label for="recordsFilterMachine">Máy</label><input id="recordsFilterMachine" list="sourceMachineList" autocomplete="off" maxlength="80" placeholder="Chọn hoặc nhập tên máy"></div><div class="field"><label for="recordsFilterProductCode">Mã SP</label><input id="recordsFilterProductCode" autocomplete="off" maxlength="80" placeholder="Nhập hoặc quét mã SP…"></div><button type="button" id="recordsFilterBtn" class="primary apply">Lọc</button></div><div id="productionRecordsStatus" class="status" role="status" aria-live="polite" hidden></div><div class="records-wrap"><table class="records-table"><thead><tr><th class="record-select-col"><button type="button" id="selectAllNhapKho" title="Chọn tất cả dòng chờ đẩy kho">Chọn tất cả</button></th><th>Thời gian</th><th>Mã QR</th><th>Mã SP</th><th>Cân lõi</th><th>Cân sản phẩm</th><th>Trọng lượng bì</th><th>Trọng lượng NVL</th><th>Trạng thái lỗi</th><th>Lý do lỗi</th><th>Ảnh lõi + ảnh SP</th><th>Supabase</th><th>Đẩy kho</th><th>Chi tiết</th><th class="record-actions-col">Thao tác</th></tr></thead><tbody id="recordsBody"><tr><td colspan="15" class="records-empty">Đang tải…</td></tr></tbody></table></div></section>
 <section id="weighBatchRecordsCard" class="card records-card"><div class="records-head"><h2>Đợt cân đã xác nhận</h2><button type="button" id="openRollBatchBtn">Xác nhận đợt cân</button><button type="button" id="refreshWeighBatchesBtn">Làm mới</button></div><div id="weighBatchStatus" class="status" role="status" aria-live="polite">Đang tải bảng ca_can…</div><div class="records-wrap"><table class="records-table"><thead><tr><th>Đợt</th><th>Mã SP</th><th>Số lượng</th><th>Ngày cân</th><th>Giờ cân</th><th>Ca</th><th>Máy</th><th>LSX</th><th>Danh sách sản phẩm</th><th>Thao tác</th></tr></thead><tbody id="weighBatchBody"><tr><td colspan="10" class="records-empty">Đang tải…</td></tr></tbody></table></div></section>
 <section id="listRecordsCard" class="card records-card list-records" hidden><div class="records-head"><h2>Danh sách từ DB</h2><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><div id="listCount" class="list-count" aria-live="polite">Tổng <strong id="listCountValue">--</strong></div><div class="list-pagination" aria-label="Phân trang danh sách"><button type="button" id="listPrevPageBtn" disabled>Trước</button><span id="listPageInfo">Trang 1/1</span><button type="button" id="listNextPageBtn" disabled>Sau</button></div><button type="button" id="refreshListRecordsBtn">Làm mới</button></div></div><div id="listStatus" class="status" role="status" aria-live="polite">Chọn khoảng ngày rồi bấm Lọc.</div><div class="records-wrap"><table class="records-table"><thead><tr><th class="list-actions-col">Thao tác</th><th>Thời gian</th><th>Ngày</th><th>Ca</th><th>Mã QR</th><th>Mã SP</th><th>Cân lõi</th><th>Cân sản phẩm</th><th>Trọng lượng bì</th><th>Trọng lượng NVL</th><th>Trạng thái lỗi</th><th>Lý do lỗi</th><th>Ảnh lõi + ảnh SP</th><th>Supabase</th><th>Đẩy kho</th></tr></thead><tbody id="listRecordsBody"><tr><td colspan="15" class="records-empty">Chọn khoảng ngày rồi bấm Lọc.</td></tr></tbody></table></div></section>
 <section id="manualSyncCard" class="card records-card" hidden aria-labelledby="manualSyncTitle">
@@ -898,10 +794,8 @@ const SOURCE_STATION_CONTEXT_KEY='rollQrScale.sourceStationContexts.v1';
  const STATION_ASSIGNMENT_KEY='rollQrScale.stationAssignment.v1';
 const ROLL_BATCH_CONFIRM_PREFIX='rollQrScale.rollBatchConfirm.v1:';
 const ROLL_BATCH_SIZE_PREFIX='rollQrScale.rollBatchSize.v1:';
-const STATION_NOTES_KEY='rollQrScale.stationNotes.v1';
 const NHAP_KHO_SUMMARY_KEY='rollQrScale.nhapKhoSummary.v1';
 const LIST_PAGE_SIZE=50;
-const STATION_NOTE_SIZES=['14','16','18','20','24'];
 const SOURCE_SHIFT_LABELS={HC1:'HC1 · 06:00–14:00',HC2:'HC2 · 14:00–22:00',HC3:'HC3 · 22:00–06:00','12C1':'12C1 · 06:00–18:00','12C2':'12C2 · 18:00–06:00','Ca chuẩn Đà Nẵng':'Ca chuẩn Đà Nẵng'};
 const FALLBACK_SHIFTS=['HC1','HC2','HC3','12C1','12C2','Ca chuẩn Đà Nẵng'];
 const FALLBACK_MACHINES=['MÁY CÁCH NHIỆT 11','MÁY BAO BÌ 11','MÁY BAO BÌ 16','MÁY BAO BÌ 5','MÁY BAO BÌ 4'];
@@ -952,7 +846,7 @@ function setSourceOrderOptions(orders,selected='',emptyLabel='Không có LSX t�
 function fillRecordsFilterFields(value=sourceContext){const dateEl=$('recordsFilterDate'),shiftEl=$('recordsFilterShift'),machineEl=$('recordsFilterMachine');if(!dateEl||!shiftEl||!machineEl)return;dateEl.value=value.date||todayLocalDate();const shift=pickListed(value.shift,SOURCE_SHIFTS,FALLBACK_SHIFTS[0]);if(![...shiftEl.options].some(option=>option.value===shift))shiftEl.add(new Option(shiftOptionLabel(shift),shift));shiftEl.value=shift;machineEl.value=sanitizeMachine(value.machine)||FALLBACK_MACHINES[0]}
 function fillSourceFields(value=sourceContext){$('sourceDate').value=value.date||todayLocalDate();$('sourceShift').value=pickListed(value.shift,SOURCE_SHIFTS,FALLBACK_SHIFTS[0]);$('sourceMachine').value=sanitizeMachine(value.machine)||FALLBACK_MACHINES[0];selectSourceOrder(value.order);$('biWeight').value=String(normalizeBiWeight(value.bi));if($('rollBatchSize')){$('rollBatchSize').max=String(rollBatchMachineLimit(value));$('rollBatchSize').value=String(rollBatchSize(value))}fillRecordsFilterFields(value)}
 function readRecordsFilterFields(){return{date:$('recordsFilterDate')?.value||todayLocalDate(),shift:pickListed($('recordsFilterShift')?.value,SOURCE_SHIFTS,FALLBACK_SHIFTS[0]),machine:sanitizeMachine($('recordsFilterMachine')?.value)||FALLBACK_MACHINES[0],order:sourceContext.order,bi:sourceContext.bi}}
-async function applyRecordsFilters(){saveSourceContext(readRecordsFilterFields());await loadProductionOrders(sourceContext.date,sourceContext.order);await loadRecords();const notice=$('productionRecordsStatus');if(notice){notice.hidden=false;status(notice,'Đã lọc theo '+sourceLabel()+'.','ok')}}
+async function applyRecordsFilters(){saveSourceContext(readRecordsFilterFields());await loadProductionOrders(sourceContext.date,sourceContext.order);await loadRecords();const notice=$('productionRecordsStatus');const productCode=String($('recordsFilterProductCode')&&$('recordsFilterProductCode').value||'').trim();if(notice){notice.hidden=false;status(notice,'Đã lọc theo '+sourceLabel()+(productCode?' · mã '+productCode:'')+'.','ok')}}
 function saveSourceContext(value){sourceContext={date:value.date||todayLocalDate(),shift:pickListed(value.shift,SOURCE_SHIFTS,FALLBACK_SHIFTS[0]),machine:sanitizeMachine(value.machine)||FALLBACK_MACHINES[0],order:sanitizeOrder(value.order),bi:normalizeBiWeight(value.bi)};try{localStorage.setItem(SOURCE_CONTEXT_KEY,JSON.stringify(sourceContext));if(activeSourceStationKey){stationSourceContexts[activeSourceStationKey]={date:sourceContext.date,shift:sourceContext.shift,machine:sourceContext.machine,order:sourceContext.order,configuredMachine:sanitizeMachine(current()&&current().machineId)};localStorage.setItem(SOURCE_STATION_CONTEXT_KEY,JSON.stringify(stationSourceContexts))}}catch{}fillSourceFields(sourceContext)}
 function stationSourceKey(session){return session?String(session.stationId||'')+'|'+String(session.cameraId||''):''}
 function lockSourceMachine(session=current()){const input=$('sourceMachine'),machine=sanitizeMachine(session&&session.machineId),key=stationSourceKey(session);if(!key){input.disabled=false;return false}if(key!==activeSourceStationKey){if(activeSourceStationKey){const previous=readSourceFields(),stored=stationSourceContexts[activeSourceStationKey]||{};stationSourceContexts[activeSourceStationKey]={...stored,date:previous.date,shift:previous.shift,machine:previous.machine,order:previous.order}}const saved=stationSourceContexts[key],fields=readSourceFields(),configChanged=Boolean(saved&&saved.configuredMachine&&saved.configuredMachine!==machine&&sanitizeMachine(saved.machine)===saved.configuredMachine),samePeriod=Boolean(saved&&saved.date===fields.date&&saved.shift===fields.shift);activeSourceStationKey=key;saveSourceContext({...fields,machine:configChanged?machine:(sanitizeMachine(saved&&saved.machine)||machine||FALLBACK_MACHINES[0]),order:saved&&!configChanged&&samePeriod?sanitizeOrder(saved.order):''});if(machine&&!SOURCE_MACHINES.includes(machine))setSourceMachineOptions([...SOURCE_MACHINES,machine],input.value);input.disabled=false;return true}if(machine&&!SOURCE_MACHINES.includes(machine))setSourceMachineOptions([...SOURCE_MACHINES,machine],input.value||machine);if(!sanitizeMachine(input.value)&&machine)input.value=machine;input.disabled=false;return false}
@@ -962,7 +856,7 @@ function productionOrdersQuery(fields=readSourceFields()){const params=new URLSe
 async function loadProductionOrders(workDate,selected=''){const request=++sourceOrdersRequest;let fields={...readSourceFields(),date:String(workDate||readSourceFields().date||todayLocalDate())};sourceOrdersLoading=true;setSourceOrderOptions(selected?[selected]:fields.order?[fields.order]:[],selected||fields.order,'Đang tải LSX…');renderControls();try{let data=await api('/api/production-orders?'+productionOrdersQuery(fields));if(request!==sourceOrdersRequest)return;const applied=applySourceFilterOptions(data,{shift:fields.shift,machine:fields.machine});if(applied.shift!==fields.shift||applied.machine!==fields.machine){fields={...fields,...applied};data=await api('/api/production-orders?'+productionOrdersQuery(fields));if(request!==sourceOrdersRequest)return;applySourceFilterOptions(data,fields)}const typed=sanitizeOrder(fields.order||selected||$('sourceOrder').value);const orders=setSourceOrderOptions(data.orders||[],typed);saveSourceContext({...readSourceFields(),date:fields.date,order:$('sourceOrder').value});if(!orders.length&&!sanitizeOrder($('sourceOrder').value)){const tipText=(Array.isArray(data.suggestions)&&data.suggestions.length)?(' Trong ngày có: '+data.suggestions.map(item=>String(item.shift||'—')+' · '+String(item.machine||'—')+' → '+(Array.isArray(item.orders)?item.orders.join(', '):'')).join(' | ')):'';const hint=data.fallback_error?' · '+data.fallback_error:'';status(captureStatus,'Chưa có LSX từ DB cho '+fields.date+' · '+fields.shift+' · '+fields.machine+'. Có thể nhập tay.'+hint+tipText,'warn')}else{const src=String(data.source||'');const relaxed=data.filter_relaxed?' (đã nới lọc '+data.filter_relaxed+')':'';const manual=sanitizeOrder($('sourceOrder').value)&&!orders.includes(sanitizeOrder($('sourceOrder').value))?' · nhập tay':'';status(captureStatus,(orders.length?'Đã tải '+orders.length+' LSX từ DB ('+(src.startsWith('master:')?src.replace('master:',''):src)+')':'LSX nhập tay')+' · '+fields.date+' · '+fields.shift+' · '+fields.machine+relaxed+manual,'ok')}}catch(error){if(request!==sourceOrdersRequest)return;setSourceOrderOptions([],selected||fields.order,'Không tải được LSX — nhập tay');status(captureStatus,'Không tải được danh sách LSX: '+error.message+' · vẫn có thể nhập tay.','bad')}finally{if(request===sourceOrdersRequest){sourceOrdersLoading=false;$('sourceOrder').disabled=false;renderControls()}}}
 async function reloadProductionOrdersForFilters(){const fields=readSourceFields();saveSourceContext({...fields,order:''});await loadProductionOrders(fields.date,'');await loadRecords()}
 async function applySourceContext(){const selected=readSourceFields();if(!selected.order){status(captureStatus,'Hãy chọn hoặc nhập LSX trước khi áp dụng.','bad');$('sourceOrder').focus();return}saveSourceContext(selected);status(captureStatus,'Đã chọn nguồn '+sourceLabel()+'. Đang lấy danh sách lần cân…','warn');await loadRecords();const session=current();if(session){evaluateSessionWeightAlerts(session,{popup:true});if(session===current())renderEvidence(session)}status(captureStatus,'Đã tải dữ liệu theo nguồn '+sourceLabel()+'.','ok');refreshCompletionState(session)}
-function sourceQuery(){return 'work_date='+encodeURIComponent(sourceContext.date)+'&shift='+encodeURIComponent(sourceContext.shift)+'&machine='+encodeURIComponent(sourceContext.machine)+(sourceContext.order?'&production_order='+encodeURIComponent(sourceContext.order):'')}
+function sourceQuery(){return 'work_date='+encodeURIComponent(sourceContext.date)+'&shift='+encodeURIComponent(sourceContext.shift)+'&machine='+encodeURIComponent(sourceContext.machine)+(sourceContext.order?'&production_order='+encodeURIComponent(sourceContext.order):'')}function recordsListQuery(){let query=sourceQuery();const productCode=String($('recordsFilterProductCode')&&$('recordsFilterProductCode').value||'').trim();if(productCode)query+='&qr_code='+encodeURIComponent(productCode);return query}
 function sourceRawTags(){persistSourceFromFields();let tags=' SOURCE_DATE='+sourceContext.date+'; SOURCE_SHIFT='+sourceContext.shift+'; SOURCE_MACHINE='+sourceContext.machine+'; BI_WEIGHT='+normalizeBiWeight(sourceContext.bi);if(sourceContext.order)tags+='; SOURCE_PRODUCTION_ORDER='+sourceContext.order;return tags}
 
 function status(el,text,type=''){el.textContent=text;el.className='status '+type}
@@ -1666,7 +1560,7 @@ async function retryProductionErrorRecord(item,button,kind){
 }
 function appendProductionDeleteAction(row,item,errorState){const cell=document.createElement('td');cell.className='record-actions-col';const button=document.createElement('button');button.type='button';if(errorState==='error'){const wrap=document.createElement('div');wrap.className='production-error-actions';const choices=document.createElement('div');choices.className='production-error-reread';const coreBtn=document.createElement('button');coreBtn.type='button';coreBtn.className='production-error-retry';coreBtn.dataset.kind='core';coreBtn.dataset.label='Ảnh lõi';coreBtn.textContent='Ảnh lõi';coreBtn.disabled=!item.core_image_url;coreBtn.title=coreBtn.disabled?'Không có ảnh lõi':'Đọc lại số cân trên ảnh lõi';coreBtn.addEventListener('click',()=>retryProductionErrorRecord(item,coreBtn,'core'));const spBtn=document.createElement('button');spBtn.type='button';spBtn.className='production-error-retry';spBtn.dataset.kind='product';spBtn.dataset.label='Ảnh SP';spBtn.textContent='Ảnh SP';spBtn.disabled=!item.product_image_url;spBtn.title=spBtn.disabled?'Không có ảnh SP':'Chọn quét QR hoặc đọc số cân trên ảnh SP';const spPanel=document.createElement('div');spPanel.className='production-error-sp';spPanel.hidden=true;[['qr','Quét QR','Đọc lại mã QR trên ảnh SP, không đọc số cân'],['product','Đọc số cân','AI đọc lại số cân trên ảnh SP, không đổi mã QR']].forEach(([choice,text,title])=>{const retry=document.createElement('button');retry.type='button';retry.className='production-error-retry';retry.dataset.kind=choice;retry.dataset.label=text;retry.textContent=text;retry.title=title;retry.addEventListener('click',()=>retryProductionErrorRecord(item,retry,choice));spPanel.appendChild(retry)});spBtn.addEventListener('click',()=>{spPanel.hidden=!spPanel.hidden;if(spBtn.classList)spBtn.classList.toggle('primary',!spPanel.hidden)});choices.appendChild(coreBtn);choices.appendChild(spBtn);wrap.appendChild(choices);wrap.appendChild(spPanel);button.className='production-error-delete';button.textContent='Xóa dòng lỗi';button.title='Chỉ xóa đúng dòng lỗi này';button.addEventListener('click',()=>deleteProductionRecord(item,button));wrap.appendChild(button);cell.appendChild(wrap)}else{button.className='production-row-delete';button.textContent='Xóa';button.title=recordNhapKhoStatus(item).key==='done'?'Xóa dòng đã đẩy kho':'Xóa dòng này';button.addEventListener('click',()=>deleteProductionRecord(item,button));cell.appendChild(button)}row.appendChild(cell)}
 async function loadRecords(options={}){
-  const request=++recordsRequestId,localOnly=true,query=sourceQuery();
+  const request=++recordsRequestId,localOnly=true,query=recordsListQuery();
   const body=$('recordsBody'),emptyCols=15,countHost=$('shiftCount');
   recordsLoading=true;countHost.classList.add('loading');countHost.classList.remove('error');countHost.setAttribute('aria-busy','true');
   try{
@@ -1730,7 +1624,7 @@ function renderListRecordsPage(){const body=$('listRecordsBody'),emptyCols=15,fi
 async function changeListRecordsPage(delta){const pages=listRecordsPageCount(),next=Math.max(0,Math.min(listRecordsPage+Number(delta||0),pages-1));if(next===listRecordsPage)return;listRecordsPage=next;await loadListRecords(false);try{$('listRecordsCard').scrollIntoView({behavior:'smooth',block:'start'})}catch{}}
 async function loadListRecords(resetPage=true){if(listRecordsLoading||!$('listRecordsBody'))return;if(resetPage)listRecordsPage=0;listRecordsLoading=true;updateListPager();const body=$('listRecordsBody'),emptyCols=15,filters=readListFilters(),listStatus=$('listStatus'),keepFlash=Boolean(listStatusFlash&&listStatusFlash.message),offset=listRecordsPage*LIST_PAGE_SIZE;$('listDateFrom').value=filters.dateFrom;$('listDateTo').value=filters.dateTo;if(listStatus&&!keepFlash)status(listStatus,'Đang tải danh sách…','warn');try{const data=await api('/api/measurements?limit='+LIST_PAGE_SIZE+'&offset='+offset+'&'+listQuery()+'&local_only=1'),hasCount=Number.isFinite(Number(data.total_count)),items=Array.isArray(data.items)?data.items:[],fallbackCount=offset+items.length,totalCount=hasCount?Number(data.total_count):fallbackCount;renderListCount(totalCount,hasCount?data.count_exact!==false:false);listRecordsItems=items;listRecordsMeta={filters,source:data.source||'',countExact:hasCount?data.count_exact!==false:false,totalCount};renderListRecordsPage()}catch(error){renderListCount(null);listRowsByEvent={};listRecordsItems=[];listRecordsMeta=null;body.replaceChildren();const row=document.createElement('tr');recordCell(row,'Không tải được danh sách: '+error.message,'records-empty').colSpan=emptyCols;body.appendChild(row);listStatusFlash=null;if(listStatus)status(listStatus,error.message,'bad')}finally{listRecordsLoading=false;updateListPager()}}
 let manualSyncTimer=0,manualSyncStatusHost='manualSyncStatus';
-function productionSyncFilters(){persistSourceFromFields();saveSourceContext(readRecordsFilterFields());const filters={date_from:sourceContext.date,date_to:sourceContext.date,shift:sourceContext.shift,qr_code:'',machine:sourceContext.machine,production_order:sourceContext.order||'',scope:'production',skip_cloudinary:true};const selected=[...selectedNhapKhoIds].filter(id=>productionRowsByEvent[id]);if(selected.length)filters.event_ids=selected;return filters}
+function productionSyncFilters(){persistSourceFromFields();saveSourceContext(readRecordsFilterFields());const productCode=String($('recordsFilterProductCode')&&$('recordsFilterProductCode').value||'').trim();const filters={date_from:sourceContext.date,date_to:sourceContext.date,shift:sourceContext.shift,qr_code:productCode,machine:sourceContext.machine,production_order:sourceContext.order||'',scope:'production',skip_cloudinary:true};const selected=[...selectedNhapKhoIds].filter(id=>productionRowsByEvent[id]);if(selected.length)filters.event_ids=selected;return filters}
 function manualSyncFilters(){const filters=readListFilters();return{date_from:filters.dateFrom,date_to:filters.dateTo,shift:filters.shift,qr_code:filters.qrCode,machine:filters.machine,production_order:filters.productionOrder,scope:$('manualSyncScope').value,skip_cloudinary:true}}
 function activeManualSyncFilters(){return workflowMode==='production'?productionSyncFilters():manualSyncFilters()}
 function manualSyncCounts(data){const c=data.counts||{};return 'Phiếu cân '+(c.measurements||0)+' · Ảnh lỗi '+(c.photo_drafts||0)+' · Đợt cân '+(c.weigh_batches||0)+' · Kiểm kho '+(c.inventory_checks||0)}
@@ -1784,7 +1678,7 @@ $('showGeminiBackupKeyBtn').onclick=()=>{const input=$('geminiBackupApiKeyInput'
 $('closeGeminiBackupKeyBtn').onclick=()=>{$('geminiBackupApiKeyInput').value='';$('geminiBackupApiKeyInput').type='password';$('showGeminiBackupKeyBtn').textContent='Hiện';$('geminiBackupKeyPanel').hidden=true};
 bindActionButton('saveGeminiBackupKeyBtn',()=>saveGeminiBackupKey());bindActionButton('useGeminiBackupBtn',()=>switchGeminiKey('backup'));bindActionButton('useGeminiPrimaryBtn',()=>switchGeminiKey('primary'));
 syncGeminiBackupWhenReady();
-bindActionButton('manualSyncPreviewBtn',()=>{manualSyncStatusHost='manualSyncStatus';return previewManualSync(manualSyncFilters())});bindActionButton('manualSyncStartBtn',()=>startManualSync(false));bindActionButton('recordsFilterBtn',()=>applyRecordsFilters());bindActionButton('pushSupabaseBtn',()=>startManualSync(true));bindActionButton('nhapKhoBtn',()=>openNhapKhoModal());
+bindActionButton('manualSyncPreviewBtn',()=>{manualSyncStatusHost='manualSyncStatus';return previewManualSync(manualSyncFilters())});bindActionButton('manualSyncStartBtn',()=>startManualSync(false));bindActionButton('recordsFilterBtn',()=>applyRecordsFilters());document.getElementById('productionListFilters')&&document.getElementById('productionListFilters').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();applyRecordsFilters()}});bindActionButton('pushSupabaseBtn',()=>startManualSync(true));bindActionButton('nhapKhoBtn',()=>openNhapKhoModal());
 let nhapKhoHits=new Map(),nhapKhoChecked=false,nhapKhoBusy=false,nhapKhoPreviewItems=[];
 function closeNhapKhoModal(){const modal=$('nhapKhoModal');if(!modal||nhapKhoBusy)return;modal.classList.remove('open');modal.hidden=true;modal.setAttribute('aria-hidden','true');if($('nhapKhoSoCuon'))$('nhapKhoSoCuon').readOnly=false}
 function productCodeFromQrLocal(qr){const full=String(qr||'').trim();if(!full)return'';const cuts=['_', '+'].map(sep=>{const i=full.indexOf(sep);return i>0?i:Number.POSITIVE_INFINITY});const cut=Math.min(...cuts);return Number.isFinite(cut)?full.slice(0,cut).trim():full}
@@ -1835,24 +1729,7 @@ function isTextEditingTarget(target){if(!target)return false;if(target.isContent
 function isQrField(target){return Boolean(target&&(target.id==='inventoryProductCode'||target.id==='captureQr'||target.id==='listQrCode'||(target.classList&&target.classList.contains('round-qr'))))}
 let qrScanBuffer='',qrScanTimer=0,qrScanLast=0;
 function flushQrScanBuffer(force=false){const code=qrScanBuffer;qrScanBuffer='';clearTimeout(qrScanTimer);qrScanTimer=0;if(code.length>=3||(force&&code.length>=2)){applyScannedQr(code);return true}if(code.length===1&&['1','2','3'].includes(code)){const index=Number(code)-1;if(index<stations.length)selectStation(index);return true}return false}
-document.addEventListener('keydown',event=>{if(event.target.closest&&event.target.closest('.round-status-toggle'))return;if(event.repeat||event.ctrlKey||event.altKey||event.metaKey)return;const editing=isTextEditingTarget(event.target),typing=editing||event.target.tagName==='SELECT',captureEditor=isQrField(event.target)||event.target===$('biWeight'),now=performance.now(),printable=event.key.length===1&&event.key!==' ';if(!captureEditor&&!typing&&printable){event.preventDefault();event.stopPropagation();if(now-qrScanLast>160)qrScanBuffer='';qrScanBuffer+=event.key;qrScanLast=now;clearTimeout(qrScanTimer);qrScanTimer=setTimeout(()=>flushQrScanBuffer(false),140);return}if(event.key==='Enter'&&qrScanBuffer.length>=2){event.preventDefault();event.stopPropagation();flushQrScanBuffer(true);return}if(['1','2','3'].includes(event.key)&&!typing&&!qrScanBuffer){const index=Number(event.key)-1;if(index<stations.length){event.preventDefault();selectStation(index)}return}if(workflowMode==='list'){if(event.key==='Enter'&&(event.target===$('listQrCode')||event.target===$('listDateFrom')||event.target===$('listDateTo')||event.target===$('listShift'))){event.preventDefault();loadListRecords()}return}if(workflowMode==='inventory'){if(event.key==='Backspace'&&(!editing||!String(event.target.value||'').length)&&inventoryHasData(inventoryState(current()))){event.preventDefault();event.stopPropagation();$('inventoryDiscardBtn').click();return}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();$('inventoryCaptureBtn').click();return}if(event.key==='Enter'&&captureEditor){readInventoryFields(current());renderControls();if($('inventorySaveBtn').disabled){event.preventDefault();return}}if(event.key==='Enter'&&!$('inventorySaveBtn').disabled){event.preventDefault();$('inventorySaveBtn').click()}return}if(event.key==='Backspace'&&event.target!==$('stationNoteText')&&(!editing||!String(event.target.value||'').length)){const session=current(),slot=session&&captureSlot(session);if(session&&slot&&slotHasData((session.rounds||[])[slot.round],slot.kind)){event.preventDefault();event.stopPropagation();$('discardBtn').click();return}}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();captureNextWeight();return}if(event.key==='Enter'){if(event.target.closest&&event.target.closest('button'))return;event.preventDefault();saveAllRounds()}},true);
+document.addEventListener('keydown',event=>{if(event.target.closest&&event.target.closest('.round-status-toggle'))return;if(event.repeat||event.ctrlKey||event.altKey||event.metaKey)return;const editing=isTextEditingTarget(event.target),typing=editing||event.target.tagName==='SELECT',captureEditor=isQrField(event.target)||event.target===$('biWeight'),now=performance.now(),printable=event.key.length===1&&event.key!==' ';if(!captureEditor&&!typing&&printable){event.preventDefault();event.stopPropagation();if(now-qrScanLast>160)qrScanBuffer='';qrScanBuffer+=event.key;qrScanLast=now;clearTimeout(qrScanTimer);qrScanTimer=setTimeout(()=>flushQrScanBuffer(false),140);return}if(event.key==='Enter'&&qrScanBuffer.length>=2){event.preventDefault();event.stopPropagation();flushQrScanBuffer(true);return}if(['1','2','3'].includes(event.key)&&!typing&&!qrScanBuffer){const index=Number(event.key)-1;if(index<stations.length){event.preventDefault();selectStation(index)}return}if(workflowMode==='list'){if(event.key==='Enter'&&(event.target===$('listQrCode')||event.target===$('listDateFrom')||event.target===$('listDateTo')||event.target===$('listShift'))){event.preventDefault();loadListRecords()}return}if(workflowMode==='inventory'){if(event.key==='Backspace'&&(!editing||!String(event.target.value||'').length)&&inventoryHasData(inventoryState(current()))){event.preventDefault();event.stopPropagation();$('inventoryDiscardBtn').click();return}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();$('inventoryCaptureBtn').click();return}if(event.key==='Enter'&&captureEditor){readInventoryFields(current());renderControls();if($('inventorySaveBtn').disabled){event.preventDefault();return}}if(event.key==='Enter'&&!$('inventorySaveBtn').disabled){event.preventDefault();$('inventorySaveBtn').click()}return}if(event.key==='Backspace'&&(!editing||!String(event.target.value||'').length)){const session=current(),slot=session&&captureSlot(session);if(session&&slot&&slotHasData((session.rounds||[])[slot.round],slot.kind)){event.preventDefault();event.stopPropagation();$('discardBtn').click();return}}if(typing&&!captureEditor)return;if(event.code==='Space'&&!editing){event.preventDefault();captureNextWeight();return}if(event.key==='Enter'){if(event.target.closest&&event.target.closest('button'))return;event.preventDefault();saveAllRounds()}},true);
 navigator.mediaDevices&&navigator.mediaDevices.addEventListener&&navigator.mediaDevices.addEventListener('devicechange',async()=>{await refreshCameraDevices(false);stations.forEach(session=>{if(session.deviceId&&!session.stream)scheduleReconnect(session,session.deviceId);if(panelMode&&session.panelDeviceId&&!session.panelStream)schedulePanelReconnect(session,session.panelDeviceId)})});window.addEventListener('resize',()=>stations.forEach(updateBoxes));window.addEventListener('beforeunload',()=>stations.forEach(session=>{session.stop();session.stopPanel()}));applyWorkflowLayout(workflowMode);fillSourceFields(sourceContext);if(workflowMode==='production')loadProductionOrders(sourceContext.date,sourceContext.order).then(()=>loadRecords());else if(workflowMode==='inventory')loadInventoryRecords();else loadListRecords();loadStatus().then(()=>{$('gatewayIdentity').textContent+=' · bản '+(appStatus.release||'local')}).finally(()=>{$('saveBtn').childNodes[0].nodeValue='Lưu ';if(wantsInventoryMode())status(captureStatus,'CÂN KIỂM KHO · bấm AI đọc ảnh; hệ thống tự mở camera khi cần.','ok')});
-setTimeout(()=>{if(appStatus?.sync_enabled)pollManualSync()},1000);
-(function setupStationNotes(){
- const editor=$('stationNoteText'),boldBtn=$('stationNoteBoldBtn'),sizeSelect=$('stationNoteSize'),savedEl=$('stationNoteSaved');
- if(!editor||!boldBtn||!sizeSelect)return;
- let saveTimer=0,savedTimer=0;
- function normalizeSize(value){const size=String(value||'16');return STATION_NOTE_SIZES.includes(size)?size:'16'}
- function readNotes(){try{const raw=JSON.parse(localStorage.getItem(STATION_NOTES_KEY)||'null');if(raw&&typeof raw==='object')return{text:String(raw.text||'').slice(0,4000),bold:Boolean(raw.bold),fontSize:normalizeSize(raw.fontSize)}}catch{}return{text:'',bold:false,fontSize:'16'}}
- function applyNotes(state){editor.value=state.text;editor.classList.toggle('is-bold',state.bold);editor.style.fontSize=state.fontSize+'px';boldBtn.setAttribute('aria-pressed',state.bold?'true':'false');sizeSelect.value=state.fontSize}
- function currentNotes(){return{text:String(editor.value||'').slice(0,4000),bold:boldBtn.getAttribute('aria-pressed')==='true',fontSize:normalizeSize(sizeSelect.value)}}
- function markSaved(){if(!savedEl)return;savedEl.textContent='Đã lưu trên máy này';clearTimeout(savedTimer);savedTimer=setTimeout(()=>{savedEl.textContent=''},1800)}
- function saveNotes(immediate){const write=()=>{try{localStorage.setItem(STATION_NOTES_KEY,JSON.stringify(currentNotes()));markSaved()}catch{}};clearTimeout(saveTimer);if(immediate){write();return}saveTimer=setTimeout(write,220)}
- applyNotes(readNotes());
- editor.addEventListener('input',()=>saveNotes(false));
- editor.addEventListener('change',()=>saveNotes(true));
- boldBtn.addEventListener('click',()=>{const next=boldBtn.getAttribute('aria-pressed')!=='true';boldBtn.setAttribute('aria-pressed',next?'true':'false');editor.classList.toggle('is-bold',next);saveNotes(true);editor.focus()});
- sizeSelect.addEventListener('change',()=>{editor.style.fontSize=normalizeSize(sizeSelect.value)+'px';saveNotes(true);editor.focus()});
- window.addEventListener('beforeunload',()=>saveNotes(true));
-})();
+setTimeout
 </script></body></html>

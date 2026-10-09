@@ -9,6 +9,7 @@ const html = fs.readFileSync(
 
 assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy Supabase</);
 assert.match(html, /id="nhapKhoBtn"[^>]*>Nhập kho</);
+assert.match(html, /id="recordsFilterProductCode"/);
 assert.match(html, /<th>Đẩy kho<\/th>/);
 assert.match(html, /id="selectAllNhapKho"/);
 assert.match(html, /paintNhapKhoSelectBtn/);

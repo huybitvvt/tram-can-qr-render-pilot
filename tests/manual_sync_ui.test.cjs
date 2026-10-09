@@ -11,6 +11,9 @@ test('production list exposes date/shift/machine filters and push button',()=>{
   assert.match(html,/id="recordsFilterDate"/);
   assert.match(html,/id="recordsFilterShift"/);
   assert.match(html,/id="recordsFilterMachine"/);
+  assert.match(html,/id="recordsFilterProductCode"/);
+  assert.match(html,/function recordsListQuery\(/);
+  assert.match(html,/qr_code='\+encodeURIComponent\(productCode\)/);
   assert.match(html,/id="pushSupabaseBtn"/);
   assert.match(html,/Đẩy lên Supabase \(không Cloudinary\)/);
   assert.doesNotMatch(html,/Đồng bộ local → Supabase \/ Cloudinary/);

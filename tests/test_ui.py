@@ -2402,14 +2402,14 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert 'class="capture-right"' in TEST_UI_HTML
     assert '<aside class="card lookup-card">' not in TEST_UI_HTML
     assert "main{width:100%" in TEST_UI_HTML
-    assert 'id="stationNotes"' in TEST_UI_HTML
-    assert 'id="stationNoteText"' in TEST_UI_HTML
-    assert "rollQrScale.stationNotes.v1" in TEST_UI_HTML
-    assert 'id="stationNoteBoldBtn"' in TEST_UI_HTML
-    assert 'id="stationNoteSize"' in TEST_UI_HTML
+    assert 'id="stationNotes"' not in TEST_UI_HTML
+    assert 'id="stationNoteText"' not in TEST_UI_HTML
+    assert "rollQrScale.stationNotes.v1" not in TEST_UI_HTML
     assert ">Đẩy Supabase<" in TEST_UI_HTML
     assert 'id="nhapKhoBtn"' in TEST_UI_HTML
     assert ">Nhập kho<" in TEST_UI_HTML
+    assert 'id="recordsFilterProductCode"' in TEST_UI_HTML
+    assert "function recordsListQuery(" in TEST_UI_HTML
     assert "<th>Đẩy kho</th>" in TEST_UI_HTML
     assert "function recordNhapKhoStatus(" in TEST_UI_HTML
     assert "function appendNhapKhoStatusCell(" in TEST_UI_HTML
