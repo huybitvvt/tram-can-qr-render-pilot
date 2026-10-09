@@ -2409,6 +2409,9 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert 'id="nhapKhoBtn"' in TEST_UI_HTML
     assert ">Nhập kho<" in TEST_UI_HTML
     assert 'id="recordsFilterProductCode"' in TEST_UI_HTML
+    assert 'id="recordsFilterSync"' in TEST_UI_HTML
+    assert 'id="recordsFilterNhapKho"' in TEST_UI_HTML
+    assert "function matchesRecordsStatusFilters(" in TEST_UI_HTML
     assert "function recordsListQuery(" in TEST_UI_HTML
     assert "<th>Đẩy kho</th>" in TEST_UI_HTML
     assert "function recordNhapKhoStatus(" in TEST_UI_HTML
@@ -2457,8 +2460,13 @@ def test_ui_records_table_shows_bi_and_nvl_weights() -> None:
     assert 'MÁY CÁCH NHIỆT 11' in TEST_UI_HTML
     assert 'MÁY BAO BÌ 11' in TEST_UI_HTML
     assert 'id="sourceOrder"' in TEST_UI_HTML
-    assert 'list="sourceOrderList"' in TEST_UI_HTML
-    assert "Chọn hoặc nhập LSX" in TEST_UI_HTML
+    assert 'id="sourceOrderMenu"' in TEST_UI_HTML
+    assert 'id="sourceOrderToggle"' in TEST_UI_HTML
+    assert "source-order-combo" in TEST_UI_HTML
+    assert "Gõ hoặc chọn LSX" in TEST_UI_HTML
+    assert "function toggleSourceOrderMenu(" in TEST_UI_HTML
+    assert "function filteredSourceOrders(" in TEST_UI_HTML
+    assert 'id="sourceOrderSelect"' not in TEST_UI_HTML
     assert "setSourceOrderOptions" in TEST_UI_HTML
     assert "sanitizeOrder" in TEST_UI_HTML
     assert 'placeholder="Nhập lệnh SX"' not in TEST_UI_HTML
@@ -3390,6 +3398,8 @@ def test_production_history_offers_delete_for_all_rows_including_pushed() -> Non
     assert "CHỈ XÓA DÒNG NÀY?" in TEST_UI_HTML
     assert "Xóa dòng đã đẩy kho" in TEST_UI_HTML
     assert 'id="selectAllNhapKho"' in TEST_UI_HTML
+    assert 'id="nhapKhoSelectedCount"' in TEST_UI_HTML
+    assert "function updateNhapKhoSelectedCount(" in TEST_UI_HTML
     assert "function canSelectForNhapKho(" in TEST_UI_HTML
     assert "function paintNhapKhoSelectBtn(" in TEST_UI_HTML
     assert "event_ids:eventIds" in TEST_UI_HTML

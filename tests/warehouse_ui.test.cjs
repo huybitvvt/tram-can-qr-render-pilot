@@ -10,8 +10,13 @@ const html = fs.readFileSync(
 assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy Supabase</);
 assert.match(html, /id="nhapKhoBtn"[^>]*>Nhập kho</);
 assert.match(html, /id="recordsFilterProductCode"/);
+assert.match(html, /id="recordsFilterSync"/);
+assert.match(html, /id="recordsFilterNhapKho"/);
+assert.match(html, /function matchesRecordsStatusFilters\(/);
 assert.match(html, /<th>Đẩy kho<\/th>/);
 assert.match(html, /id="selectAllNhapKho"/);
+assert.match(html, /id="nhapKhoSelectedCount"/);
+assert.match(html, /function updateNhapKhoSelectedCount\(/);
 assert.match(html, /paintNhapKhoSelectBtn/);
 assert.match(html, /skip_sync:true/);
 assert.match(html, /bindActionButton\('pushSupabaseBtn',\(\)=>startManualSync\(true\)\)/);

@@ -12,6 +12,9 @@ test('production list exposes date/shift/machine filters and push button',()=>{
   assert.match(html,/id="recordsFilterShift"/);
   assert.match(html,/id="recordsFilterMachine"/);
   assert.match(html,/id="recordsFilterProductCode"/);
+  assert.match(html,/id="recordsFilterSync"/);
+  assert.match(html,/id="recordsFilterNhapKho"/);
+  assert.match(html,/function matchesRecordsStatusFilters\(/);
   assert.match(html,/function recordsListQuery\(/);
   assert.match(html,/qr_code='\+encodeURIComponent\(productCode\)/);
   assert.match(html,/id="pushSupabaseBtn"/);
