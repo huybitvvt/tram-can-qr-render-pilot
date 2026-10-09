@@ -9,6 +9,8 @@ const html = fs.readFileSync(
 
 assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy kho</);
 assert.match(html, /<th>Đẩy kho<\/th>/);
+assert.match(html, /id="selectAllNhapKho"/);
+assert.match(html, /function canSelectForNhapKho\(/);
 assert.match(html, /function recordNhapKhoStatus\(/);
 assert.match(html, /function appendNhapKhoStatusCell\(/);
 assert.match(html, /Đã đẩy kho/);
@@ -17,8 +19,11 @@ assert.match(html, /id="nhapKhoModal"/);
 assert.match(html, /id="confirmNhapKhoBtn"/);
 assert.match(html, /id="checkNhapKhoBtn"/);
 assert.match(html, /function openNhapKhoModal\(/);
+assert.match(html, /event_ids:eventIds/);
 assert.match(html, /\/api\/warehouse\/nhap-kho\/confirm/);
 assert.match(html, /Đã nhập kho/);
+assert.match(html, /production-row-delete/);
+assert.match(html, /Xóa dòng đã đẩy kho/);
 assert.match(html, /NHAP_KHO_SUMMARY_KEY='rollQrScale\.nhapKhoSummary\.v1'/);
 assert.match(html, /function rememberNhapKhoPush\(/);
 assert.match(html, /id="nhapKhoSummaryModal"/);
@@ -47,7 +52,8 @@ function confirmContext(api) {
   for (const id of ['confirmNhapKhoBtn', 'checkNhapKhoBtn', 'closeNhapKhoBtn', 'nhapKhoStatus', 'productionRecordsStatus']) {
     fields[id] = { disabled: false };
   }
-  const context = vm.createContext({ nhapKhoBusy: false, $: id => fields[id], api,
+  const context = vm.createContext({ nhapKhoBusy: false, nhapKhoSelectedEventIds: ['e1'],
+    selectedNhapKhoIds: new Set(['e1']), $: id => fields[id], api,
     status: (field, message, kind) => Object.assign(field, { message, kind }),
     setManualSyncRunning: () => {}, closeNhapKhoModal: () => {}, loadRecords: async () => {},
     rememberNhapKhoPush: () => null,

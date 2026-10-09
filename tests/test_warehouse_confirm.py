@@ -4,6 +4,77 @@ from roll_qr_scale import warehouse
 import pytest
 
 
+def test_confirm_nhap_kho_uses_selected_event_ids(monkeypatch) -> None:
+    monkeypatch.setattr(warehouse, "kho_configured", lambda: True)
+    monkeypatch.setattr(warehouse, "kho_supabase_url", lambda: "https://kho.example")
+    monkeypatch.setattr(warehouse, "kho_supabase_key", lambda: "key")
+    monkeypatch.setattr(
+        warehouse,
+        "write_nhap_kho_batch",
+        lambda *_args, **kwargs: {
+            "success": True,
+            "saved": [{"ma_sp_quet": "SP01_B", "created_at": "t"}],
+            "duplicateCodes": [],
+            "source": "kho",
+        },
+    )
+    monkeypatch.setattr(
+        warehouse,
+        "update_can_tu_dong_nhap_kho",
+        lambda *_args, **kwargs: {
+            "success": True,
+            "updated": 1,
+            "requested": 1,
+            "confirmed_count": 1,
+            "nhap_kho_luc": "2026-10-08T10:00:00+00:00",
+            "nhap_kho_boi": "Trạm cân",
+        },
+    )
+    monkeypatch.setattr(
+        warehouse,
+        "fetch_can_tu_dong_by_event_ids",
+        lambda *_args: [{"event_id": "e2", "qr_code": "SP01_B"}],
+    )
+    monkeypatch.setattr(
+        warehouse,
+        "append_nhap_kho_summary_row",
+        lambda entry: {"ok": True, "rows": [entry], "csv_path": "x.csv", "folder": "x"},
+    )
+
+    result = warehouse.confirm_nhap_kho(
+        items=[
+            {
+                "event_id": "e1",
+                "qr_code": "SP01_A",
+                "work_date": "2026-10-08",
+                "shift": "HC1",
+                "machine": "Máy 1",
+            },
+            {
+                "event_id": "e2",
+                "qr_code": "SP01_B",
+                "work_date": "2026-10-08",
+                "shift": "HC1",
+                "machine": "Máy 1",
+            },
+        ],
+        kho="Kho thành phẩm",
+        ca="HC1",
+        may="Máy 1",
+        ngay="2026-10-08",
+        ma_sp="SP01",
+        so_cuon=1,
+        event_ids=["e2"],
+        nguoi="Trạm cân",
+        run_manual_sync=lambda: {"state": "complete", "synced": 1, "empty": False},
+        weigh_supabase_url="https://weigh.example",
+        weigh_supabase_key="weigh-key",
+    )
+
+    assert result["saved"] == ["SP01_B"]
+    assert result["saved_count"] == 1
+
+
 def test_confirm_nhap_kho_writes_and_marks_status(monkeypatch) -> None:
     calls: dict[str, object] = {}
 

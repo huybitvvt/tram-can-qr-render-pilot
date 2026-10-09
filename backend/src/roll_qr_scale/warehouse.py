@@ -910,6 +910,44 @@ def filter_waiting_candidates(
     return selected
 
 
+def _normalize_event_id_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in raw:
+        event_id = str(item or "").strip()
+        if not event_id or event_id in seen:
+            continue
+        seen.add(event_id)
+        ordered.append(event_id)
+    return ordered
+
+
+def select_nhap_kho_preview(
+    waiting: list[dict[str, object]],
+    *,
+    so_cuon: int,
+    event_ids: list[str] | None = None,
+) -> list[dict[str, object]]:
+    wanted = _normalize_event_id_list(event_ids or [])
+    if wanted:
+        by_id = {
+            str(row.get("event_id") or "").strip(): row
+            for row in waiting
+            if str(row.get("event_id") or "").strip()
+        }
+        missing = [event_id for event_id in wanted if event_id not in by_id]
+        if missing:
+            raise ValueError(
+                "Một số dòng đã chọn không còn chờ đẩy kho (đã đẩy hoặc lệch ca/máy/Mã SP)"
+            )
+        return [by_id[event_id] for event_id in wanted]
+    if so_cuon < 1:
+        return []
+    return waiting[:so_cuon]
+
+
 def confirm_nhap_kho(
     *,
     items: list[dict[str, object]],
@@ -925,11 +963,13 @@ def confirm_nhap_kho(
     weigh_supabase_key: str,
     update_local_row: Callable[[str, str, str, str, str], None] | None = None,
     weigh_request: Callable[[list[str], str], dict[str, object]] | None = None,
+    event_ids: list[str] | None = None,
 ) -> dict[str, object]:
     if not kho_configured():
         raise RuntimeError(f"Chưa cấu hình DB kho ({kho_db_label()})")
-    if so_cuon < 1:
-        raise ValueError("Nhập số cuộn để hiện mã QR chờ nhập kho")
+    selected_ids = _normalize_event_id_list(event_ids or [])
+    if not selected_ids and so_cuon < 1:
+        raise ValueError("Tick chọn dòng SP hoặc nhập số cuộn để đẩy kho")
     if not kho.strip():
         raise ValueError("Chưa có kho thành phẩm để lập phiếu nhập")
     if not ca.strip() or not may.strip() or not ma_sp.strip():
@@ -940,7 +980,9 @@ def confirm_nhap_kho(
     waiting = filter_waiting_candidates(
         items, work_date=ngay, shift=ca, machine=may, ma_sp=ma_sp
     )
-    preview = waiting[:so_cuon]
+    preview = select_nhap_kho_preview(
+        waiting, so_cuon=so_cuon, event_ids=selected_ids or None
+    )
     if not preview:
         raise ValueError("Không còn mã QR chờ nhập kho cho Mã SP này")
     event_ids = [str(row.get("event_id") or "").strip() for row in preview]

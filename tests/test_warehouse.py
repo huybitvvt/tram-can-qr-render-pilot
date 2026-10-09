@@ -16,6 +16,7 @@ from roll_qr_scale.warehouse import (
     product_code_from_qr,
     read_nhap_kho_status,
     save_nhap_kho_summary_rows,
+    select_nhap_kho_preview,
     upsert_local_nhap_kho_tags,
 )
 
@@ -75,6 +76,16 @@ def test_waiting_filter_skips_already_imported_rows() -> None:
     assert not is_waiting_nhap_kho(done)
     assert not is_waiting_nhap_kho(done_by_tag)
     assert not is_waiting_nhap_kho(done_by_field)
+
+
+def test_select_nhap_kho_preview_keeps_selected_event_order() -> None:
+    waiting = [
+        {"event_id": "e1", "qr_code": "A"},
+        {"event_id": "e2", "qr_code": "B"},
+        {"event_id": "e3", "qr_code": "C"},
+    ]
+    preview = select_nhap_kho_preview(waiting, so_cuon=2, event_ids=["e3", "e1"])
+    assert [row["event_id"] for row in preview] == ["e3", "e1"]
 
 
 def test_local_nhap_kho_tags_round_trip() -> None:

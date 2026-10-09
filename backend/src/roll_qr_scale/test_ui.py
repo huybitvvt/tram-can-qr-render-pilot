@@ -88,6 +88,7 @@ from .warehouse import (
     product_code_from_qr,
     read_nhap_kho_status,
     save_nhap_kho_summary_rows,
+    select_nhap_kho_preview,
     upsert_local_nhap_kho_tags,
 )
 from .station_session import (
@@ -3140,6 +3141,11 @@ class StationUIService:
             raise ValueError("Số cuộn không hợp lệ") from exc
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
             raise ValueError("Ngày phiếu không hợp lệ")
+        selected_ids = [
+            str(item or "").strip()
+            for item in (payload.get("event_ids") or [])
+            if str(item or "").strip()
+        ] if isinstance(payload.get("event_ids"), list) else []
         pool = self.warehouse_measurement_pool(
             work_date=work_date, shift=shift, machine=machine
         )
@@ -3164,7 +3170,12 @@ class StationUIService:
             seen_codes.add(key)
             ma_sp_options.append(code)
         ma_sp_options.sort(key=lambda value: value.lower())
-        preview = waiting[:so_cuon] if so_cuon > 0 else []
+        try:
+            preview = select_nhap_kho_preview(
+                waiting, so_cuon=so_cuon, event_ids=selected_ids or None
+            )
+        except ValueError:
+            preview = []
         return {
             "ok": True,
             "waiting_count": len(waiting),
@@ -3179,6 +3190,7 @@ class StationUIService:
             ],
             "ma_sp_options": ma_sp_options,
             "configured": kho_configured(),
+            "event_ids": [str(item.get("event_id") or "") for item in preview],
         }
 
     def warehouse_check_codes(self, payload: dict[str, object]) -> dict[str, object]:
@@ -3214,10 +3226,17 @@ class StationUIService:
         ma_sp = str(payload.get("ma_sp") or "").strip()
         kho = str(payload.get("kho") or "").strip()
         nguoi = str(payload.get("nguoi") or payload.get("nhan_su") or "").strip() or "Không rõ"
+        selected_ids = [
+            str(item or "").strip()
+            for item in (payload.get("event_ids") or [])
+            if str(item or "").strip()
+        ] if isinstance(payload.get("event_ids"), list) else []
         try:
             so_cuon = int(payload.get("so_cuon") or 0)
         except (TypeError, ValueError) as exc:
             raise ValueError("Số cuộn không hợp lệ") from exc
+        if selected_ids:
+            so_cuon = max(so_cuon, len(selected_ids))
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
             raise ValueError("Ngày phiếu không hợp lệ")
 
@@ -3286,6 +3305,7 @@ class StationUIService:
             weigh_supabase_key=_supabase_read_key(),
             update_local_row=update_local,
             weigh_request=weigh_request if api_url and api_token else None,
+            event_ids=selected_ids or None,
         )
 
     def warehouse_nhap_kho_summary(self) -> dict[str, object]:

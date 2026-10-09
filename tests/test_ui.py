@@ -3377,14 +3377,20 @@ def test_ui_confirms_the_exact_row_before_deleting_saved_error_photos() -> None:
     assert "cloud_photo_drafts_deleted" in TEST_UI_HTML
 
 
-def test_production_history_only_offers_delete_for_error_rows() -> None:
+def test_production_history_offers_delete_for_all_rows_including_pushed() -> None:
     assert 'class="record-actions-col">Thao tác</th>' in TEST_UI_HTML
     assert 'id="productionRecordsStatus"' in TEST_UI_HTML
     assert "function appendProductionDeleteAction(" in TEST_UI_HTML
-    assert "if(errorState==='error')" in TEST_UI_HTML
+    assert "function deleteProductionRecord(" in TEST_UI_HTML
     assert "button.textContent='Xóa dòng lỗi'" in TEST_UI_HTML
-    assert "CHỈ XÓA DÒNG LỖI NÀY?\\nMã QR:" in TEST_UI_HTML
-    assert "recordErrorStatus(item)!=='error'" in TEST_UI_HTML
+    assert "button.className='production-row-delete'" in TEST_UI_HTML
+    assert "CHỈ XÓA DÒNG LỖI NÀY?" in TEST_UI_HTML
+    assert "CHỈ XÓA DÒNG NÀY?" in TEST_UI_HTML
+    assert "Xóa dòng đã đẩy kho" in TEST_UI_HTML
+    assert 'id="selectAllNhapKho"' in TEST_UI_HTML
+    assert "function canSelectForNhapKho(" in TEST_UI_HTML
+    assert "event_ids:eventIds" in TEST_UI_HTML
+    assert "Hãy tick chọn các dòng SP chờ đẩy kho trước khi bấm Đẩy kho." in TEST_UI_HTML
 
 
 def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
