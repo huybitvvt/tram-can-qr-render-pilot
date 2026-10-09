@@ -1,5 +1,5 @@
 #define MyAppName "Tram Can QR"
-#define MyAppVersion "0.2.0-rc48"
+#define MyAppVersion "0.2.0-rc49"
 #define MyAppExeName "TramCanQR.exe"
 
 [Setup]

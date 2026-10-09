@@ -71,6 +71,7 @@ from .qr_reader import QRReader
 from .scale import WeightReading
 from .weight_limits import validate_production_weights
 from .warehouse import (
+    append_nhap_kho_summary_row,
     check_nhap_kho_codes,
     confirm_nhap_kho,
     default_finished_goods_warehouse_name,
@@ -81,8 +82,11 @@ from .warehouse import (
     kho_db_label,
     kho_supabase_key,
     kho_supabase_url,
+    nhap_kho_summary_status,
     normalize_product_code_key,
+    open_nhap_kho_exports_folder,
     product_code_from_qr,
+    save_nhap_kho_summary_rows,
     upsert_local_nhap_kho_tags,
 )
 from .station_session import (
@@ -3261,6 +3265,21 @@ class StationUIService:
             weigh_request=weigh_request if api_url and api_token else None,
         )
 
+    def warehouse_nhap_kho_summary(self) -> dict[str, object]:
+        return nhap_kho_summary_status()
+
+    def warehouse_nhap_kho_summary_save(self, payload: dict[str, object]) -> dict[str, object]:
+        rows = payload.get("rows")
+        entry = payload.get("entry")
+        if isinstance(entry, dict) and not isinstance(rows, list):
+            return append_nhap_kho_summary_row(entry)
+        if not isinstance(rows, list):
+            raise ValueError("Thiếu danh sách tổng hợp đẩy kho")
+        return save_nhap_kho_summary_rows(rows)
+
+    def warehouse_nhap_kho_summary_open(self) -> dict[str, object]:
+        return open_nhap_kho_exports_folder()
+
     def status(self) -> dict[str, object]:
         station_states = {item["station_id"]: item for item in self.sessions.statuses()}
         stations: list[dict[str, object]] = []
@@ -5845,6 +5864,9 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             if parsed.path == "/api/warehouse/kho-thanh-pham":
                 self.send_json(200, service.warehouse_warehouses())
                 return
+            if parsed.path == "/api/warehouse/nhap-kho/summary":
+                self.send_json(200, service.warehouse_nhap_kho_summary())
+                return
             if parsed.path == "/api/warehouse/nhap-kho/candidates":
                 query = {
                     key: values[0] if values else ""
@@ -6499,6 +6521,27 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         self.send_json(400, {"ok": False, "message": str(exc)})
                     except RuntimeError as exc:
                         self.send_json(503, {"ok": False, "message": str(exc)})
+                    return
+                if self.path in {
+                    "/api/warehouse/nhap-kho/summary",
+                    "/api/warehouse/nhap-kho/summary-export",
+                }:
+                    try:
+                        self.send_json(
+                            200, service.warehouse_nhap_kho_summary_save(payload)
+                        )
+                    except ValueError as exc:
+                        self.send_json(400, {"ok": False, "message": str(exc)})
+                    except OSError as exc:
+                        self.send_json(500, {"ok": False, "message": str(exc)})
+                    return
+                if self.path == "/api/warehouse/nhap-kho/summary-open":
+                    try:
+                        self.send_json(
+                            200, service.warehouse_nhap_kho_summary_open()
+                        )
+                    except RuntimeError as exc:
+                        self.send_json(500, {"ok": False, "message": str(exc)})
                     return
                 if self.path == "/api/weighing-batches/confirm":
                     work_date = str(payload.get("work_date") or "").strip()

@@ -14,6 +14,14 @@ assert.match(html, /id="checkNhapKhoBtn"/);
 assert.match(html, /function openNhapKhoModal\(/);
 assert.match(html, /\/api\/warehouse\/nhap-kho\/confirm/);
 assert.match(html, /Đã nhập kho/);
+assert.match(html, /NHAP_KHO_SUMMARY_KEY='rollQrScale\.nhapKhoSummary\.v1'/);
+assert.match(html, /function rememberNhapKhoPush\(/);
+assert.match(html, /id="nhapKhoSummaryModal"/);
+assert.match(html, /Tổng hợp đẩy kho/);
+assert.match(html, /\/api\/warehouse\/nhap-kho\/summary/);
+assert.match(html, /\/api\/warehouse\/nhap-kho\/summary-export/);
+assert.match(html, /Mở thư mục Excel/);
+assert.doesNotMatch(html, /function downloadNhapKhoSummaryCsv\(/);
 assert.doesNotMatch(html, /bindActionButton\('pushSupabaseBtn',\(\)=>startManualSync\(true\)\)/);
 
 console.log('warehouse_ui.test.cjs: ok');
@@ -33,6 +41,7 @@ function confirmContext(api) {
   const context = vm.createContext({ nhapKhoBusy: false, $: id => fields[id], api,
     status: (field, message, kind) => Object.assign(field, { message, kind }),
     setManualSyncRunning: () => {}, closeNhapKhoModal: () => {}, loadRecords: async () => {},
+    rememberNhapKhoPush: () => null,
     refreshNhapKhoCandidates: async () => { fields.nhapKhoStatus.message = 'Sẵn sàng'; },
   });
   vm.runInContext(html.match(/^async function confirmNhapKho\(\).*$/m)[0], context);

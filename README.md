@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc48`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc48/TramCanQR-Setup-0.2.0-rc48.exe).
+>    Bản `0.2.0-rc49`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc49/TramCanQR-Setup-0.2.0-rc49.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc48.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc49.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -689,4 +689,8 @@ Bản 0.2.0-rc45 không đẩy dòng lỗi lên Supabase. Sau lượt đẩy, h�
 
 Bản 0.2.0-rc46 thêm ô Ghi chú dưới khung camera: tự lưu trên máy, F5 không mất; có chữ đậm và chỉnh cỡ chữ. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc46.md).
 
+Bản 0.2.0-rc47 đổi nút Đẩy kho: đồng bộ phiếu cân lên Supabase cân AI, ghi `nhap_kho`/`phieu_nhap`, rồi cập nhật trạng thái Đã nhập kho. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc47.md).
+
 Bản 0.2.0-rc48 nhận cấu hình `SUPABASE_KHO_*` trên Windows, xác nhận dữ liệu cân AI trước khi ghi kho chờ và dùng lại phiếu khi bấm lại sau lỗi mạng. Cần cập nhật Edge Function `ingest-measurement` bản này trước khi cài bộ mới. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc48.md).
+
+Bản 0.2.0-rc49 lưu tổng hợp đẩy kho thẳng vào folder exports trên máy (CSV/Excel), không tải qua trình duyệt. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc49.md).

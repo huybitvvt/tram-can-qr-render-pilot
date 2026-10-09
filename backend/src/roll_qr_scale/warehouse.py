@@ -2,18 +2,217 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import os
 import re
+import subprocess
+import sys
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Callable
 
 NHAP_KHO_CHO = "Chờ nhập kho"
 NHAP_KHO_DA = "Đã nhập kho"
+SUMMARY_JSON_NAME = "tong-hop-day-kho.json"
+SUMMARY_CSV_NAME = "tong-hop-day-kho.csv"
+
+
+def nhap_kho_exports_dir() -> Path:
+    """Writable folder for day-end warehouse push summary files."""
+
+    configured = os.environ.get("ROLL_SCALE_NHAP_KHO_EXPORT_DIR", "").strip()
+    if configured:
+        root = Path(configured)
+    else:
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        root = base / "TramCanQR" / "exports"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def nhap_kho_summary_paths() -> tuple[Path, Path]:
+    folder = nhap_kho_exports_dir()
+    return folder / SUMMARY_JSON_NAME, folder / SUMMARY_CSV_NAME
+
+
+def _normalize_summary_row(item: object) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    ma_phieu = str(item.get("ma_phieu") or "").strip()
+    ngay = str(item.get("ngay") or "").strip()
+    try:
+        so_luong = max(0, int(float(item.get("so_luong") or 0)))
+    except (TypeError, ValueError):
+        so_luong = 0
+    if not ma_phieu or not ngay or so_luong < 1:
+        return None
+    return {
+        "id": str(item.get("id") or "").strip(),
+        "ma_phieu": ma_phieu,
+        "ma_sp": str(item.get("ma_sp") or "").strip(),
+        "so_luong": so_luong,
+        "ngay": ngay,
+        "ca": str(item.get("ca") or "").strip(),
+        "may": str(item.get("may") or "").strip(),
+        "kho": str(item.get("kho") or "").strip(),
+        "saved_at": str(item.get("saved_at") or "").strip(),
+    }
+
+
+def load_nhap_kho_summary_rows() -> list[dict[str, object]]:
+    json_path, _csv_path = nhap_kho_summary_paths()
+    if not json_path.is_file():
+        return []
+    try:
+        payload = json.loads(json_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    rows = payload.get("rows") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return []
+    cleaned: list[dict[str, object]] = []
+    for item in rows:
+        normalized = _normalize_summary_row(item)
+        if normalized is not None:
+            cleaned.append(normalized)
+    return cleaned[-500:]
+
+
+def _summary_csv_text(rows: list[dict[str, object]]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\r\n")
+    writer.writerow(
+        [
+            "TT",
+            "Tên phiếu đẩy",
+            "Sản phẩm",
+            "Số lượng",
+            "Ngày",
+            "Ca",
+            "Máy",
+            "Kho",
+            "Thời điểm lưu",
+        ]
+    )
+    total = 0
+    for index, row in enumerate(rows, start=1):
+        qty = int(row.get("so_luong") or 0)
+        total += qty
+        writer.writerow(
+            [
+                index,
+                row.get("ma_phieu") or "",
+                row.get("ma_sp") or "",
+                qty,
+                row.get("ngay") or "",
+                row.get("ca") or "",
+                row.get("may") or "",
+                row.get("kho") or "",
+                row.get("saved_at") or "",
+            ]
+        )
+    writer.writerow(["", "TỔNG", "", total, "", "", "", "", ""])
+    return "\ufeff" + buffer.getvalue()
+
+
+def save_nhap_kho_summary_rows(rows: list[object]) -> dict[str, object]:
+    cleaned: list[dict[str, object]] = []
+    for item in rows:
+        normalized = _normalize_summary_row(item)
+        if normalized is not None:
+            cleaned.append(normalized)
+    cleaned = cleaned[-500:]
+    json_path, csv_path = nhap_kho_summary_paths()
+    payload = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "rows": cleaned,
+    }
+    json_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    csv_path.write_text(_summary_csv_text(cleaned), encoding="utf-8-sig")
+    return {
+        "ok": True,
+        "count": len(cleaned),
+        "folder": str(nhap_kho_exports_dir()),
+        "json_path": str(json_path),
+        "csv_path": str(csv_path),
+        "path": str(csv_path),
+        "rows": cleaned,
+    }
+
+
+def append_nhap_kho_summary_row(entry: dict[str, object]) -> dict[str, object]:
+    rows = load_nhap_kho_summary_rows()
+    next_row = _normalize_summary_row(entry)
+    if next_row is None:
+        raise ValueError("Dòng tổng hợp đẩy kho không hợp lệ")
+    if not next_row.get("id"):
+        next_row["id"] = (
+            f"nk-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}-"
+            f"{len(rows) + 1}"
+        )
+    if not next_row.get("saved_at"):
+        next_row["saved_at"] = datetime.now(timezone.utc).isoformat()
+    duplicate = any(
+        str(row.get("ma_phieu")) == next_row["ma_phieu"]
+        and str(row.get("ngay")) == next_row["ngay"]
+        and str(row.get("ma_sp")) == next_row["ma_sp"]
+        and int(row.get("so_luong") or 0) == int(next_row["so_luong"])
+        and str(row.get("ca")) == next_row["ca"]
+        for row in rows
+    )
+    if not duplicate:
+        rows.append(next_row)
+    return save_nhap_kho_summary_rows(rows)
+
+
+def nhap_kho_summary_status() -> dict[str, object]:
+    json_path, csv_path = nhap_kho_summary_paths()
+    rows = load_nhap_kho_summary_rows()
+    return {
+        "ok": True,
+        "count": len(rows),
+        "folder": str(nhap_kho_exports_dir()),
+        "json_path": str(json_path),
+        "csv_path": str(csv_path),
+        "path": str(csv_path),
+        "rows": rows,
+    }
+
+
+def open_nhap_kho_exports_folder() -> dict[str, object]:
+    folder = nhap_kho_exports_dir()
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(str(folder))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(
+                ["open", str(folder)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                ["xdg-open", str(folder)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except OSError as exc:
+        raise RuntimeError(f"Không mở được thư mục exports: {exc}") from exc
+    return {
+        "ok": True,
+        "folder": str(folder),
+        "path": str(folder / SUMMARY_CSV_NAME),
+        "csv_path": str(folder / SUMMARY_CSV_NAME),
+    }
 
 
 def kho_supabase_url() -> str:
@@ -843,6 +1042,23 @@ def confirm_nhap_kho(
             for row in group:
                 update_local_row(str(row["event_id"]), NHAP_KHO_DA, luc, boi, receipt)
 
+    summary_export: dict[str, object] = {"ok": False}
+    try:
+        summary_export = append_nhap_kho_summary_row(
+            {
+                "ma_phieu": ma_phieu,
+                "ma_sp": ma_sp.strip(),
+                "so_luong": len(saved_rows),
+                "ngay": ngay,
+                "ca": ca.strip(),
+                "may": may.strip(),
+                "kho": kho.strip(),
+                "saved_at": luc,
+            }
+        )
+    except (OSError, ValueError) as exc:
+        summary_export = {"ok": False, "message": str(exc)}
+
     return {
         "ok": True,
         "ma_phieu": next(iter(groups)),
@@ -859,4 +1075,5 @@ def confirm_nhap_kho(
         "status_update": status_update,
         "kho": kho.strip(),
         "source": kho_db_label(),
+        "summary_export": summary_export,
     }

@@ -36,6 +36,18 @@ def test_confirm_nhap_kho_writes_and_marks_status(monkeypatch) -> None:
         {"event_id": "e1", "qr_code": "SP01_A"},
         {"event_id": "e2", "qr_code": "SP01_DUP"},
     ])
+    monkeypatch.setattr(
+        warehouse,
+        "append_nhap_kho_summary_row",
+        lambda entry: {
+            "ok": True,
+            "count": 1,
+            "path": "C:/tmp/tong-hop-day-kho.csv",
+            "csv_path": "C:/tmp/tong-hop-day-kho.csv",
+            "folder": "C:/tmp",
+            "rows": [entry],
+        },
+    )
 
     local_updates: list[tuple] = []
 
@@ -77,6 +89,8 @@ def test_confirm_nhap_kho_writes_and_marks_status(monkeypatch) -> None:
     assert calls["update"]["ma_phieu"] == result["ma_phieu"]
     assert local_updates and local_updates[0][0] == "e1"
     assert local_updates[0][1] == warehouse.NHAP_KHO_DA
+    assert result["summary_export"]["ok"] is True
+    assert result["summary_export"]["csv_path"].endswith("tong-hop-day-kho.csv")
 
 
 def confirm_args():

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from roll_qr_scale.warehouse import (
     NHAP_KHO_DA,
+    append_nhap_kho_summary_row,
     filter_waiting_candidates,
     is_finished_goods_warehouse_name,
     is_waiting_nhap_kho,
+    load_nhap_kho_summary_rows,
     machine_slip_code_token,
     new_phieu_nhap_code,
+    nhap_kho_summary_status,
     product_code_from_qr,
     read_nhap_kho_status,
+    save_nhap_kho_summary_rows,
     upsert_local_nhap_kho_tags,
 )
 
@@ -82,3 +87,37 @@ def test_warehouse_names_fall_back_to_receipts_if_catalog_is_unavailable(monkeyp
 
     monkeypatch.setattr(warehouse, "_postgrest_request", request)
     assert warehouse.fetch_finished_goods_warehouses("url", "key") == ["Kho thành phẩm 1"]
+
+
+def test_nhap_kho_summary_writes_csv_json(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ROLL_SCALE_NHAP_KHO_EXPORT_DIR", str(tmp_path))
+    saved = append_nhap_kho_summary_row(
+        {
+            "ma_phieu": "PN-MBB15-20261008-010203",
+            "ma_sp": "SP01",
+            "so_luong": 3,
+            "ngay": "2026-10-08",
+            "ca": "HC1",
+            "may": "Máy bao bì 15",
+            "kho": "Kho thành phẩm",
+            "saved_at": "2026-10-08T01:02:03+00:00",
+        }
+    )
+    assert saved["ok"] is True
+    assert saved["count"] == 1
+    assert Path(saved["csv_path"]).is_file()
+    assert Path(saved["json_path"]).is_file()
+    csv_text = Path(saved["csv_path"]).read_text(encoding="utf-8-sig")
+    assert "PN-MBB15-20261008-010203" in csv_text
+    assert "TỔNG" in csv_text
+    rows = load_nhap_kho_summary_rows()
+    assert len(rows) == 1
+    assert rows[0]["ma_sp"] == "SP01"
+    # duplicate append is ignored
+    again = append_nhap_kho_summary_row(rows[0])
+    assert again["count"] == 1
+    cleared = save_nhap_kho_summary_rows([])
+    assert cleared["count"] == 0
+    status = nhap_kho_summary_status()
+    assert status["count"] == 0
+    assert status["folder"] == str(tmp_path)
