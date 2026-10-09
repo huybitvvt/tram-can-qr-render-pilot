@@ -311,6 +311,9 @@ def normalize_qr_key(value: str) -> str:
 
 
 def read_nhap_kho_status(item: dict[str, object]) -> str:
+    top = str(item.get("nhap_kho_trang_thai") or "").strip()
+    if top:
+        return top
     metadata = item.get("metadata")
     if isinstance(metadata, dict):
         status = str(metadata.get("nhap_kho_trang_thai") or "").strip()

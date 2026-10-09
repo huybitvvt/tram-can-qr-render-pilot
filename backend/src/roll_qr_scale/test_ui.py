@@ -86,6 +86,7 @@ from .warehouse import (
     normalize_product_code_key,
     open_nhap_kho_exports_folder,
     product_code_from_qr,
+    read_nhap_kho_status,
     save_nhap_kho_summary_rows,
     upsert_local_nhap_kho_tags,
 )
@@ -1257,6 +1258,12 @@ def _local_measurement_items(
             "product_image_url": product_url,
             "has_core_image": bool(core_url),
             "has_product_image": bool(product_url),
+            "nhap_kho_trang_thai": read_nhap_kho_status(
+                {
+                    "weight_raw": item.weight_raw or "",
+                    "metadata": {},
+                }
+            ),
         }
         items.append(payload)
         if len(items) >= limit:
@@ -3096,14 +3103,30 @@ class StationUIService:
                     "production_order": str(metadata.get("production_order") or "").strip(),
                     "metadata": metadata,
                     "weight_raw": str(metadata.get("weight_raw") or ""),
+                    "nhap_kho_trang_thai": read_nhap_kho_status(
+                        {
+                            "metadata": metadata,
+                            "weight_raw": str(metadata.get("weight_raw") or ""),
+                        }
+                    ),
                 }
                 existing = by_event.get(event_id)
                 if existing is None:
                     by_event[event_id] = payload
                 else:
-                    existing_meta = existing.get("metadata")
-                    if not isinstance(existing_meta, dict):
-                        existing["metadata"] = metadata
+                    existing_meta = (
+                        dict(existing["metadata"])
+                        if isinstance(existing.get("metadata"), dict)
+                        else {}
+                    )
+                    if metadata:
+                        existing_meta.update(metadata)
+                        existing["metadata"] = existing_meta
+                    # Remote Đã nhập kho wins so a later push never re-selects the roll.
+                    remote_status = read_nhap_kho_status(payload)
+                    existing["nhap_kho_trang_thai"] = remote_status or read_nhap_kho_status(
+                        existing
+                    )
         return list(by_event.values())
 
     def warehouse_candidates(self, payload: dict[str, object]) -> dict[str, object]:

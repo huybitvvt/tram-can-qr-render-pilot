@@ -50,9 +50,21 @@ def test_waiting_filter_skips_already_imported_rows() -> None:
         "qr_code": "SP01_B",
         "metadata": {"nhap_kho_trang_thai": NHAP_KHO_DA},
     }
+    done_by_tag = {
+        **waiting,
+        "event_id": "e4",
+        "qr_code": "SP01_D",
+        "weight_raw": "NHAP_KHO_STATUS=Đã nhập kho; NHAP_KHO_MA_PHIEU=PN-1",
+    }
+    done_by_field = {
+        **waiting,
+        "event_id": "e5",
+        "qr_code": "SP01_E",
+        "nhap_kho_trang_thai": NHAP_KHO_DA,
+    }
     other_sp = {**waiting, "event_id": "e3", "qr_code": "SP02_C"}
     rows = filter_waiting_candidates(
-        [waiting, done, other_sp],
+        [waiting, done, other_sp, done_by_tag, done_by_field],
         work_date="2026-10-08",
         shift="HC1",
         machine="Máy bao bì 15",
@@ -61,6 +73,8 @@ def test_waiting_filter_skips_already_imported_rows() -> None:
     assert [row["event_id"] for row in rows] == ["e1"]
     assert is_waiting_nhap_kho(waiting)
     assert not is_waiting_nhap_kho(done)
+    assert not is_waiting_nhap_kho(done_by_tag)
+    assert not is_waiting_nhap_kho(done_by_field)
 
 
 def test_local_nhap_kho_tags_round_trip() -> None:

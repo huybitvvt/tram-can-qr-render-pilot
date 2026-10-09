@@ -8,6 +8,11 @@ const html = fs.readFileSync(
 );
 
 assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy kho</);
+assert.match(html, /<th>Đẩy kho<\/th>/);
+assert.match(html, /function recordNhapKhoStatus\(/);
+assert.match(html, /function appendNhapKhoStatusCell\(/);
+assert.match(html, /Đã đẩy kho/);
+assert.match(html, /Chờ đẩy kho/);
 assert.match(html, /id="nhapKhoModal"/);
 assert.match(html, /id="confirmNhapKhoBtn"/);
 assert.match(html, /id="checkNhapKhoBtn"/);
@@ -21,6 +26,10 @@ assert.match(html, /Tổng hợp đẩy kho/);
 assert.match(html, /\/api\/warehouse\/nhap-kho\/summary/);
 assert.match(html, /\/api\/warehouse\/nhap-kho\/summary-export/);
 assert.match(html, /Mở thư mục Excel/);
+assert.match(html, /id="printNhapKhoSummaryBtn"/);
+assert.match(html, /function printNhapKhoSummary\(/);
+assert.match(html, /TỔNG HỢP ĐẨY KHO/);
+assert.match(html, /In PDF/);
 assert.doesNotMatch(html, /function downloadNhapKhoSummaryCsv\(/);
 assert.doesNotMatch(html, /bindActionButton\('pushSupabaseBtn',\(\)=>startManualSync\(true\)\)/);
 

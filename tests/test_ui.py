@@ -2408,6 +2408,11 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert 'id="stationNoteBoldBtn"' in TEST_UI_HTML
     assert 'id="stationNoteSize"' in TEST_UI_HTML
     assert ">Đẩy kho<" in TEST_UI_HTML
+    assert "<th>Đẩy kho</th>" in TEST_UI_HTML
+    assert "function recordNhapKhoStatus(" in TEST_UI_HTML
+    assert "function appendNhapKhoStatusCell(" in TEST_UI_HTML
+    assert "Đã đẩy kho" in TEST_UI_HTML
+    assert "Chờ đẩy kho" in TEST_UI_HTML
     assert 'id="nhapKhoModal"' in TEST_UI_HTML
     assert "openNhapKhoModal" in TEST_UI_HTML
     assert "/api/warehouse/nhap-kho/confirm" in TEST_UI_HTML
@@ -2418,6 +2423,10 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert "/api/warehouse/nhap-kho/summary" in TEST_UI_HTML
     assert "/api/warehouse/nhap-kho/summary-export" in TEST_UI_HTML
     assert "Mở thư mục Excel" in TEST_UI_HTML
+    assert 'id="printNhapKhoSummaryBtn"' in TEST_UI_HTML
+    assert "function printNhapKhoSummary(" in TEST_UI_HTML
+    assert "TỔNG HỢP ĐẨY KHO" in TEST_UI_HTML
+    assert "In PDF" in TEST_UI_HTML
     assert "downloadNhapKhoSummaryCsv" not in TEST_UI_HTML
 
 
