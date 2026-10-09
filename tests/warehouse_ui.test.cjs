@@ -7,9 +7,14 @@ const html = fs.readFileSync(
   'utf8'
 );
 
-assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy kho</);
+assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy Supabase</);
+assert.match(html, /id="nhapKhoBtn"[^>]*>Nhập kho</);
 assert.match(html, /<th>Đẩy kho<\/th>/);
 assert.match(html, /id="selectAllNhapKho"/);
+assert.match(html, /paintNhapKhoSelectBtn/);
+assert.match(html, /skip_sync:true/);
+assert.match(html, /bindActionButton\('pushSupabaseBtn',\(\)=>startManualSync\(true\)\)/);
+assert.match(html, /bindActionButton\('nhapKhoBtn',\(\)=>openNhapKhoModal\(\)\)/);
 assert.match(html, /function canSelectForNhapKho\(/);
 assert.match(html, /function recordNhapKhoStatus\(/);
 assert.match(html, /function appendNhapKhoStatusCell\(/);
@@ -38,7 +43,7 @@ assert.match(html, /function printNhapKhoSummary\(/);
 assert.match(html, /TỔNG HỢP ĐẨY KHO/);
 assert.match(html, /In PDF/);
 assert.doesNotMatch(html, /function downloadNhapKhoSummaryCsv\(/);
-assert.doesNotMatch(html, /bindActionButton\('pushSupabaseBtn',\(\)=>startManualSync\(true\)\)/);
+assert.doesNotMatch(html, /bindActionButton\('pushSupabaseBtn',\(\)=>openNhapKhoModal\(\)\)/);
 
 console.log('warehouse_ui.test.cjs: ok');
 

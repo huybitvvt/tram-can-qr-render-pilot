@@ -2407,7 +2407,9 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert "rollQrScale.stationNotes.v1" in TEST_UI_HTML
     assert 'id="stationNoteBoldBtn"' in TEST_UI_HTML
     assert 'id="stationNoteSize"' in TEST_UI_HTML
-    assert ">Đẩy kho<" in TEST_UI_HTML
+    assert ">Đẩy Supabase<" in TEST_UI_HTML
+    assert 'id="nhapKhoBtn"' in TEST_UI_HTML
+    assert ">Nhập kho<" in TEST_UI_HTML
     assert "<th>Đẩy kho</th>" in TEST_UI_HTML
     assert "function recordNhapKhoStatus(" in TEST_UI_HTML
     assert "function appendNhapKhoStatusCell(" in TEST_UI_HTML
@@ -3389,8 +3391,11 @@ def test_production_history_offers_delete_for_all_rows_including_pushed() -> Non
     assert "Xóa dòng đã đẩy kho" in TEST_UI_HTML
     assert 'id="selectAllNhapKho"' in TEST_UI_HTML
     assert "function canSelectForNhapKho(" in TEST_UI_HTML
+    assert "function paintNhapKhoSelectBtn(" in TEST_UI_HTML
     assert "event_ids:eventIds" in TEST_UI_HTML
-    assert "Hãy tick chọn các dòng SP chờ đẩy kho trước khi bấm Đẩy kho." in TEST_UI_HTML
+    assert "skip_sync:true" in TEST_UI_HTML
+    assert "Hãy bấm Chọn các dòng SP chờ đẩy kho, rồi bấm Nhập kho." in TEST_UI_HTML
+    assert "btn.textContent=selected?'Đã chọn':'Chọn'" in TEST_UI_HTML
 
 
 def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
@@ -3445,6 +3450,10 @@ def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> Non
     assert 'id="weighBatchRecordsCard"' in TEST_UI_HTML
     assert 'id="printSheet"' in TEST_UI_HTML
     assert "function printWeighBatch" in TEST_UI_HTML
+    assert "function appendPrintLetterhead" in TEST_UI_HTML
+    assert "print-letterhead-logo" in TEST_UI_HTML
+    assert "appendPrintLetterhead(sheet,'PHIẾU XÁC NHẬN ĐỢT CÂN')" in TEST_UI_HTML
+    assert "appendPrintLetterhead(sheet,'TỔNG HỢP ĐẨY KHO')" in TEST_UI_HTML
     assert "/api/weighing-batches/confirm" in TEST_UI_HTML
     assert "Đang lưu đợt cân trên máy" in TEST_UI_HTML
     assert "writeRollBatchConfirmed(0)" in TEST_UI_HTML

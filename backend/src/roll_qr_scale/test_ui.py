@@ -3323,10 +3323,25 @@ class StationUIService:
             event_ids=selected_ids or None,
         )
 
+        skip_sync = payload.get("skip_sync") not in {False, 0, "0", "false", "False", None}
+
         def run_sync() -> dict[str, object]:
+            if skip_sync:
+                # Nhập kho tách khỏi Đẩy Supabase: chỉ kiểm tra các dòng đã chọn còn chưa sync.
+                unsynced: list[str] = []
+                for event_id in selected_ids:
+                    row = self.store.get(event_id)
+                    if row is None or str(row.sync_status or "") != "synced":
+                        unsynced.append(event_id)
+                return {
+                    "skipped": True,
+                    "state": "complete",
+                    "unsynced_event_ids": unsynced,
+                    "reason": "skip_sync",
+                }
             if self.manual_sync is None:
                 return {"skipped": True, "reason": "Chưa cấu hình đồng bộ cân AI"}
-            payload = {
+            sync_payload = {
                 "date_from": work_date,
                 "date_to": work_date,
                 "shift": shift,
@@ -3338,8 +3353,8 @@ class StationUIService:
             }
             # Chỉ đồng bộ các dòng đang đẩy, không quét cả ca/máy.
             if selected_ids:
-                payload["event_ids"] = selected_ids
-            return self.manual_sync.run_now(payload)
+                sync_payload["event_ids"] = selected_ids
+            return self.manual_sync.run_now(sync_payload)
 
         def update_local(event_id: str, status: str, luc: str, boi: str, ma_phieu: str) -> None:
             item = self.store.get(event_id)

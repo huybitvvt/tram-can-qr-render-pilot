@@ -1010,7 +1010,10 @@ def confirm_nhap_kho(
     if sync_summary.get("state") == "error":
         raise RuntimeError("Đồng bộ cân AI lỗi: " + str(sync_summary.get("last_error") or "Hãy thử lại"))
     if set(event_ids).intersection(sync_summary.get("unsynced_event_ids") or []):
-        raise RuntimeError("Chưa đồng bộ xong phiếu cân AI; chưa ghi kho. " + str(sync_summary.get("last_error") or "Hãy thử lại"))
+        raise RuntimeError(
+            "Chưa đồng bộ xong phiếu cân AI; hãy bấm Đẩy Supabase trước rồi nhập kho lại. "
+            + str(sync_summary.get("last_error") or "")
+        )
 
     if weigh_request is not None:
         checked = weigh_request(event_ids, "")
