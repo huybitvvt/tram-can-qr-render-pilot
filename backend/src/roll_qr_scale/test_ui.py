@@ -86,10 +86,13 @@ from .warehouse import (
     normalize_product_code_key,
     open_nhap_kho_exports_folder,
     product_code_from_qr,
+    merge_nhap_kho_status,
     read_nhap_kho_status,
+    read_nhap_kho_status_optional,
     save_nhap_kho_summary_rows,
     select_nhap_kho_preview,
     upsert_local_nhap_kho_tags,
+    NHAP_KHO_DA,
 )
 from .station_session import (
     AnalysisBindingMismatch,
@@ -3123,11 +3126,42 @@ class StationUIService:
                     if metadata:
                         existing_meta.update(metadata)
                         existing["metadata"] = existing_meta
-                    # Remote Đã nhập kho wins so a later push never re-selects the roll.
-                    remote_status = read_nhap_kho_status(payload)
-                    existing["nhap_kho_trang_thai"] = remote_status or read_nhap_kho_status(
-                        existing
+                    # Remote/local Đã nhập kho wins; blank remote must not reset local Đã.
+                    merged = merge_nhap_kho_status(existing, payload)
+                    existing["nhap_kho_trang_thai"] = merged
+                    local_tagged = read_nhap_kho_status_optional(
+                        {"weight_raw": str(existing.get("weight_raw") or "")}
                     )
+                    if merged == NHAP_KHO_DA and local_tagged != NHAP_KHO_DA:
+                        # Persist cloud Đã xuống local để danh sách lần cân không còn hiện Chờ.
+                        event_id = str(existing.get("event_id") or "").strip()
+                        item = self.store.get(event_id) if event_id else None
+                        if item is not None:
+                            meta = (
+                                existing.get("metadata")
+                                if isinstance(existing.get("metadata"), dict)
+                                else {}
+                            )
+                            phieu = str(
+                                meta.get("nhap_kho_ma_phieu")
+                                or meta.get("ma_phieu")
+                                or ""
+                            ).strip()
+                            raw = upsert_local_nhap_kho_tags(
+                                item.weight_raw or "",
+                                status=NHAP_KHO_DA,
+                                luc=str(meta.get("nhap_kho_luc") or ""),
+                                boi=str(meta.get("nhap_kho_boi") or ""),
+                                ma_phieu=phieu,
+                            )
+                            self.store.update_measurement_fields(
+                                event_id,
+                                qr_code=item.qr_code,
+                                weight=item.weight,
+                                product_weight=item.product_weight,
+                                weight_raw=raw,
+                            )
+                            existing["weight_raw"] = raw
         return list(by_event.values())
 
     def warehouse_candidates(self, payload: dict[str, object]) -> dict[str, object]:

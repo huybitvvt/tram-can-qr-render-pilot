@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from roll_qr_scale.warehouse import (
+    NHAP_KHO_CHO,
     NHAP_KHO_DA,
     append_nhap_kho_summary_row,
     filter_waiting_candidates,
@@ -11,10 +12,12 @@ from roll_qr_scale.warehouse import (
     is_waiting_nhap_kho,
     load_nhap_kho_summary_rows,
     machine_slip_code_token,
+    merge_nhap_kho_status,
     new_phieu_nhap_code,
     nhap_kho_summary_status,
     product_code_from_qr,
     read_nhap_kho_status,
+    read_nhap_kho_status_optional,
     save_nhap_kho_summary_rows,
     select_nhap_kho_preview,
     upsert_local_nhap_kho_tags,
@@ -76,6 +79,18 @@ def test_waiting_filter_skips_already_imported_rows() -> None:
     assert not is_waiting_nhap_kho(done)
     assert not is_waiting_nhap_kho(done_by_tag)
     assert not is_waiting_nhap_kho(done_by_field)
+
+
+def test_merge_nhap_kho_status_keeps_local_done_when_remote_blank() -> None:
+    local = {"weight_raw": "NHAP_KHO_STATUS=Đã nhập kho"}
+    remote = {"metadata": {}, "weight_raw": ""}
+    assert read_nhap_kho_status_optional(remote) is None
+    assert merge_nhap_kho_status(local, remote) == NHAP_KHO_DA
+    assert merge_nhap_kho_status(
+        {"weight_raw": ""},
+        {"metadata": {"nhap_kho_trang_thai": NHAP_KHO_DA}},
+    ) == NHAP_KHO_DA
+    assert merge_nhap_kho_status({"weight_raw": ""}, remote) == NHAP_KHO_CHO
 
 
 def test_select_nhap_kho_preview_keeps_selected_event_order() -> None:

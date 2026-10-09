@@ -310,7 +310,8 @@ def normalize_qr_key(value: str) -> str:
     return str(value or "").strip().upper()
 
 
-def read_nhap_kho_status(item: dict[str, object]) -> str:
+def read_nhap_kho_status_optional(item: dict[str, object]) -> str | None:
+    """Return explicit warehouse status, or None when the row never recorded one."""
     top = str(item.get("nhap_kho_trang_thai") or "").strip()
     if top:
         return top
@@ -320,11 +321,25 @@ def read_nhap_kho_status(item: dict[str, object]) -> str:
         if status:
             return status
     raw = str(item.get("weight_raw") or "")
-    tagged = ""
     match = re.search(r"(?:^|; )NHAP_KHO_STATUS=([^;]*)", raw)
     if match:
         tagged = match.group(1).strip()
-    return tagged or NHAP_KHO_CHO
+        if tagged:
+            return tagged
+    return None
+
+
+def read_nhap_kho_status(item: dict[str, object]) -> str:
+    return read_nhap_kho_status_optional(item) or NHAP_KHO_CHO
+
+
+def merge_nhap_kho_status(local: dict[str, object], remote: dict[str, object]) -> str:
+    """Prefer Đã nhập kho from either side; never let a blank remote reset local Đã."""
+    remote_status = read_nhap_kho_status_optional(remote)
+    local_status = read_nhap_kho_status_optional(local)
+    if remote_status == NHAP_KHO_DA or local_status == NHAP_KHO_DA:
+        return NHAP_KHO_DA
+    return remote_status or local_status or NHAP_KHO_CHO
 
 
 def is_waiting_nhap_kho(item: dict[str, object]) -> bool:
