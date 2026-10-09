@@ -1092,7 +1092,23 @@ def _manual_sync_filters(payload: dict[str, object]) -> dict[str, str]:
         skip_flag = "1"
     else:
         skip_flag = "1" if skip_cloudinary not in {False, 0, "0", "false", "False"} else "0"
-    return {**filters, "scope": scope, "skip_cloudinary": skip_flag}
+    event_ids_raw = payload.get("event_ids")
+    if isinstance(event_ids_raw, list):
+        event_ids = ",".join(
+            str(item or "").strip()
+            for item in event_ids_raw
+            if str(item or "").strip()
+        )
+    else:
+        event_ids = str(event_ids_raw or "").strip()
+    if len(event_ids) > 20000:
+        raise ValueError("Danh sách event_id đồng bộ quá dài")
+    return {
+        **filters,
+        "scope": scope,
+        "skip_cloudinary": skip_flag,
+        "event_ids": event_ids,
+    }
 
 
 def _sync_row_has_error(item: object) -> bool:
@@ -1117,6 +1133,15 @@ def _manual_sync_matches(item: dict[str, object], filters: dict[str, str]) -> bo
     code = filters["qr_code"].casefold()
     if code and code not in str(item.get("qr_code") or "").casefold():
         return False
+    wanted = {
+        part.strip()
+        for part in str(filters.get("event_ids") or "").split(",")
+        if part.strip()
+    }
+    if wanted:
+        event_id = str(item.get("event_id") or "").strip()
+        if event_id not in wanted:
+            return False
     return True
 
 
@@ -3051,6 +3076,8 @@ class StationUIService:
         work_date: str,
         shift: str = "",
         machine: str = "",
+        include_remote: bool = True,
+        event_ids: list[str] | None = None,
     ) -> list[dict[str, object]]:
         local_items = _local_measurement_items(
             self.store,
@@ -3059,11 +3086,19 @@ class StationUIService:
             shift=shift,
             machine=machine,
         )
+        wanted = {
+            str(item or "").strip()
+            for item in (event_ids or [])
+            if str(item or "").strip()
+        }
         by_event = {
             str(item.get("event_id") or ""): item
             for item in local_items
             if str(item.get("event_id") or "").strip()
+            and (not wanted or str(item.get("event_id") or "").strip() in wanted)
         }
+        if not include_remote:
+            return list(by_event.values())
         supabase_url = _supabase_project_url()
         supabase_key = _supabase_read_key()
         api_url = self.manual_sync.worker.api_url if self.manual_sync else _ingest_api_url()
@@ -3180,8 +3215,13 @@ class StationUIService:
             for item in (payload.get("event_ids") or [])
             if str(item or "").strip()
         ] if isinstance(payload.get("event_ids"), list) else []
+        # Local-only: tránh kéo cả trang remote mỗi lần mở/lọc Đẩy kho.
         pool = self.warehouse_measurement_pool(
-            work_date=work_date, shift=shift, machine=machine
+            work_date=work_date,
+            shift=shift,
+            machine=machine,
+            include_remote=False,
+            event_ids=selected_ids or None,
         )
         waiting = filter_waiting_candidates(
             pool, work_date=work_date, shift=shift, machine=machine, ma_sp=ma_sp
@@ -3274,25 +3314,32 @@ class StationUIService:
         if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", work_date):
             raise ValueError("Ngày phiếu không hợp lệ")
 
+        # Local-only pool: xác minh QR trên cloud đã có ở weigh_request theo event_ids.
         pool = self.warehouse_measurement_pool(
-            work_date=work_date, shift=shift, machine=machine
+            work_date=work_date,
+            shift=shift,
+            machine=machine,
+            include_remote=False,
+            event_ids=selected_ids or None,
         )
 
         def run_sync() -> dict[str, object]:
             if self.manual_sync is None:
                 return {"skipped": True, "reason": "Chưa cấu hình đồng bộ cân AI"}
-            return self.manual_sync.run_now(
-                {
-                    "date_from": work_date,
-                    "date_to": work_date,
-                    "shift": shift,
-                    "machine": machine,
-                    "production_order": "",
-                    "qr_code": "",
-                    "scope": "production",
-                    "skip_cloudinary": True,
-                }
-            )
+            payload = {
+                "date_from": work_date,
+                "date_to": work_date,
+                "shift": shift,
+                "machine": machine,
+                "production_order": "",
+                "qr_code": "",
+                "scope": "production",
+                "skip_cloudinary": True,
+            }
+            # Chỉ đồng bộ các dòng đang đẩy, không quét cả ca/máy.
+            if selected_ids:
+                payload["event_ids"] = selected_ids
+            return self.manual_sync.run_now(payload)
 
         def update_local(event_id: str, status: str, luc: str, boi: str, ma_phieu: str) -> None:
             item = self.store.get(event_id)

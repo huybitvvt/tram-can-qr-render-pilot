@@ -29,9 +29,51 @@ def test_warehouse_pool_reads_all_pages_with_device_token(tmp_path, monkeypatch)
         assert len(result) == 205
         assert offsets == [0, 200]
         assert result[-1]["event_id"] == "e204"
+        offsets.clear()
+        local_only = service.warehouse_measurement_pool(
+            work_date="2026-10-08", shift="HC1", machine="Máy 1", include_remote=False
+        )
+        assert local_only == []
+        assert offsets == []
     finally:
         service.close()
         store.close()
+
+
+def test_manual_sync_filters_can_limit_to_selected_event_ids() -> None:
+    filters = test_ui._manual_sync_filters(
+        {
+            "date_from": "2026-10-08",
+            "date_to": "2026-10-08",
+            "shift": "HC1",
+            "machine": "Máy 1",
+            "scope": "production",
+            "event_ids": ["e1", "e3"],
+        }
+    )
+    assert filters["event_ids"] == "e1,e3"
+    assert test_ui._manual_sync_matches(
+        {
+            "event_id": "e1",
+            "qr_code": "SP01_A",
+            "work_date": "2026-10-08",
+            "shift": "HC1",
+            "machine": "Máy 1",
+            "weight_raw": "SOURCE_DATE=2026-10-08; SOURCE_SHIFT=HC1; SOURCE_MACHINE=Máy 1",
+        },
+        filters,
+    )
+    assert not test_ui._manual_sync_matches(
+        {
+            "event_id": "e2",
+            "qr_code": "SP01_B",
+            "work_date": "2026-10-08",
+            "shift": "HC1",
+            "machine": "Máy 1",
+            "weight_raw": "SOURCE_DATE=2026-10-08; SOURCE_SHIFT=HC1; SOURCE_MACHINE=Máy 1",
+        },
+        filters,
+    )
 
 
 def test_warehouse_confirm_uses_ingest_token_without_ai_service_key(tmp_path, monkeypatch):

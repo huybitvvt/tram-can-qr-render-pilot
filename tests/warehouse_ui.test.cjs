@@ -20,6 +20,8 @@ assert.match(html, /id="confirmNhapKhoBtn"/);
 assert.match(html, /id="checkNhapKhoBtn"/);
 assert.match(html, /function openNhapKhoModal\(/);
 assert.match(html, /event_ids:eventIds/);
+assert.match(html, /function markProductionRowsPushed\(/);
+assert.match(html, /void loadRecords\(\)/);
 assert.match(html, /\/api\/warehouse\/nhap-kho\/confirm/);
 assert.match(html, /Đã nhập kho/);
 assert.match(html, /production-row-delete/);
@@ -56,7 +58,7 @@ function confirmContext(api) {
     selectedNhapKhoIds: new Set(['e1']), $: id => fields[id], api,
     status: (field, message, kind) => Object.assign(field, { message, kind }),
     setManualSyncRunning: () => {}, closeNhapKhoModal: () => {}, loadRecords: async () => {},
-    rememberNhapKhoPush: () => null,
+    rememberNhapKhoPush: () => null, markProductionRowsPushed: () => {},
     refreshNhapKhoCandidates: async () => { fields.nhapKhoStatus.message = 'Sẵn sàng'; },
   });
   vm.runInContext(html.match(/^async function confirmNhapKho\(\).*$/m)[0], context);
