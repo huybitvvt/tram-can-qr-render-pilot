@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from roll_qr_scale.gemini_key_manager import GeminiKeyManager
@@ -219,3 +221,158 @@ def test_gemini_store_uses_legacy_compatible_encrypted_secret_action() -> None:
         secret_action="codex-auth",
     )
     assert store.secret_action == "codex-auth"
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        "AQ.test-key-value-123456789",
+        '  "AQ.test-key-value-123456789"  ',
+        "'AQ.test-key-value-123456789'",
+        "`AQ.test-key-value-123456789`",
+        'ROLL_SCALE_GEMINI_API_KEY="AQ.test-key-value-123456789"',
+        "ROLL_SCALE_GEMINI_BACKUP_API_KEY = 'AQ.test-key-value-123456789'",
+        'export GEMINI_API_KEY="AQ.test-key-value-123456789"',
+        "GOOGLE_API_KEY=AQ.test-key-value-123456789",
+        "AIza-test-key-value-123456789",
+    ],
+)
+def test_pasted_key_preserves_full_auth_key_and_normalizes_wrappers(pasted) -> None:
+    expected = (
+        "AIza-test-key-value-123456789"
+        if pasted.startswith("AIza")
+        else "AQ.test-key-value-123456789"
+    )
+    assert GeminiKeyManager._validate_format(pasted) == expected
+    assert GeminiKeyManager.key_id(pasted) == GeminiKeyManager.key_id(expected)
+
+
+@pytest.mark.parametrize(
+    "pasted",
+    [
+        "*" * 40,
+        "•" * 40,
+        "AQ.test-key value-123456789",
+        "AQ.test-key\nvalue-123456789",
+        "AQ.test-key\u200b-value-123456789",
+        '"AQ.test-key-value-123456789',
+        "SUPABASE_KHO_KEY=AQ.test-key-value-123456789",
+        "AQ." + "a" * 254,
+    ],
+)
+def test_masked_incomplete_or_corrupted_key_is_rejected_before_google(pasted) -> None:
+    with pytest.raises(ValueError, match="đúng định dạng"):
+        GeminiKeyManager._validate_format(pasted)
+
+
+@pytest.fixture
+def validation_client(monkeypatch):
+    from google import genai
+
+    def install(error=None):
+        calls = []
+        options = []
+
+        def generate_content(**kwargs):
+            calls.append(kwargs)
+            if error is not None:
+                raise error
+            return SimpleNamespace(text="OK")
+
+        client = SimpleNamespace(
+            models=SimpleNamespace(generate_content=generate_content),
+            closed=False,
+        )
+        client.close = lambda: setattr(client, "closed", True)
+
+        def create(**kwargs):
+            options.append(kwargs)
+            return client
+
+        monkeypatch.setattr(genai, "Client", create)
+        return client, calls, options
+
+    return install
+
+
+def test_validation_calls_capture_model_with_supplied_auth_key(validation_client) -> None:
+    client, calls, options = validation_client()
+    current = manager(MemoryStore())
+    current.validate('GEMINI_API_KEY="AQ.test-key-value-123456789"')
+
+    assert options[0]["api_key"] == "AQ.test-key-value-123456789"
+    assert options[0]["http_options"].timeout == 10000
+    assert options[0]["http_options"].retry_options.attempts == 1
+    assert calls[0]["model"] == "fast-model"
+    assert calls[0]["config"].max_output_tokens == 8
+    assert calls[0]["config"].automatic_function_calling.disable is True
+    assert client.closed
+
+
+@pytest.mark.parametrize("slot", ["day", "night"])
+def test_normalized_key_is_persisted_and_activated_for_only_selected_shift(
+    validation_client, slot,
+) -> None:
+    validation_client()
+    old_day = {"api_key": "old-day-key-value-123456"}
+    old_night = {"api_key": "old-night-key-value-123456"}
+    day_store = MemoryStore(old_day)
+    night_store = MemoryStore(old_night)
+    current = manager(day_store, backup_store=night_store)
+    current.load_shift_keys()
+
+    readers = current.replace_shift_key(
+        slot, 'ROLL_SCALE_GEMINI_API_KEY="AQ.new-key-value-123456789"'
+    )
+
+    assert all(reader.api_key == "AQ.new-key-value-123456789" for reader in readers)
+    selected = day_store if slot == "day" else night_store
+    assert selected.value["api_key"] == "AQ.new-key-value-123456789"
+    assert (night_store.value if slot == "day" else day_store.value) == (
+        old_night if slot == "day" else old_day
+    )
+    assert current.status()[f"{slot}_key_id"] == current.key_id(
+        "AQ.new-key-value-123456789"
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "reason", "message"),
+    [
+        (400, "API_KEY_INVALID", "Google không chấp nhận key"),
+        (401, "ACCESS_TOKEN_TYPE_UNSUPPORTED", "Google không chấp nhận key"),
+        (403, "API_KEY_SERVICE_BLOCKED", "quyền sử dụng key"),
+        (429, "", "hết hạn mức"),
+        (404, "", "Model cân"),
+        (400, "", "yêu cầu kiểm tra key"),
+        (503, "", "kết nối mạng"),
+        (None, "", "kết nối mạng"),
+    ],
+)
+@pytest.mark.parametrize("slot", ["day", "night"])
+def test_failed_google_validation_keeps_both_shift_keys_and_hides_raw_error(
+    validation_client, code, reason, message, slot,
+) -> None:
+    attempted_key = "AQ.test-key-value-123456789"
+    error = RuntimeError(f"Google rejected secret {attempted_key}")
+    error.code = code
+    error.response_json = {"error": {"details": [{"reason": reason}]}}
+    client, _, _ = validation_client(error)
+    day_store = MemoryStore({"api_key": "old-day-key-value-123456"})
+    night_store = MemoryStore({"api_key": "old-night-key-value-123456"})
+    current = manager(day_store, backup_store=night_store)
+    current.load_shift_keys()
+    previous_status = current.status()
+    created = []
+    current.reader_factory = lambda *args, **kwargs: created.append(args)
+
+    with pytest.raises(ValueError, match=message) as caught:
+        current.replace_shift_key(slot, attempted_key)
+
+    assert attempted_key not in str(caught.value)
+    assert "Key cũ vẫn được giữ" in str(caught.value)
+    assert day_store.value == {"api_key": "old-day-key-value-123456"}
+    assert night_store.value == {"api_key": "old-night-key-value-123456"}
+    assert current.status() == previous_status
+    assert created == []
+    assert client.closed

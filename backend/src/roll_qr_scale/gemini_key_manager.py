@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 from typing import Callable
 
@@ -59,7 +60,7 @@ class GeminiKeyManager:
     @staticmethod
     def key_id(api_key: str) -> str:
         """Return a safe short identifier without exposing any part of the key."""
-        value = api_key.strip()
+        value = GeminiKeyManager._normalize_pasted_key(api_key)
         return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10] if value else ""
 
     def _saved_key(self, store: EncryptedCodexTokenStore | None) -> str:
@@ -220,11 +221,69 @@ class GeminiKeyManager:
         return fast, flash31, flash37, accurate
 
     @staticmethod
-    def _validate_format(api_key: str) -> str:
+    def _normalize_pasted_key(api_key: str) -> str:
         value = api_key.strip()
-        if not 20 <= len(value) <= 256 or any(character.isspace() for character in value):
-            raise ValueError("Gemini API key không đúng định dạng")
+        assignment = re.fullmatch(
+            r"(?:export\s+)?(?:ROLL_SCALE_GEMINI_API_KEY|"
+            r"ROLL_SCALE_GEMINI_BACKUP_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY)"
+            r"\s*=\s*(.+)",
+            value,
+        )
+        if assignment:
+            value = assignment.group(1).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'`":
+            value = value[1:-1].strip()
         return value
+
+    @staticmethod
+    def _validate_format(api_key: str) -> str:
+        value = GeminiKeyManager._normalize_pasted_key(api_key)
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{20,256}", value):
+            raise ValueError(
+                "Gemini API key không đúng định dạng. Hãy sao chép đầy đủ key "
+                "từ Google AI Studio, không dùng chuỗi đã che hoặc có ký tự lạ."
+            )
+        return value
+
+    @staticmethod
+    def _validation_error(exc: Exception) -> str:
+        payload = getattr(exc, "response_json", {})
+        error = payload.get("error", payload) if isinstance(payload, dict) else {}
+        reasons = {
+            detail.get("reason")
+            for detail in error.get("details", [])
+            if isinstance(detail, dict)
+        }
+        code = getattr(exc, "code", None)
+        if "API_KEY_INVALID" in reasons or code == 401:
+            return (
+                "Google không chấp nhận key này. Hãy sao chép lại toàn bộ key "
+                "trong Google AI Studio; nếu vẫn lỗi, tạo key mới. Key cũ vẫn được giữ."
+            )
+        if code == 403:
+            return (
+                "Google từ chối quyền sử dụng key. Kiểm tra quyền và giới hạn "
+                "Gemini API của project trong Google AI Studio. Key cũ vẫn được giữ."
+            )
+        if code == 429:
+            return (
+                "Project của key đã hết hạn mức Gemini. Chờ hạn mức được cấp lại "
+                "hoặc dùng key của project khác. Key cũ vẫn được giữ."
+            )
+        if code == 404:
+            return (
+                "Model cân đang cấu hình không khả dụng với key này. "
+                "Kiểm tra ROLL_SCALE_GEMINI_MODEL. Key cũ vẫn được giữ."
+            )
+        if code == 400:
+            return (
+                "Google từ chối yêu cầu kiểm tra key. Kiểm tra key và model cân "
+                "trong Google AI Studio. Key cũ vẫn được giữ."
+            )
+        return (
+            "Chưa kiểm tra được key với Google. Kiểm tra kết nối mạng và thử lại. "
+            "Key cũ vẫn được giữ."
+        )
 
     def validate(self, api_key: str) -> None:
         value = self._validate_format(api_key)
@@ -239,12 +298,25 @@ class GeminiKeyManager:
             api_key=value,
             http_options=types.HttpOptions(
                 timeout=10000,
+                retry_options=types.HttpRetryOptions(attempts=1),
             ),
         )
         try:
-            client.models.get(model=self.flash31_model)
+            # Check the inference endpoint and the configured capture model.
+            # Metadata access to a different model does not prove that this
+            # key can run capture, especially for service-account auth keys.
+            client.models.generate_content(
+                model=self.fast_model,
+                contents="Reply OK.",
+                config=types.GenerateContentConfig(
+                    max_output_tokens=8,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=True,
+                    ),
+                ),
+            )
         except Exception as exc:
-            raise ValueError(f"Gemini từ chối key hoặc model: {str(exc)[:240]}") from exc
+            raise ValueError(self._validation_error(exc)) from exc
         finally:
             client.close()
 

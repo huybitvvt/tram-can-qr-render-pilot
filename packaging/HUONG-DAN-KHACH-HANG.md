@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc58` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc59` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc58.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc59.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -83,6 +83,13 @@ Giữ `ROLL_SCALE_STATION_COUNT=1`. Mỗi máy điền **bộ URL/token Supabase
 và **Gemini key riêng** được cấp cho đúng trạm đó. Đóng ứng dụng rồi mở lại sau
 khi sửa. Không sao chép nguyên `config.env` từ máy 01 sang máy khác vì sẽ làm
 trùng danh tính và gửi dữ liệu sang sai Supabase.
+
+Để đổi key khi chương trình đang chạy, vào **Cài đặt → Key ca ngày (12C1)**
+hoặc **Key ca đêm (12C2)**, dán đầy đủ key từ Google AI Studio rồi bấm Lưu.
+Key dạng `AQ.` và `AIza` đều được nhận; có thể dán key kèm dấu nháy hoặc
+dòng `GEMINI_API_KEY=...`. Ứng dụng thử key với model cân đang cấu hình trước
+khi lưu mã hóa trên Supabase và áp dụng ngay cho đúng ca. Nếu Google từ chối,
+key cũ được giữ nguyên. Không dán chuỗi dấu chấm/dấu sao đã che key.
 
 Mỗi camera chỉ được gán cho một trạm. Trên giao diện, chọn đúng camera ở từng
 thẻ trạm rồi bấm **Mở camera đã gán**. Trình duyệt lưu ánh xạ này trên chính

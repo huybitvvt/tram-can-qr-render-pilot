@@ -28,6 +28,7 @@ function setup(){
     SOURCE_CONTEXT_KEY:'rollQrScale.sourceContext.v1',
     stationSourceContexts:{},activeSourceStationKey:'',
     sourceContext:{date:'2026-09-23',shift:'HC1',machine:'MÁY CÁCH NHIỆT 11',order:'',bi:0.16},
+    renderSourceOrderMenu(){},
   });
   for(const declaration of [
     'const SOURCE_STATION_CONTEXT_KEY=',
