@@ -15,7 +15,7 @@ function setup(items=[]){
   sourceQuery:()=>'',api:async()=>({items}),syncCaptureProductCodes:()=>{},
   statusForPartialWeights:()=> 'Continue capturing',
  });
- const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasData','roundHasPhoto','roundHasBothImages','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundQrNotice','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
+ const names=['sessionRoundCount','ensureRounds','validWeightValue','roundHasData','roundHasPhoto','roundHasBothImages','roundCoreReady','roundProductReady','nextCaptureStep','roundQrId','roundCode','normalizeQrKey','productCodeFromQr','qrProductMismatchMessage','resetProductForReweigh','rejectQrForProductMismatch','rebuildProductionQrIndex','qrDuplicateMessage','markQrInputDuplicate','clearRoundQr','rejectDuplicateQr','verifyQrAgainstServer','roundQrNotice','roundHasDuplicateQr','roundReadyToSave','roundQualityReady','roundOverWeightLimit','sessionOverWeightLimit','roundCanSave','savableRoundIndexes','savedRoundCount'];
  vm.runInContext('let productionQrByCode={};',ctx);
  for(const name of names){const line=script.split('\n').find(line=>line.startsWith('function '+name+'(')||line.startsWith('async function '+name+'('));assert.ok(line,name);vm.runInContext(line,ctx)}
  ctx.renderControls=()=>{nodes.saveBtn={disabled:!ctx.savableRoundIndexes(session).length}};
@@ -69,6 +69,37 @@ test('server duplicate rejection clears QR but still permits photo-backed save',
  assert.match(messages.at(-1).message,/Đã đọc QR:.*TRÙNG MÃ QR/);
 });
 
+function setupProductCode(code){
+ const fixture=setup();const {ctx,nodes}=fixture,alerts=[];
+ nodes.sourceProductCode={value:code};
+ Object.assign(ctx,{syncSessionAliases(){},showVideo(){},openWeightAlertModal:(...args)=>alerts.push(args)});
+ for(const name of ['roundSlotName','roundSlotTitle','slotHasData'])vm.runInContext(script.split('\n').find(line=>line.startsWith('function '+name+'(')),ctx);
+ return {...fixture,alerts};
+}
+test('a QR whose prefix matches Mã SP is accepted case-insensitively',()=>{
+ const {ctx,session,nodes}=setupProductCode('mt-tcn0013');
+ assert.equal(ctx.qrDuplicateMessage(session.rounds[0].qr,0,session),'');
+ ctx.refreshCompletionState(session);assert.equal(nodes.saveBtn.disabled,false);
+});
+test('a QR prefix different from Mã SP blocks save until the product is weighed again',()=>{
+ const {ctx,session,nodes,messages,alerts}=setupProductCode('MT-TCN0099');const round=session.rounds[0],code=round.qr;
+ ctx.refreshCompletionState(session);
+ assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/SAI MÃ SP/);
+ assert.equal(ctx.rejectDuplicateQr(code,session,0,ctx.$('captureQr')),true);
+ assert.equal(round.qr,'');assert.equal(round.productImage,'');assert.equal(round.productWeight,'');assert.equal(round.productAnalysis,null);
+ assert.equal(round.coreImage,'core');assert.equal(round.weight,'1.18');
+ assert.deepEqual({...session.selectedSlot},{kind:'product',round:0});
+ assert.equal(nodes.saveBtn.disabled,true);
+ assert.equal(alerts.length,1);assert.match(alerts[0][1],/MT-TCN0013.*khác Mã SP MT-TCN0099/);
+ assert.match(messages.at(-1).message,/SAI MÃ SP/);
+});
+test('a mismatched QR scanned before the product weigh only clears the QR',()=>{
+ const {ctx,session,nodes}=setupProductCode('MT-TCN0099');const round=session.rounds[0],code=round.qr;
+ round.productImage='';round.productAnalysis=null;round.productWeight='';
+ assert.equal(ctx.rejectDuplicateQr(code,session,0,ctx.$('captureQr')),true);
+ assert.equal(round.qr,'');assert.equal(round.coreImage,'core');
+ assert.match(round.qrNotice,/SAI MÃ SP/);assert.doesNotMatch(round.qrNotice,/Đã bỏ ảnh/);
+});
 test('late duplicate response cannot clear a replacement QR',async()=>{
  const {ctx,session}=setup(),code=session.rounds[0].qr;
  let respond;ctx.api=()=>new Promise(resolve=>{respond=resolve});

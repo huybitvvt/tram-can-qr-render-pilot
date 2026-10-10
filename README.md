@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc57`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc57/TramCanQR-Setup-0.2.0-rc57.exe).
+>    Bản `0.2.0-rc58`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc58/TramCanQR-Setup-0.2.0-rc58.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc57.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc58.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -698,3 +698,5 @@ Bản 0.2.0-rc49 lưu tổng hợp đẩy kho thẳng vào folder exports trên 
 Bản 0.2.0-rc56: lọc Supabase/Đẩy kho, LSX gõ+gợi ý một ô, đếm dòng đã chọn. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc56.md).
 
 Bản 0.2.0-rc57: ô Mã SP gợi ý theo Lệnh sản xuất đã chọn. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc57.md).
+
+Bản 0.2.0-rc58: QR có tiền tố khác ô Mã SP bị báo lỗi và bắt cân lại sản phẩm. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc58.md).
