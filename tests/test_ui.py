@@ -793,6 +793,38 @@ def test_ui_photo_capture_survives_local_qr_decoder_failure(tmp_path, monkeypatc
     store.close()
 
 
+def test_next_photo_commits_while_weight_ai_is_blocked(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    entered, release = threading.Event(), threading.Event()
+    def blocked_ai():
+        entered.set()
+        assert release.wait(10)
+    job = service.inference.submit(blocked_ai)
+    try:
+        assert entered.wait(3)
+        parent_id, capture_id = str(uuid.uuid4()), str(uuid.uuid4())
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            saved = executor.submit(
+                service.capture_photo_draft, make_qr_frame("QR-NEXT-PHOTO"),
+                event_id=capture_id, parent_event_id=parent_id,
+                capture_kind="product", capture_round=1,
+                station_id="station-01", camera_id="camera-01", machine="Máy 1",
+            ).result(timeout=5)
+        assert not job.done()
+        assert saved["capture_id"] == capture_id
+        draft = store.get_photo_draft(capture_id)
+        assert draft is not None and Path(draft.image_path).is_file()
+        assert draft.parent_event_id == parent_id and draft.capture_round == 1
+    finally:
+        release.set()
+        job.result(timeout=5)
+        service.close()
+        store.close()
+
+
 def test_reread_saved_core_photo_keeps_incomplete_row_as_error(tmp_path, monkeypatch) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
@@ -3364,7 +3396,7 @@ def test_product_capture_uses_detected_qr_as_product_code() -> None:
     assert "session.placeholder.textContent='Mở camera để chụp '+nextStillCaptureLabel(next)" in TEST_UI_HTML
     assert "function advanceToNextCapture(session)" in TEST_UI_HTML
     assert "const next=nextCaptureStep(session);if(next)session.selectedSlot=next" in TEST_UI_HTML
-    assert "const next=advanceToNextCapture(session);" in TEST_UI_HTML
+    assert "const followingSlot=nextCaptureStep(session);" in TEST_UI_HTML
     assert "scrollIntoView({behavior:'smooth',block:'nearest'})" in TEST_UI_HTML
     assert "Ảnh cũ đã khóa. Bấm Mở camera" in TEST_UI_HTML
     assert "bindActionButton('inventoryPhoneBtn',()=>captureInventoryPhoto())" in TEST_UI_HTML
@@ -3484,7 +3516,7 @@ def test_ui_weighs_multiple_rounds_with_split_second_table() -> None:
     assert "ROUND2_CORE=" in TEST_UI_HTML
     assert "evidence-round split" in TEST_UI_HTML
     assert "evidence-round split" in TEST_UI_HTML
-    assert "session.eventId&&(retryingFailedCore||session.coreAnalysis&&session.analysisId)" in TEST_UI_HTML
+    assert "session.eventId&&(retryingFailedCore||round.coreImage||session.coreAnalysis&&session.analysisId)" in TEST_UI_HTML
     assert "if(targetRound===0)" in TEST_UI_HTML
     assert "capture_kind:kind,capture_round:targetRound" in TEST_UI_HTML
     assert 'id="captureQr2"' in TEST_UI_HTML

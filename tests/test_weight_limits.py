@@ -47,7 +47,7 @@ def test_capture_saves_weights_above_old_limits(tmp_path, core, product, machine
 
 def test_frontend_allows_weights_above_old_limits():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
-    names = ["productWeightLimitKg", "coreWeightOverLimit", "productWeightOverLimit", "roundOverWeightLimit", "sessionOverWeightLimit", "roundCanSave"]
+    names = ["roundAiPending", "productWeightLimitKg", "coreWeightOverLimit", "productWeightOverLimit", "roundOverWeightLimit", "sessionOverWeightLimit", "roundCanSave"]
     script = "const assert=require('node:assert/strict');let sourceContext={machine:'Máy cách nhiệt'};"
     script += "function sessionRoundCount(s){return s.rounds.length}function roundHasDuplicateQr(){return false}function roundQualityReady(){return true}function roundReadyToSave(){return true}"
     script += "\n".join(next(line for line in html.splitlines() if line.startswith("function " + name + "(")) for name in names)
@@ -72,6 +72,7 @@ round.saved=true;assert.equal(sessionOverWeightLimit(session),false);
 def test_frontend_can_save_unreadable_weights_with_one_image_and_no_qr():
     html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = [
+        "roundAiPending",
         "validWeightValue",
         "roundHasPhoto",
         "roundHasBothImages",

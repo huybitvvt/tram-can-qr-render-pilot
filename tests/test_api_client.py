@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import urllib.error
+import socket
 
 import cv2
 import numpy as np
@@ -19,8 +20,75 @@ from roll_qr_scale.api_client import (
     IngestResponseError,
     post_measurement,
     post_remote_action,
+    normalize_remote_url,
     validate_ingest_response,
 )
+
+
+@pytest.mark.parametrize("value", [
+    " https://project.supabase.co/functions/v1/ingest-measurement ",
+    '"https://project.supabase.co/functions/v1/ingest-measurement"',
+    "[Supabase](https://project.supabase.co/functions/v1/ingest-measurement)",
+])
+def test_remote_url_accepts_plain_quoted_and_markdown_text(value):
+    assert normalize_remote_url(value) == "https://project.supabase.co/functions/v1/ingest-measurement"
+
+
+@pytest.mark.parametrize("value", [
+    "project.supabase.co", "https://project. supabase.co", "https://user:secret@project.supabase.co",
+])
+def test_remote_url_rejects_invalid_configuration_without_echoing_it(value):
+    with pytest.raises(ValueError, match="URL Supabase không hợp lệ") as error:
+        normalize_remote_url(value)
+    assert "secret" not in str(error.value)
+
+
+def test_measurement_dns_retry_preserves_request_and_recovers(monkeypatch, tmp_path):
+    requests, pauses = [], []
+    class Response(io.BytesIO):
+        status = 200
+    def urlopen(request, timeout):
+        requests.append(request)
+        if len(requests) < 3:
+            raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+        return Response(b'{"ok":true,"event_id":"same-event"}')
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("roll_qr_scale.api_client.time.sleep", pauses.append)
+    result = post_measurement(
+        "[API](https://project.supabase.co/functions/v1/ingest-measurement)",
+        {"event_id": "same-event"}, tmp_path / "unused.jpg", "secret-token", include_images=False,
+    )
+    assert result["event_id"] == "same-event"
+    assert len(requests) == 3 and pauses == [0.5, 1.0]
+    assert all(request is requests[0] for request in requests)
+    assert requests[0].full_url == "https://project.supabase.co/functions/v1/ingest-measurement"
+    assert requests[0].get_header("X-device-token") == "secret-token"
+    assert json.loads(requests[0].data)["event_id"] == "same-event"
+
+
+def test_persistent_dns_failure_is_bounded_and_shows_only_the_host(monkeypatch):
+    requests = []
+    def urlopen(request, timeout):
+        requests.append(request)
+        raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr("roll_qr_scale.api_client.time.sleep", lambda _: None)
+    with pytest.raises(RuntimeError, match="DNS của project.supabase.co sau 3 lần thử") as error:
+        post_remote_action("https://project.supabase.co/functions/v1/ingest?secret=hidden", "token-hidden", body={"action": "update"})
+    assert len(requests) == 3
+    assert "hidden" not in str(error.value)
+
+
+def test_non_dns_transport_failure_is_not_retried(monkeypatch):
+    requests = []
+    error = urllib.error.URLError(TimeoutError("timed out after connection"))
+    def urlopen(request, timeout):
+        requests.append(request)
+        raise error
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    with pytest.raises(urllib.error.URLError) as caught:
+        post_remote_action("https://project.supabase.co", "token", body={"action": "update"})
+    assert caught.value is error and len(requests) == 1
 
 
 def test_remote_measurement_page_sends_all_filters_and_reads_exact_count(monkeypatch) -> None:

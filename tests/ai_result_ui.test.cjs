@@ -15,10 +15,11 @@ async function analyzeWith(result,kind='core',clientQr=''){
   weightKindLabel:()=> 'cân lõi',appStatus:{weight_engine:'gemini'},recognitionProfile:{value:'fast'},recognitionProvider:{value:'gemini'},sourceContext:{shift:'HC1'},
   api:async()=>({...result,event_id:'event-01'}),parseBox:()=>null,qrDuplicateMessage:()=>'',captureQr:{value:''},weight:{value:''},productWeight:{value:''},unit:{value:'kg'},
   $:()=>null,renderRoundParams(){},updateBoxes(){},syncCaptureProductCodes(){},persistAiMissPhoto:async()=>({saved:true,synced:false}),
-  advanceToNextCapture:()=>null,refreshCompletionState(){messages.push('Trạng thái hoàn tất')},weightsReady:()=>false,
+  advanceToNextCapture:()=>null,nextCaptureStep:()=>null,renderEvidence(){},refreshCompletionState(){},weightsReady:()=>false,weighSlotLabel:()=> 'Cân lõi',
   stopAiCountdown(){},performance:{now:()=>1000},
  });
- for(const name of ['validWeightValue','aiDetectedWeight']){
+ ctx.requestCaptureAi=payload=>ctx.api('/api/analyze',{body:JSON.stringify(payload)});
+ for(const name of ['roundQrId','validWeightValue','aiDetectedWeight','slotAiPending','ownsAiCapture','syncSessionAliases']){
   const line=script.split('\n').find(line=>line.startsWith('function '+name+'('));
   assert.ok(line,name);vm.runInContext(line,ctx);
  }

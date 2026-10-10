@@ -45,7 +45,9 @@ test('the Bỏ button is enabled for a recovered analysis with no browser photo'
     inventoryState:()=>({}),
     inventoryHasData:()=>false,
     inventoryReady:()=>false,
+    sessionRoundCount:()=>0,
   });
+  for(const name of ['slotAiPending','roundAiPending','sessionAiPending'])vm.runInContext(script.split('\n').find(item=>item.startsWith('function '+name+'(')),ctx);
   vm.runInContext(line,ctx);
   ctx.renderControls();
   assert.equal(discard.disabled,false);

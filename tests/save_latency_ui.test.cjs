@@ -52,6 +52,16 @@ test('a duplicate QR stops all writes and releases save lock',async()=>{
  checks[0].resolve(true);await pending;
  assert.deepEqual(calls,['verify0']);assert.equal(session._saveLock,false);
 });
+
+test('keyboard and per-round saves cannot run while the camera is still capturing or discarding',async()=>{
+ const {ctx,session,calls}=setup();
+ for(const flag of ['_analyzeLock','_discardLock']){
+  session[flag]=true;
+  await ctx.saveValidatedCapture();await ctx.saveRoundEvidence(0);await ctx.saveAllRounds();
+  assert.deepEqual(calls,[]);
+  session[flag]=false;
+ }
+});
 test('saving one completed pair keeps the other pair and its QR draft',async()=>{
  const {ctx,session,calls,checks}=setup();
  session.rounds[0].coreImage='core-photo-1';session.rounds[0].productImage='product-photo-1';

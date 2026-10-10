@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc59`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc59/TramCanQR-Setup-0.2.0-rc59.exe).
+>    Bản `0.2.0-rc60`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc60/TramCanQR-Setup-0.2.0-rc60.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc59.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc60.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -702,3 +702,5 @@ Bản 0.2.0-rc57: ô Mã SP gợi ý theo Lệnh sản xuất đã chọn. Xem [
 Bản 0.2.0-rc58: QR có tiền tố khác ô Mã SP bị báo lỗi và bắt cân lại sản phẩm. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc58.md).
 
 Bản 0.2.0-rc59: chuẩn hóa key Gemini được dán kèm dấu nháy/dòng cấu hình, thử key bằng model cân và giữ key cũ nếu Google từ chối. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc59.md).
+
+Bản 0.2.0-rc60: lưu ảnh local trước, đọc AI ở nền theo từng ô và cho chụp ô tiếp theo trong lúc chờ. Thử lại khi lỗi DNS Supabase và hiển thị tên miền đang lỗi. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc60.md).

@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc59` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc60` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc59.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc60.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -32,6 +32,14 @@ Nếu máy đang dùng nút từ bộ cài cũ và nút không hoạt động, t
 `CAP-NHAT-BAN-MOI.cmd` trong `%LOCALAPPDATA%\Programs\TramCanQR` bằng file
 cập nhật mới do đơn vị triển khai cung cấp, rồi bấm lại nút trên Desktop.
 Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự mang nút mới.
+
+### Chụp tiếp khi AI đang đọc
+
+Nhấn Space để chụp ô đang chọn. Sau khi ảnh được ghi xuống máy, ô đó hiện
+**Ảnh đã lưu · chờ AI** và tự chọn ô còn thiếu tiếp theo. Có thể chụp tiếp ngay;
+số cân tự điền vào đúng ô khi AI trả kết quả. Ô đang chờ AI chưa cho lưu phiếu
+hoặc chụp đè. Ngày, ca, máy, LSX và Mã SP tạm khoá cho đến khi AI đọc xong.
+Nếu AI lỗi, ảnh vẫn được giữ trên máy để đọc lại trong Danh sách.
 
 ### Lưu từng lần cân
 

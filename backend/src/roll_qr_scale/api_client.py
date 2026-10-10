@@ -4,6 +4,9 @@ import base64
 import hashlib
 import json
 import os
+import re
+import socket
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -15,6 +18,44 @@ import numpy as np
 
 _UPLOAD_IMAGE_MAX_EDGE = 1600
 _UPLOAD_IMAGE_TARGET_BYTES = 1_500_000
+
+
+def normalize_remote_url(value: str) -> str:
+    """Accept URLs copied as plain text, quoted text, or a Markdown link."""
+    url = str(value).strip()
+    if len(url) >= 2 and url[0] == url[-1] and url[0] in "\"'":
+        url = url[1:-1].strip()
+    markdown = re.fullmatch(r"\[[^\]\r\n]*\]\((https?://[^\s()]+)\)", url)
+    if markdown:
+        url = markdown.group(1)
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or any(character.isspace() or ord(character) < 32 for character in url)
+        or any(character in parsed.netloc for character in "()")
+    ):
+        raise ValueError("URL Supabase không hợp lệ; kiểm tra tên miền trong config.env")
+    return url
+
+
+def _urlopen_with_dns_retry(request: urllib.request.Request, *, timeout: float):
+    """DNS failures occur before sending HTTP; retry without duplicating a write."""
+    for attempt in range(3):
+        try:
+            return urllib.request.urlopen(request, timeout=timeout)
+        except urllib.error.URLError as exc:
+            if not isinstance(exc.reason, socket.gaierror):
+                raise
+            if attempt == 2:
+                host = urllib.parse.urlsplit(request.full_url).hostname or "Supabase"
+                raise RuntimeError(
+                    f"Không phân giải được DNS của {host} sau 3 lần thử. "
+                    "Dữ liệu vẫn giữ trên máy; kiểm tra mạng và URL Supabase rồi đồng bộ lại."
+                ) from exc
+            time.sleep(0.5 * (attempt + 1))
 
 
 def _compact_upload_image(image: bytes) -> bytes:
@@ -59,6 +100,7 @@ def fetch_remote_json(
     params: dict[str, object] | None = None,
     timeout: float = 10.0,
 ) -> dict[str, object]:
+    url = normalize_remote_url(url)
     separator = "&" if "?" in url else "?"
     query = urllib.parse.urlencode(params or {})
     request_url = f"{url}{separator}{query}" if query else url
@@ -67,7 +109,7 @@ def fetch_remote_json(
         headers={"Accept": "application/json", "X-Device-Token": token},
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _urlopen_with_dns_retry(request, timeout=timeout) as response:
         parsed = json.loads(response.read().decode("utf-8"))
     if not isinstance(parsed, dict):
         raise RuntimeError("Supabase response is invalid")
@@ -157,7 +199,7 @@ def post_remote_action(
 
     action = str(body.get("action") or "remote_action")
     request = urllib.request.Request(
-        url,
+        normalize_remote_url(url),
         data=json.dumps(body).encode("utf-8"),
         headers={
             "Accept": "application/json",
@@ -167,7 +209,7 @@ def post_remote_action(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _urlopen_with_dns_retry(request, timeout=timeout) as response:
             parsed = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
@@ -233,7 +275,7 @@ def fetch_supabase_rows(
     })
     encoded_table = urllib.parse.quote(table, safe="")
     request = urllib.request.Request(
-        f"{supabase_url.rstrip('/')}/rest/v1/{encoded_table}?{query}",
+        f"{normalize_remote_url(supabase_url).rstrip('/')}/rest/v1/{encoded_table}?{query}",
         headers={
             "Accept": "application/json",
             "apikey": publishable_key,
@@ -241,7 +283,7 @@ def fetch_supabase_rows(
         },
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _urlopen_with_dns_retry(request, timeout=timeout) as response:
         parsed = json.loads(response.read().decode("utf-8"))
     if not isinstance(parsed, list):
         raise RuntimeError(f"Supabase {table} response is invalid")
@@ -299,7 +341,7 @@ def fetch_supabase_table(
             params["qr_code"] = f"ilike.*{safe}*"
     query = urllib.parse.urlencode(params)
     request = urllib.request.Request(
-        f"{supabase_url.rstrip('/')}/rest/v1/can_tu_dong?{query}",
+        f"{normalize_remote_url(supabase_url).rstrip('/')}/rest/v1/can_tu_dong?{query}",
         headers={
             "Accept": "application/json",
             "apikey": publishable_key,
@@ -307,7 +349,7 @@ def fetch_supabase_table(
         },
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _urlopen_with_dns_retry(request, timeout=timeout) as response:
         parsed = json.loads(response.read().decode("utf-8"))
     if not isinstance(parsed, list):
         raise RuntimeError("Supabase can_tu_dong response is invalid")
@@ -356,7 +398,7 @@ def fetch_supabase_table_count(
             params["qr_code"] = f"ilike.*{safe}*"
     query = urllib.parse.urlencode(params)
     request = urllib.request.Request(
-        f"{supabase_url.rstrip('/')}/rest/v1/can_tu_dong?{query}",
+        f"{normalize_remote_url(supabase_url).rstrip('/')}/rest/v1/can_tu_dong?{query}",
         headers={
             "Accept": "application/json",
             "apikey": publishable_key,
@@ -367,7 +409,7 @@ def fetch_supabase_table_count(
         },
         method="GET",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _urlopen_with_dns_retry(request, timeout=timeout) as response:
         content_range = str(response.headers.get("Content-Range", ""))
     if "/" not in content_range:
         raise RuntimeError("Supabase count response has no Content-Range")
@@ -423,7 +465,7 @@ def fetch_supabase_photo_drafts(
                 params["qr_code"] = f"ilike.*{safe}*"
         query = urllib.parse.urlencode(params)
         request = urllib.request.Request(
-            f"{supabase_url.rstrip('/')}/rest/v1/anh_can_cho_ai?{query}",
+            f"{normalize_remote_url(supabase_url).rstrip('/')}/rest/v1/anh_can_cho_ai?{query}",
             headers={
                 "Accept": "application/json",
                 "apikey": service_key,
@@ -431,7 +473,7 @@ def fetch_supabase_photo_drafts(
             },
             method="GET",
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _urlopen_with_dns_retry(request, timeout=timeout) as response:
             parsed = json.loads(response.read().decode("utf-8"))
         if not isinstance(parsed, list):
             raise RuntimeError("Supabase anh_can_cho_ai response is invalid")
@@ -477,7 +519,7 @@ def delete_supabase_photo_drafts(
         "or": f"(parent_event_id.eq.{event_id},event_id.eq.{event_id})",
     }
     request = urllib.request.Request(
-        f"{supabase_url.rstrip('/')}/rest/v1/anh_can_cho_ai?{urllib.parse.urlencode(params)}",
+        f"{normalize_remote_url(supabase_url).rstrip('/')}/rest/v1/anh_can_cho_ai?{urllib.parse.urlencode(params)}",
         headers={
             "Accept": "application/json",
             "apikey": service_key,
@@ -486,7 +528,7 @@ def delete_supabase_photo_drafts(
         },
         method="DELETE",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _urlopen_with_dns_retry(request, timeout=timeout) as response:
         parsed = json.loads(response.read().decode("utf-8"))
     if not isinstance(parsed, list):
         raise RuntimeError("Supabase anh_can_cho_ai delete response is invalid")
@@ -518,7 +560,7 @@ def sign_storage_image(
     safe_expiry = max(60, min(int(expires_in), 3600))
     encoded_path = urllib.parse.quote(object_path, safe="/")
     request = urllib.request.Request(
-        f"{supabase_url.rstrip('/')}/storage/v1/object/sign/roll-captures/{encoded_path}",
+        f"{normalize_remote_url(supabase_url).rstrip('/')}/storage/v1/object/sign/roll-captures/{encoded_path}",
         data=json.dumps({"expiresIn": safe_expiry}).encode("utf-8"),
         headers={
             "apikey": service_key,
@@ -527,12 +569,12 @@ def sign_storage_image(
         },
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with _urlopen_with_dns_retry(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
     signed = payload.get("signedURL") if isinstance(payload, dict) else None
     if not isinstance(signed, str) or not signed:
         raise RuntimeError("Supabase Storage did not return a signed URL")
-    return f"{supabase_url.rstrip('/')}/storage/v1{signed}"
+    return f"{normalize_remote_url(supabase_url).rstrip('/')}/storage/v1{signed}"
 
 
 def validate_ingest_response(
@@ -659,13 +701,13 @@ def post_measurement(
         "X-Device-Token": token,
     }
     request = urllib.request.Request(
-        url,
+        normalize_remote_url(url),
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers=headers,
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=effective_timeout) as response:
+        with _urlopen_with_dns_retry(request, timeout=effective_timeout) as response:
             response_body = response.read()
             if not 200 <= response.status < 300:
                 raise RuntimeError(f"API returned HTTP {response.status}")

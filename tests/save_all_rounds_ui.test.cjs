@@ -24,7 +24,7 @@ function setup(saveRoundEvidence){
   roundHasDuplicateQr:()=>false,roundQualityReady:()=>true,roundOverWeightLimit:()=>false,
   saveRoundEvidence,
  });
- for(const name of ['emptyWeighRound','roundHasData','roundHasPhoto','roundHasBothImages','roundIsOpen','sessionRoundCount','ensureRounds','roundReadyToSave','roundCanSave','savableRoundIndexes','compactUnsavedRounds'])load(ctx,name);
+ for(const name of ['roundAiPending','sessionAiPending','emptyWeighRound','roundHasData','roundHasPhoto','roundHasBothImages','roundIsOpen','sessionRoundCount','ensureRounds','roundReadyToSave','roundCanSave','savableRoundIndexes','compactUnsavedRounds'])load(ctx,name);
  const start=script.indexOf('async function saveAllRounds(');
  vm.runInContext(script.slice(start,script.indexOf('\nsaveCapture=saveValidatedCapture;',start)),ctx);
  return {ctx,session,messages};
