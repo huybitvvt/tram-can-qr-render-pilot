@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc60` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc61` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc60.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc61.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -250,6 +250,13 @@ cấp, mở **Task Manager**, chọn `TramCanQR.exe` và bấm **End task**; sau
 lại shortcut. Không chạy hai bản gateway cùng lúc trên cổng 8080.
 
 ## 4. Đồng bộ cloud
+
+Khi có URL Supabase và token thiết bị, chương trình tự đẩy các dòng **Chờ đồng bộ**
+mỗi 10 phút khi AI rảnh. AI chạy lại thì tạm dừng gửi các dòng tiếp theo. Phiếu
+có lỗi cân/QR và ảnh nháp chưa thành phiếu giữ trên máy. Chỉ gửi dữ liệu Supabase,
+không tự nhập kho hoặc đẩy ảnh Cloudinary. Dòng lỗi mạng cần dùng nút đồng bộ thủ
+công để thử lại. Có thể tắt lịch tự đẩy bằng `ROLL_SCALE_AUTO_SYNC=0` trong
+`config.env`, sau đó thoát hẳn ứng dụng và mở lại.
 
 Cloud là tùy chọn. Khi chưa cấu hình API, ứng dụng vẫn lưu local. Token ingest
 và lookup riêng của từng trạm phải được đơn vị triển khai chuyển bằng kênh

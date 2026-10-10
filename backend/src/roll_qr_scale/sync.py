@@ -4,6 +4,7 @@ import threading
 import base64
 import inspect
 import json
+import logging
 import time
 from pathlib import Path
 from collections.abc import Callable
@@ -424,6 +425,65 @@ class OutboxSyncWorker:
         with self._sync_lock:
             return self._sync_weigh_batch(batch)
 
+    def sync_pending_when_idle(
+        self,
+        can_sync: Callable[[], bool],
+        accept_measurement: Callable[[Measurement], bool],
+        *,
+        limit: int = 5000,
+    ) -> dict[str, object]:
+        """Send waiting rows only, yielding to inference and manual uploads."""
+        result: dict[str, object] = {"attempted": 0, "synced": 0, "failed": 0, "pause": ""}
+        if not can_sync():
+            result["pause"] = "waiting_ai"
+            return result
+        # Filter in SQL before LIMIT, so old failed/cloudinary rows cannot hide
+        # newer pending records. Photo-only drafts stay local without Cloudinary.
+        rows: list[Measurement | InventoryCheck | PhotoDraft | dict[str, object]] = [
+            *self.store.pending(limit, only_pending=True),
+            *self.store.pending_inventory_checks(limit, only_pending=True),
+            *(self.store.pending_photo_drafts(limit, only_pending=True) if self.include_images else []),
+        ]
+        rows.sort(key=lambda item: (item.captured_at, item.id))
+        rows = rows[:limit]
+        rows.extend(self.store.pending_weigh_batches(limit=limit, only_pending=True))
+        for row in rows:
+            if not can_sync():
+                result["pause"] = "waiting_ai"
+                break
+            if not self._sync_lock.acquire(blocking=False):
+                result["pause"] = "waiting_sync"
+                break
+            try:
+                # Re-read under the upload lock: a manual job may have sent or
+                # edited this record after the automatic snapshot was taken.
+                if not can_sync():
+                    result["pause"] = "waiting_ai"
+                    break
+                if isinstance(row, Measurement):
+                    current = self.store.get(row.event_id)
+                    send = self._sync_measurement
+                elif isinstance(row, InventoryCheck):
+                    current = self.store.get_inventory_check(row.event_id)
+                    send = self._sync_inventory_check
+                elif isinstance(row, PhotoDraft):
+                    current = self.store.get_photo_draft(row.event_id)
+                    send = self._sync_photo_draft
+                else:
+                    current = self.store.get_weigh_batch(int(row["id"]))
+                    send = self._sync_weigh_batch
+                state = current.get("sync_status") if isinstance(current, dict) else getattr(current, "sync_status", None)
+                if state != "pending":
+                    continue
+                if isinstance(current, Measurement) and not accept_measurement(current):
+                    continue
+                succeeded = send(current)
+                result["attempted"] += 1
+                result["synced" if succeeded else "failed"] += 1
+            finally:
+                self._sync_lock.release()
+        return result
+
     def _sync_weigh_batch(self, batch: dict[str, object]) -> bool:
         try:
             if not self.api_url or not self.device_token:
@@ -460,3 +520,81 @@ class OutboxSyncWorker:
         self._wake.set()
         if self._thread.is_alive():
             self._thread.join(timeout=max(12.0, self.interval + 1.0))
+
+
+class IdlePendingSync:
+    """A ten-minute timer independent of the browser and capture requests."""
+
+    def __init__(
+        self,
+        worker: OutboxSyncWorker,
+        is_idle: Callable[[], bool],
+        accept_measurement: Callable[[Measurement], bool],
+        *,
+        interval: float = 600.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.worker = worker
+        self.is_idle = is_idle
+        self.accept_measurement = accept_measurement
+        self.interval = float(interval)
+        self.clock = clock
+        self._next_run = self.clock() + self.interval
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._state = "idle"
+        self._last_result: dict[str, object] = {}
+        self._last_error = ""
+        self._thread = threading.Thread(target=self._run, name="idle-pending-sync", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            return {
+                "enabled": not self._stop.is_set(),
+                "interval_seconds": self.interval,
+                "pending_only": True,
+                "idle_only": True,
+                "state": self._state,
+                "next_run_in_seconds": max(0.0, self._next_run - self.clock()),
+                "last_result": dict(self._last_result),
+                "last_error": self._last_error,
+            }
+
+    def tick(self) -> None:
+        if self._stop.is_set() or self.clock() < self._next_run:
+            return
+        with self._lock:
+            self._state = "running"
+        try:
+            result = self.worker.sync_pending_when_idle(
+                lambda: not self._stop.is_set() and self.is_idle(), self.accept_measurement,
+            )
+            pause = str(result.get("pause") or "")
+            with self._lock:
+                self._last_result = result
+                self._last_error = ""
+                self._state = pause or "idle"
+                # A paused cycle resumes when AI is idle, without another ten-
+                # minute wait. Finished cycles never spin on a failed upload.
+                if not pause:
+                    self._next_run = self.clock() + self.interval
+            if result["attempted"]:
+                logging.info("Automatic pending sync: %s", result)
+        except Exception as exc:
+            logging.exception("Automatic pending sync failed")
+            with self._lock:
+                self._state = "idle"
+                self._last_error = str(exc)[:500]
+                self._next_run = self.clock() + self.interval
+
+    def _run(self) -> None:
+        while not self._stop.wait(1.0):
+            self.tick()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=12.0)

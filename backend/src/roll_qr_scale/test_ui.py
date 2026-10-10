@@ -103,7 +103,7 @@ from .station_session import (
     jpeg_sha256,
 )
 from .storage import EventIdConflictError, MeasurementStore
-from .sync import OutboxSyncWorker
+from .sync import IdlePendingSync, OutboxSyncWorker
 from .weight_ocr import (
     CameraOCRWeightSource,
     NormalizedROI,
@@ -2489,6 +2489,7 @@ class StationUIService:
         codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None,
         antigravity_reader: AntigravityWeightReader | None = None,
         weight_engine: str = "local",
+        auto_sync: bool = True,
     ):
         if not 1 <= int(station_count) <= 3:
             raise ValueError("station_count phải từ 1 đến 3")
@@ -2605,6 +2606,20 @@ class StationUIService:
         self._ocr_preload_error: str | None = None
         self._recent: dict[str, float] = {}
         self._lock = threading.Lock()
+        self.auto_sync = (
+            IdlePendingSync(
+                sync_worker, self._inference_is_idle,
+                lambda item: not _sync_row_has_error(item),
+            )
+            if auto_sync and sync_worker is not None and sync_worker.api_url and sync_worker.device_token
+            else None
+        )
+        if self.auto_sync is not None:
+            self.auto_sync.start()
+
+    def _inference_is_idle(self) -> bool:
+        status = self.inference.status()
+        return not status.closed and not status.active and status.queued == 0 and status.submitted == status.completed + status.failed
 
     def start_ocr_preload(self) -> None:
         if self.weight_engine == "gemini":
@@ -2631,6 +2646,8 @@ class StationUIService:
             self._ocr_preload_error = str(exc)
 
     def close(self) -> None:
+        if self.auto_sync is not None:
+            self.auto_sync.stop()
         if self._owns_inference:
             self.inference.close()
         closed: set[int] = set()
@@ -3665,6 +3682,7 @@ class StationUIService:
                 else {"enabled": False}
             ),
             "inference": self.inference.status().as_dict(),
+            "auto_sync": self.auto_sync.status() if self.auto_sync is not None else {"enabled": False},
         }
 
     def validate_station_source(
@@ -5615,6 +5633,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-sharpness", type=float, default=35.0)
     parser.add_argument("--api-url", default=os.environ.get("ROLL_SCALE_API_URL"))
     parser.add_argument("--api-token", default=os.environ.get("ROLL_SCALE_DEVICE_TOKEN"))
+    parser.add_argument(
+        "--auto-sync", action=argparse.BooleanOptionalAction,
+        default=os.environ.get("ROLL_SCALE_AUTO_SYNC", "1").strip().lower() not in {"0", "false", "no", "off"},
+        help="Tự đẩy dòng Chờ đồng bộ mỗi 10 phút khi AI rảnh",
+    )
     parser.add_argument("--lookup-url", default=os.environ.get("ROLL_SCALE_LOOKUP_URL"))
     parser.add_argument("--lookup-token", default=os.environ.get("ROLL_SCALE_LOOKUP_TOKEN"))
     parser.add_argument(
@@ -5792,6 +5815,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         staging_dir=args.staging_dir,
         diagnostic_image=args.diagnostic_image,
         inference_queue_size=args.inference_queue_size,
+        auto_sync=args.auto_sync,
         auto_advance=args.auto_advance,
         weight_rois=weight_rois,
         weight_burst_frames=args.weight_burst_frames,
@@ -6118,7 +6142,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         ),
                         "ocr_min_confidence": service.ocr_min_confidence,
                         "sync_enabled": service.sync_worker is not None,
-                        "sync_mode": "manual",
+                        "sync_mode": "auto_idle_pending" if service.auto_sync is not None else "manual",
                         "image_provider": "supabase" if service.sync_worker is not None else "local",
                         "release": os.environ.get("RENDER_GIT_COMMIT", "local")[:12],
                         "quality_settings": service.quality_settings,

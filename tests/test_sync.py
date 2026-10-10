@@ -11,7 +11,150 @@ import pytest
 
 from roll_qr_scale.api_client import post_measurement
 from roll_qr_scale.storage import MeasurementStore
-from roll_qr_scale.sync import OutboxSyncWorker
+from roll_qr_scale.sync import IdlePendingSync, OutboxSyncWorker
+
+
+@pytest.fixture
+def automatic_sync_case(tmp_path):
+    store = MeasurementStore(tmp_path / "automatic.db", tmp_path / "captures")
+    sent = []
+
+    def send(url, payload, image_path, token):
+        sent.append(payload["event_id"])
+        return {"ok": True, "event_id": payload["event_id"], "id": len(sent), "cloudinary_skipped": True, "local_backup_committed": True}
+
+    worker = OutboxSyncWorker(store, "https://example.test/ingest", "token", send=send, include_images=False)
+    yield store, worker, sent
+    store.close()
+
+
+def save_automatic_row(store, code, **kwargs):
+    return store.save(code, 1.0, "kg", np.zeros((20, 20, 3), dtype=np.uint8), "manual", **kwargs)
+
+
+def test_automatic_sync_only_sends_pending_rows_before_limit(automatic_sync_case):
+    store, worker, sent = automatic_sync_case
+    failed = save_automatic_row(store, "FAILED", needs_sync=True)
+    store.mark_sync_failed(failed.event_id, "DNS error")
+    local = save_automatic_row(store, "LOCAL", needs_sync=False)
+    synced = save_automatic_row(store, "SYNCED", needs_sync=True)
+    store.mark_synced(synced.event_id, 1)
+    cloudinary = save_automatic_row(store, "CLOUDINARY", needs_sync=True)
+    store.mark_cloudinary_pending(cloudinary.event_id, 2)
+    pending = save_automatic_row(store, "PENDING", needs_sync=True)
+    draft, _ = store.save_photo_draft_idempotent(np.zeros((20, 20, 3), dtype=np.uint8), needs_sync=True)
+    result = worker.sync_pending_when_idle(lambda: True, lambda row: True, limit=1)
+    assert sent == [pending.event_id]
+    assert result == {"attempted": 1, "synced": 1, "failed": 0, "pause": ""}
+    assert store.get(pending.event_id).sync_status == "synced"
+    assert store.get(failed.event_id).sync_status == "failed"
+    assert store.get(local.event_id).sync_status == "local"
+    assert store.get(cloudinary.event_id).sync_error == "cloudinary_pending"
+    assert store.get_photo_draft(draft.event_id).sync_status == "pending"
+
+
+def test_automatic_sync_pauses_for_ai_between_rows_and_rechecks_state(automatic_sync_case):
+    store, worker, sent = automatic_sync_case
+    first = save_automatic_row(store, "FIRST", needs_sync=True)
+    second = save_automatic_row(store, "SECOND", needs_sync=True)
+    result = worker.sync_pending_when_idle(lambda: not sent, lambda row: True)
+    assert sent == [first.event_id]
+    assert result["pause"] == "waiting_ai"
+    # A manual upload completes this row before the next automatic pass.
+    store.mark_synced(second.event_id, 2)
+    worker.sync_pending_when_idle(lambda: True, lambda row: True)
+    assert sent == [first.event_id]
+
+
+def test_automatic_sync_yields_to_manual_upload_and_revalidates_record(automatic_sync_case):
+    store, worker, sent = automatic_sync_case
+    row = save_automatic_row(store, "ROW", needs_sync=True)
+    with worker._sync_lock:
+        result = worker.sync_pending_when_idle(lambda: True, lambda row: True)
+    assert result["pause"] == "waiting_sync"
+    assert sent == []
+    checks = 0
+
+    def idle():
+        nonlocal checks
+        checks += 1
+        if checks == 2:
+            store.mark_synced(row.event_id, 3)
+        return True
+
+    worker.sync_pending_when_idle(idle, lambda row: True)
+    assert sent == []
+
+
+def test_automatic_timer_waits_ten_minutes_and_resumes_after_ai_failure(automatic_sync_case):
+    store, worker, sent = automatic_sync_case
+    save_automatic_row(store, "WAITING", needs_sync=True)
+    now = [0.0]
+    idle = [False]
+    timer = IdlePendingSync(worker, lambda: idle[0], lambda row: True, clock=lambda: now[0])
+    now[0] = 599.0
+    timer.tick()
+    assert sent == []
+    now[0] = 600.0
+    timer.tick()
+    assert timer.status()["state"] == "waiting_ai"
+    idle[0] = True
+    now[0] = 601.0
+    timer.tick()
+    assert len(sent) == 1
+    assert timer.status()["next_run_in_seconds"] == 600.0
+    save_automatic_row(store, "NEXT", needs_sync=True)
+    now[0] = 1200.0
+    timer.tick()
+    assert len(sent) == 1
+    now[0] = 1201.0
+    timer.tick()
+    assert len(sent) == 2
+    timer.stop()
+    save_automatic_row(store, "STOPPED", needs_sync=True)
+    now[0] = 1801.0
+    timer.tick()
+    assert len(sent) == 2
+
+
+def test_automatic_upload_failure_is_kept_locally_and_not_retried(automatic_sync_case):
+    store, worker, sent = automatic_sync_case
+    row = save_automatic_row(store, "NETWORK-ERROR", needs_sync=True)
+
+    def fail(*args):
+        sent.append("failed")
+        raise OSError("DNS unavailable")
+
+    worker.send = fail
+    result = worker.sync_pending_when_idle(lambda: True, lambda row: True)
+    assert result["failed"] == 1
+    saved = store.get(row.event_id)
+    assert saved.sync_status == "failed" and Path(saved.image_path).is_file()
+    worker.sync_pending_when_idle(lambda: True, lambda row: True)
+    assert sent == ["failed"]
+
+
+def test_automatic_sync_inventory_pending_only_and_waiting_batch_sources(automatic_sync_case, monkeypatch):
+    store, worker, sent = automatic_sync_case
+    frame = np.zeros((20, 20, 3), dtype=np.uint8)
+    failed, _ = store.save_inventory_check_idempotent("FAILED", 1.0, 0.0, 0.0, "kg", frame, "manual", needs_sync=True)
+    store.mark_inventory_check_failed(failed.event_id, "network")
+    pending, _ = store.save_inventory_check_idempotent("WAITING", 1.0, 0.0, 0.0, "kg", frame, "manual", needs_sync=True)
+    measurement = save_automatic_row(store, "SOURCE", needs_sync=True)
+    batch, _ = store.save_weigh_batch(
+        "2026-10-10", "12C1", "Máy 1", "LSX-1", 10, 10,
+        [{"event_id": measurement.event_id, "qr_code": "SOURCE"}], needs_sync=True,
+    )
+    batch_id = store.pending_weigh_batches()[0]["id"]
+    batch_calls = []
+    monkeypatch.setattr("roll_qr_scale.sync.post_remote_action", lambda *args, **kwargs: batch_calls.append(kwargs) or {"ok": True})
+    worker.sync_pending_when_idle(lambda: True, lambda row: True)
+    assert sent == [pending.event_id, measurement.event_id]
+    assert store.get_inventory_check(failed.event_id).sync_status == "failed"
+    assert store.get_inventory_check(pending.event_id).sync_status == "synced"
+    assert store.get_weigh_batch(batch_id)["sync_status"] == "synced"
+    worker.sync_pending_when_idle(lambda: True, lambda row: True)
+    assert len(batch_calls) == 1
 
 
 def test_local_weigh_batch_prints_before_cloud_and_syncs_later(tmp_path, monkeypatch) -> None:

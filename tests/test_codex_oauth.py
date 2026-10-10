@@ -52,6 +52,7 @@ def test_encrypted_store_never_sends_plain_access_token(monkeypatch) -> None:
     encoded_request = json.dumps(requests[0][1]["payload"])
     assert "sensitive-access-token" not in encoded_request
     assert store.read()["access_token"] == "sensitive-access-token"
+    assert all(kwargs["attempts"] == 3 and kwargs["retry_dns_only"] for _, kwargs in requests)
 
 
 def test_device_flow_verifies_server_pkce_and_saves_tokens(monkeypatch) -> None:
@@ -143,3 +144,93 @@ def test_oauth_weight_reader_parses_fixed_two_decimal_result(monkeypatch) -> Non
     assert result.readable is True
     assert result.value == 13.04
     assert result.raw.startswith("CODEX-OAUTH:13.04")
+
+
+def test_http_json_retries_on_urlerror_and_succeeds(monkeypatch) -> None:
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        if len(calls) < 2:
+            import socket
+            import urllib.error
+            raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+        import io
+        return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(codex_oauth.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(codex_oauth.time, "sleep", lambda s: None)
+    res = codex_oauth._http_json("https://example.supabase.co/test", attempts=3)
+    assert res == {"ok": True}
+    assert len(calls) == 2
+
+
+def test_http_json_reports_hostname_on_dns_failure(monkeypatch) -> None:
+    import pytest
+    import socket
+    import urllib.error
+
+    def fake_urlopen(request, timeout):
+        raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+
+    monkeypatch.setattr(codex_oauth.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(codex_oauth.time, "sleep", lambda s: None)
+    with pytest.raises(codex_oauth.CodexOAuthError, match=r"Không phân giải được tên miền example\.supabase\.co"):
+        codex_oauth._http_json("https://example.supabase.co/test", attempts=2)
+
+
+def test_encrypted_store_normalizes_pasted_url_and_preserves_query(monkeypatch):
+    calls = []
+    monkeypatch.setattr(codex_oauth, "_http_json", lambda url, **kwargs: calls.append(url) or {"found": False})
+    store = EncryptedCodexTokenStore(
+        '[API](https://example.supabase.co/ingest?station=1)', "device-secret", secret_name="gemini-api-key:gateway-01",
+    )
+    assert store.configured
+    assert store.read() is None
+    assert calls[0].startswith("https://example.supabase.co/ingest?station=1&action=")
+
+
+def test_encrypted_store_does_not_retry_http_failure_or_ambiguous_timeout(monkeypatch):
+    import io
+    import pytest
+    import urllib.error
+
+    calls = []
+    errors = [
+        urllib.error.HTTPError("https://example.supabase.co/ingest", 503, "Unavailable", {}, io.BytesIO(b'{}')),
+        urllib.error.URLError(TimeoutError("timed out")),
+    ]
+    store = EncryptedCodexTokenStore("https://example.supabase.co/ingest", "device-secret", secret_name="gemini-api-key:test")
+    for error in errors:
+        calls.clear()
+
+        def fail(request, timeout):
+            calls.append(request)
+            raise error
+
+        monkeypatch.setattr(codex_oauth.urllib.request, "urlopen", fail)
+        with pytest.raises(codex_oauth.CodexOAuthError):
+            store.write({"api_key": "dummy-test-secret"})
+        assert len(calls) == 1
+
+
+def test_encrypted_store_recovers_dns_failure_without_sending_plain_key(monkeypatch):
+    import io
+    import socket
+    import urllib.error
+
+    calls = []
+
+    def send(request, timeout):
+        calls.append(request)
+        if len(calls) < 3:
+            raise urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed"))
+        return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(codex_oauth.urllib.request, "urlopen", send)
+    monkeypatch.setattr(codex_oauth.time, "sleep", lambda seconds: None)
+    store = EncryptedCodexTokenStore("https://example.supabase.co/ingest", "device-secret", secret_name="gemini-api-key:test")
+    store.write({"api_key": "dummy-test-secret"})
+    assert len(calls) == 3
+    assert all(b"dummy-test-secret" not in request.data for request in calls)
+    assert calls[0].data == calls[-1].data

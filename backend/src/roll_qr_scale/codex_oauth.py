@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import secrets
+import socket
 import threading
 import time
 import urllib.error
@@ -13,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
+
+from .api_client import normalize_remote_url
 
 
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -42,6 +45,7 @@ def _http_json(
     headers: dict[str, str] | None = None,
     timeout: float = 30.0,
     attempts: int = 1,
+    retry_dns_only: bool = False,
 ) -> dict[str, Any]:
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     request_headers = {
@@ -66,7 +70,7 @@ def _http_json(
             break
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            if 500 <= exc.code <= 599 and attempt + 1 < total_attempts:
+            if not retry_dns_only and 500 <= exc.code <= 599 and attempt + 1 < total_attempts:
                 time.sleep(0.35 * (2**attempt))
                 continue
             try:
@@ -80,16 +84,23 @@ def _http_json(
                 message = detail or str(exc)
             raise CodexOAuthHTTPError(exc.code, message[:500]) from exc
         except urllib.error.URLError as exc:
-            if attempt + 1 < total_attempts:
+            dns_error = isinstance(exc.reason, socket.gaierror) or "getaddrinfo" in str(exc.reason)
+            if (not retry_dns_only or dns_error) and attempt + 1 < total_attempts:
                 time.sleep(0.35 * (2**attempt))
                 continue
-            raise CodexOAuthError(f"Không kết nối được máy chủ đăng nhập: {exc.reason}") from exc
+            host = urllib.parse.urlsplit(url).hostname or "máy chủ"
+            if dns_error:
+                raise CodexOAuthError(
+                    f"Không phân giải được tên miền {host} sau {total_attempts} lần thử: {exc.reason}"
+                ) from exc
+            raise CodexOAuthError(f"Không kết nối được máy chủ {host}: {exc.reason}") from exc
+    host = urllib.parse.urlsplit(url).hostname or "máy chủ"
     try:
         parsed = json.loads(raw)
     except ValueError as exc:
-        raise CodexOAuthError("Máy chủ đăng nhập trả về dữ liệu không hợp lệ") from exc
+        raise CodexOAuthError(f"Máy chủ {host} trả về dữ liệu không hợp lệ") from exc
     if not isinstance(parsed, dict):
-        raise CodexOAuthError("Máy chủ đăng nhập trả về dữ liệu không hợp lệ")
+        raise CodexOAuthError(f"Máy chủ {host} trả về dữ liệu không hợp lệ")
     return parsed
 
 
@@ -152,6 +163,11 @@ class EncryptedCodexTokenStore:
             self._config_error = "Thiếu ROLL_SCALE_API_URL hoặc ROLL_SCALE_DEVICE_TOKEN"
             return
         try:
+            self.api_url = normalize_remote_url(self.api_url)
+        except ValueError as exc:
+            self._config_error = str(exc)
+            return
+        try:
             key = encryption_key.strip().encode("ascii") if encryption_key.strip() else self._derived_key()
             self._fernet = Fernet(key)
         except (ValueError, UnicodeError) as exc:
@@ -177,9 +193,11 @@ class EncryptedCodexTokenStore:
             raise CodexOAuthError(self.config_error or "Kho bí mật mã hóa chưa cấu hình")
         query = urllib.parse.urlencode({"action": self.secret_action, "name": self.secret_name})
         result = _http_json(
-            f"{self.api_url}?{query}",
+            f"{self.api_url}{'&' if '?' in self.api_url else '?'}{query}",
             headers=self._headers(),
             timeout=self.timeout_seconds,
+            attempts=3,
+            retry_dns_only=True,
         )
         if not result.get("found"):
             return None
@@ -211,6 +229,8 @@ class EncryptedCodexTokenStore:
             },
             headers=self._headers(),
             timeout=self.timeout_seconds,
+            attempts=3,
+            retry_dns_only=True,
         )
         if not result.get("ok"):
             raise CodexOAuthError("Supabase không lưu được bí mật đã mã hóa")

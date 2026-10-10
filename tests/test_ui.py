@@ -27,6 +27,74 @@ from roll_qr_scale.test_ui import (
 from roll_qr_scale.weight_ocr import NormalizedROI
 
 
+def test_automatic_sync_waits_for_running_and_queued_ai_then_sends_valid_pending(tmp_path):
+    from roll_qr_scale.sync import IdlePendingSync
+
+    store = MeasurementStore(tmp_path / "automatic.db", tmp_path / "captures")
+    sent = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def send(url, payload, image_path, token):
+        sent.append(payload["event_id"])
+        return {"ok": True, "event_id": payload["event_id"], "id": 1, "cloudinary_skipped": True, "local_backup_committed": True}
+
+    worker = OutboxSyncWorker(store, "https://example.test/ingest", "token", send=send, include_images=False)
+    service = StationUIService(store, worker, None, None)
+    service.auto_sync.stop()
+    now = [0.0]
+    timer = IdlePendingSync(worker, service._inference_is_idle, lambda row: not test_ui_module._sync_row_has_error(row), clock=lambda: now[0])
+
+    def ai_failure():
+        started.set()
+        assert release.wait(3)
+        raise RuntimeError("Gemini unavailable")
+
+    try:
+        frame = np.zeros((20, 20, 3), dtype=np.uint8)
+        valid = store.save("VALID", 1.0, "kg", frame, "manual", needs_sync=True)
+        invalid = store.save("INVALID", 1.0, "kg", frame, "manual", needs_sync=True, weight_raw="ERROR_STATUS=error; ERROR_REASON=unreadable")
+        future = service.inference.submit(ai_failure)
+        assert started.wait(2)
+        queued = service.inference.submit(lambda: None)
+        now[0] = 600.0
+        timer.tick()
+        assert sent == [] and timer.status()["state"] == "waiting_ai"
+        release.set()
+        with pytest.raises(RuntimeError, match="Gemini unavailable"):
+            future.result(timeout=2)
+        queued.result(timeout=2)
+        for _ in range(100):
+            if service._inference_is_idle():
+                break
+            time.sleep(0.01)
+        timer.tick()
+        assert sent == [valid.event_id]
+        assert store.get(valid.event_id).sync_status == "synced"
+        assert store.get(invalid.event_id).sync_status == "pending"
+        assert service.status()["auto_sync"]["interval_seconds"] == 600.0
+    finally:
+        release.set()
+        timer.stop()
+        service.close()
+        store.close()
+
+
+def test_auto_sync_can_be_disabled_and_requires_device_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("ROLL_SCALE_AUTO_SYNC", "0")
+    assert test_ui_module.build_parser().parse_args([]).auto_sync is False
+    assert test_ui_module.build_parser().parse_args(["--auto-sync"]).auto_sync is True
+    store = MeasurementStore(tmp_path / "disabled.db", tmp_path / "captures")
+    worker = OutboxSyncWorker(store, "https://example.test/ingest", "")
+    service = StationUIService(store, worker, None, None)
+    try:
+        assert service.auto_sync is None
+        assert service.status()["auto_sync"] == {"enabled": False}
+    finally:
+        service.close()
+        store.close()
+
+
 @pytest.mark.parametrize(
     ("shift", "machine", "expected"),
     [

@@ -1112,6 +1112,7 @@ class MeasurementStore:
         *,
         include_failed: bool = True,
         include_local: bool = False,
+        only_pending: bool = False,
     ) -> list[Measurement]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
@@ -1121,13 +1122,16 @@ class MeasurementStore:
                 ["pending"] + (["failed"] if include_failed else []) + (["local"] if include_local else [])
             )
         ) + ")"
+        cloudinary_clause = "" if only_pending else "OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')"
+        if only_pending:
+            statuses = "('pending')"
         with self._lock:
             rows = self.connection.execute(
                 f"""
                 SELECT * FROM measurements
                 WHERE (
                     sync_status IN {statuses}
-                    OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')
+                    {cloudinary_clause}
                 )
                   AND (image_path <> '' OR product_image_path <> '')
                   {retry_clause}
@@ -1440,6 +1444,7 @@ class MeasurementStore:
         *,
         include_failed: bool = True,
         include_local: bool = False,
+        only_pending: bool = False,
     ) -> list[InventoryCheck]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
@@ -1449,13 +1454,16 @@ class MeasurementStore:
                 ["pending"] + (["failed"] if include_failed else []) + (["local"] if include_local else [])
             )
         ) + ")"
+        cloudinary_clause = "" if only_pending else "OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')"
+        if only_pending:
+            statuses = "('pending')"
         with self._lock:
             rows = self.connection.execute(
                 f"""
                 SELECT * FROM inventory_checks
                 WHERE (
                     sync_status IN {statuses}
-                    OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')
+                    {cloudinary_clause}
                 )
                   AND image_path <> ''
                   {retry_clause}
@@ -1719,6 +1727,7 @@ class MeasurementStore:
         *,
         include_failed: bool = True,
         include_local: bool = False,
+        only_pending: bool = False,
     ) -> list[PhotoDraft]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
@@ -1728,13 +1737,16 @@ class MeasurementStore:
                 ["pending"] + (["failed"] if include_failed else []) + (["local"] if include_local else [])
             )
         ) + ")"
+        cloudinary_clause = "" if only_pending else "OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')"
+        if only_pending:
+            statuses = "('pending')"
         with self._lock:
             rows = self.connection.execute(
                 f"""
                 SELECT * FROM photo_drafts
                 WHERE (
                     sync_status IN {statuses}
-                    OR (sync_status = 'synced' AND sync_error = 'cloudinary_pending')
+                    {cloudinary_clause}
                 )
                   AND image_path <> ''
                   {retry_clause}
@@ -1927,11 +1939,14 @@ class MeasurementStore:
     def pending_weigh_batches(
         self, *, limit: int = 20, include_deferred: bool = False,
         include_local: bool = False,
+        only_pending: bool = False,
     ) -> list[dict[str, object]]:
         now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         retry_clause = "" if include_deferred else "AND (next_retry_at IS NULL OR next_retry_at <= ?)"
         parameters = (limit,) if include_deferred else (now, limit)
         statuses = "('pending','failed','local')" if include_local else "('pending','failed')"
+        if only_pending:
+            statuses = "('pending')"
         with self._lock:
             rows = self.connection.execute(
                 f"SELECT * FROM weigh_batches WHERE sync_status IN {statuses} "
