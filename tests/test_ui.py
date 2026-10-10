@@ -2467,6 +2467,11 @@ def test_ui_records_table_shows_bi_and_nvl_weights() -> None:
     assert "function toggleSourceOrderMenu(" in TEST_UI_HTML
     assert "function filteredSourceOrders(" in TEST_UI_HTML
     assert 'id="sourceOrderSelect"' not in TEST_UI_HTML
+    assert 'id="sourceProductCode"' in TEST_UI_HTML
+    assert 'id="sourceProductCodeList"' in TEST_UI_HTML
+    assert "function setSourceProductCodeOptions(" in TEST_UI_HTML
+    assert "function applyProductCodesFromOrders(" in TEST_UI_HTML
+    assert "params.set('production_order'" in TEST_UI_HTML
     assert "setSourceOrderOptions" in TEST_UI_HTML
     assert "sanitizeOrder" in TEST_UI_HTML
     assert 'placeholder="Nhập lệnh SX"' not in TEST_UI_HTML
@@ -2807,6 +2812,56 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "TRÙNG MÃ QR" in TEST_UI_HTML
     assert "rebuildProductionQrIndex" in TEST_UI_HTML
     assert "!roundHasDuplicateQr(session,index)" in TEST_UI_HTML
+
+
+def test_product_codes_grouped_by_production_order() -> None:
+    master_rows = [
+        {
+            "ma_lsx": "LSX-A",
+            "ngay": "01/07/2026",
+            "ca": "12C1",
+            "ma_sp": "MT-TCN0013",
+        },
+        {
+            "ma_lsx": "LSX-A",
+            "ngay": "01/07/2026",
+            "ca": "12C1",
+            "ma_san_pham": "MT-TCN0014",
+        },
+        {
+            "ma_lsx": "LSX-B",
+            "ngay": "01/07/2026",
+            "ca": "12C1",
+            "product_code": "BB-PE50",
+        },
+    ]
+    by_order = test_ui_module._product_codes_by_order_from_master(
+        master_rows, "2026-07-01", shift="12C1"
+    )
+    assert by_order["LSX-A"] == ["MT-TCN0013", "MT-TCN0014"]
+    assert by_order["LSX-B"] == ["BB-PE50"]
+    measurements = [
+        {
+            "captured_at": "2026-07-01T08:00:00",
+            "weight_raw": "SOURCE_DATE=2026-07-01; SOURCE_SHIFT=12C1; SOURCE_PRODUCTION_ORDER=LSX-A",
+            "qr_code": "MT-TCN0015_54281234",
+        },
+        {
+            "captured_at": "2026-07-01T09:00:00",
+            "weight_raw": "SOURCE_DATE=2026-07-01; SOURCE_SHIFT=12C1; SOURCE_PRODUCTION_ORDER=LSX-A",
+            "qr_code": "MT-TCN0013_9999",
+        },
+    ]
+    from_meas = test_ui_module._product_codes_by_order_from_measurements(
+        measurements, "2026-07-01", shift="12C1", production_order="LSX-A"
+    )
+    merged = test_ui_module._merge_product_codes_by_order(by_order, from_meas)
+    assert test_ui_module._product_codes_for_order(merged, "LSX-A") == [
+        "MT-TCN0013",
+        "MT-TCN0014",
+        "MT-TCN0015",
+    ]
+    assert test_ui_module._product_codes_for_order(merged, "LSX-B") == ["BB-PE50"]
 
 
 def test_production_orders_read_master_table_rows() -> None:

@@ -298,6 +298,16 @@ PRODUCTION_ORDER_PRODUCT_FIELDS = (
     "product_name",
     "ten_sp",
 )
+PRODUCTION_ORDER_PRODUCT_CODE_FIELDS = (
+    "ma_sp",
+    "ma_san_pham",
+    "mã sp",
+    "ma sp",
+    "ma_hang",
+    "mã hàng",
+    "product_code",
+    "sku",
+)
 MACHINE_PRODUCT_HINTS: dict[str, tuple[str, ...]] = {
     "Máy cách nhiệt": ("cach nhiet", "ranko", "tam cach"),
     "Máy Bao Bì": ("bao bi", "bao goi", "dong goi"),
@@ -312,6 +322,128 @@ PRODUCTION_ORDER_MACHINE_FIELDS = (
     "loai_may",
     "machine_name",
 )
+
+
+
+def _production_order_product_code(row: dict[str, object]) -> str:
+    """Return a product code (Mã SP) from an LSX master row when available."""
+    direct = _row_field(row, PRODUCTION_ORDER_PRODUCT_CODE_FIELDS)
+    text = str(direct or "").strip()
+    if not text:
+        return ""
+    code = product_code_from_qr(text) or text
+    # Skip obvious long product names mistaken as codes.
+    if " " in code and len(code) > 24:
+        return ""
+    return code[:80]
+
+
+def _product_codes_by_order_from_master(
+    rows: list[dict[str, object]],
+    work_date: str = "",
+    *,
+    shift: str = "",
+    machine: str = "",
+    production_order: str = "",
+) -> dict[str, list[str]]:
+    wanted = str(production_order or "").strip().casefold()
+    mapping: dict[str, list[str]] = {}
+    for row in rows:
+        if not _row_matches_production_filters(
+            row, work_date=work_date, shift=shift, machine=machine
+        ):
+            continue
+        order = _production_order_code(row)
+        if not order:
+            continue
+        if wanted and order.casefold() not in wanted and wanted not in order.casefold():
+            continue
+        code = _production_order_product_code(row)
+        if not code:
+            continue
+        bucket = mapping.setdefault(order, [])
+        if code not in bucket:
+            bucket.append(code)
+    for order, codes in mapping.items():
+        mapping[order] = sorted(codes, key=str.casefold)
+    return mapping
+
+
+def _product_codes_by_order_from_measurements(
+    items: list[dict[str, object]],
+    work_date: str = "",
+    *,
+    shift: str = "",
+    machine: str = "",
+    production_order: str = "",
+) -> dict[str, list[str]]:
+    wanted = str(production_order or "").strip().casefold()
+    mapping: dict[str, list[str]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_date = _item_source_date(item)
+        if work_date and item_date and item_date != work_date:
+            continue
+        item_shift = _item_source_value(item, "shift", "SOURCE_SHIFT")
+        if shift and item_shift and not _shifts_match(item_shift, shift):
+            continue
+        item_machine = _item_source_value(item, "machine", "SOURCE_MACHINE")
+        if machine and item_machine and not _machine_labels_match(item_machine, machine):
+            continue
+        order = _item_source_value(item, "production_order", "SOURCE_PRODUCTION_ORDER")
+        if not order:
+            continue
+        if wanted and order.casefold() not in wanted and wanted not in order.casefold():
+            continue
+        code = product_code_from_qr(str(item.get("qr_code") or ""))
+        if not code:
+            continue
+        bucket = mapping.setdefault(order, [])
+        if code not in bucket:
+            bucket.append(code)
+    for order, codes in mapping.items():
+        mapping[order] = sorted(codes, key=str.casefold)
+    return mapping
+
+
+def _merge_product_codes_by_order(
+    *maps: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for mapping in maps:
+        for order, codes in mapping.items():
+            bucket = merged.setdefault(order, [])
+            for code in codes:
+                if code and code not in bucket:
+                    bucket.append(code)
+    for order, codes in merged.items():
+        merged[order] = sorted(codes, key=str.casefold)
+    return merged
+
+
+def _product_codes_for_order(
+    mapping: dict[str, list[str]],
+    production_order: str = "",
+) -> list[str]:
+    order = str(production_order or "").strip()
+    if not order:
+        seen: list[str] = []
+        for codes in mapping.values():
+            for code in codes:
+                if code not in seen:
+                    seen.append(code)
+        return sorted(seen, key=str.casefold)
+    if order in mapping:
+        return mapping[order]
+    matched: list[str] = []
+    needle = order.casefold()
+    for code_order, codes in mapping.items():
+        if code_order.casefold() in needle or needle in code_order.casefold():
+            for code in codes:
+                if code not in matched:
+                    matched.append(code)
+    return sorted(matched, key=str.casefold)
 
 
 def _production_order_product_text(row: dict[str, object]) -> str:
@@ -6060,6 +6192,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     }
                     for item in store.recent(200)
                 ]
+                production_order = str(query.get("production_order", [""])[0]).strip()
                 orders, source, fallback_error, filter_relaxed = _load_production_orders(
                     work_date, shift=shift, machine=machine
                 )
@@ -6072,6 +6205,34 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 db_shifts, db_machines, suggestions = _production_order_filter_options(
                     work_date
                 )
+                master_rows, _master_table = _master_production_order_rows()
+                measurement_items = [
+                    {
+                        "captured_at": item.captured_at,
+                        "weight_raw": item.weight_raw,
+                        "qr_code": item.qr_code,
+                    }
+                    for item in store.recent(500)
+                ]
+                product_codes_by_order = _merge_product_codes_by_order(
+                    _product_codes_by_order_from_master(
+                        master_rows,
+                        work_date,
+                        shift=shift,
+                        machine=machine,
+                        production_order=production_order,
+                    ),
+                    _product_codes_by_order_from_measurements(
+                        measurement_items,
+                        work_date,
+                        shift=shift,
+                        machine=machine,
+                        production_order=production_order,
+                    ),
+                )
+                product_codes = _product_codes_for_order(
+                    product_codes_by_order, production_order
+                )
                 self.send_json(
                     200,
                     {
@@ -6080,8 +6241,11 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         "work_date": work_date,
                         "shift": shift or None,
                         "machine": machine or None,
+                        "production_order": production_order or None,
                         "filter_relaxed": filter_relaxed,
                         "orders": orders,
+                        "product_codes": product_codes,
+                        "product_codes_by_order": product_codes_by_order,
                         "shifts": db_shifts,
                         "machines": db_machines,
                         "suggestions": suggestions,
