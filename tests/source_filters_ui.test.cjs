@@ -110,6 +110,7 @@ test('a single LSX suggestion cannot replace a selected shift',async()=>{
   ctx.productionOrdersQuery=()=>'';
   ctx.api=async()=>({suggestions:[{shift:'HC1',machine:'MÁY CẤU HÌNH'}],shifts:['HC1'],machines:['MÁY CẤU HÌNH'],orders:['LSX-01'],source:'local'});
   ctx.setSourceOrderOptions=(orders,selected)=>{nodes.sourceOrder.value=selected||orders[0]||'';return orders};
+  ctx.applyProductCodesFromOrders=()=>[];
   ctx.applySourceFilterOptions=(data,preferred)=>{nodes.sourceShift.value=preferred.shift;nodes.sourceMachine.value=preferred.machine;return preferred};
   vm.runInContext(line('async function loadProductionOrders('),ctx);
   await ctx.loadProductionOrders('2026-09-23');
