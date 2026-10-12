@@ -118,3 +118,22 @@ test('a single LSX suggestion cannot replace a selected shift',async()=>{
   assert.equal(nodes.sourceShift.value,'Ca chuẩn Đà Nẵng');
   assert.equal(JSON.parse(storage.get('rollQrScale.sourceContext.v1')).shift,'Ca chuẩn Đà Nẵng');
 });
+
+test('an order response cannot overwrite a manual edit made while loading',async()=>{
+  const {ctx,nodes,storage}=setup();
+  nodes.sourceOrder.value='LSX-OLD';
+  ctx.sourceOrdersRequest=0;ctx.sourceOrdersLoading=false;ctx.captureStatus={};
+  ctx.renderControls=()=>{};ctx.status=()=>{};ctx.productionOrdersQuery=()=>'';
+  let resolve;
+  ctx.api=()=>new Promise(done=>{resolve=done});
+  ctx.setSourceOrderOptions=(orders,selected)=>{nodes.sourceOrder.value=selected||orders[0]||'';return orders};
+  ctx.applyProductCodesFromOrders=()=>[];
+  ctx.applySourceFilterOptions=(data,preferred)=>preferred;
+  vm.runInContext(line('async function loadProductionOrders('),ctx);
+  const loading=ctx.loadProductionOrders('2026-09-23');
+  nodes.sourceOrder.value='LSX-GO-TAY';
+  resolve({orders:['LSX-DB'],source:'local'});
+  await loading;
+  assert.equal(nodes.sourceOrder.value,'LSX-GO-TAY');
+  assert.equal(JSON.parse(storage.get('rollQrScale.sourceContext.v1')).order,'LSX-GO-TAY');
+});

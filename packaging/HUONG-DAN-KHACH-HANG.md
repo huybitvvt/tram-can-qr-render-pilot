@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc64` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc65` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc64.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc65.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -109,6 +109,10 @@ mã hóa và giữ qua khởi động lại. Nếu mất phản hồi, bấm **T
 Mỗi camera chỉ được gán cho một trạm. Trên giao diện, chọn đúng camera ở từng
 thẻ trạm rồi bấm **Mở camera đã gán**. Trình duyệt lưu ánh xạ này trên chính
 máy khách.
+
+Ô **Lệnh sản xuất** và **Mã SP** đều cho gõ tay hoặc bấm **▾** để xổ danh sách
+gợi ý. Gõ để lọc, dùng **↑/↓** và **Enter** để chọn; vẫn nhập được mã ngoài
+danh sách. Bấm **Áp dụng** để dùng thông tin đã chọn cho lần cân.
 
 ### Đẩy cân AI và kho chờ
 

@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc64`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc64/TramCanQR-Setup-0.2.0-rc64.exe).
+>    Bản `0.2.0-rc65`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc65/TramCanQR-Setup-0.2.0-rc65.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc64.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc65.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -708,4 +708,4 @@ Bản 0.2.0-rc60: lưu ảnh local trước, đọc AI ở nền theo từng ô 
 
 Bản 0.2.0-rc61: tự đẩy các dòng Chờ đồng bộ mỗi 10 phút khi AI rảnh; tạm dừng giữa các phiếu khi AI bắt đầu chạy. Thử lại DNS khi lưu key Gemini và báo đúng tên miền lỗi. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc61.md).
 
-Bản 0.2.0-rc64: khôi phục ô Ghi chú dưới khung camera; khôi phục kiểm tra tiến trình đồng bộ khi mở trang. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc64.md).
+Bản 0.2.0-rc65: khôi phục ô Ghi chú dưới khung camera; khôi phục kiểm tra tiến trình đồng bộ khi mở trang. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc65.md).

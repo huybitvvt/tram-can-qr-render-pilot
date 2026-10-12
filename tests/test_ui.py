@@ -2604,7 +2604,8 @@ def test_ui_records_table_shows_bi_and_nvl_weights() -> None:
     assert "function filteredSourceOrders(" in TEST_UI_HTML
     assert 'id="sourceOrderSelect"' not in TEST_UI_HTML
     assert 'id="sourceProductCode"' in TEST_UI_HTML
-    assert 'id="sourceProductCodeList"' in TEST_UI_HTML
+    assert 'id="sourceProductCodeMenu"' in TEST_UI_HTML
+    assert 'id="sourceProductCodeToggle"' in TEST_UI_HTML
     assert "function setSourceProductCodeOptions(" in TEST_UI_HTML
     assert "function applyProductCodesFromOrders(" in TEST_UI_HTML
     assert "params.set('production_order'" in TEST_UI_HTML
