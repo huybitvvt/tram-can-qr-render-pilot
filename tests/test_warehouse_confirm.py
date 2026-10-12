@@ -93,7 +93,7 @@ def test_confirm_nhap_kho_writes_and_marks_status(monkeypatch) -> None:
             "success": True,
             "updated": 1,
             "requested": 1,
-            "confirmed_count": 1,
+            "confirmed_count": len(_args[2]),
             "nhap_kho_luc": "2026-10-08T10:00:00+00:00",
             "nhap_kho_boi": "Trạm cân",
         }
@@ -154,12 +154,16 @@ def test_confirm_nhap_kho_writes_and_marks_status(monkeypatch) -> None:
 
     assert result["saved_count"] == 1
     assert result["duplicate_count"] == 1
+    assert result["report_count"] == 2
+    assert result["processed_event_ids"] == ["e2", "e1"]
+    assert result["summary_export"]["rows"][0]["so_luong"] == 2
     assert result["saved"] == ["SP01_A"]
     assert str(result["ma_phieu"]).startswith("PN-MBB15-")
     assert calls["write"]["kho"] == "Kho thành phẩm"
     assert calls["update"]["ma_phieu"] == result["ma_phieu"]
     assert local_updates and local_updates[0][0] == "e1"
     assert local_updates[0][1] == warehouse.NHAP_KHO_DA
+    assert {row[0] for row in local_updates} == {"e1", "e2"}
     assert result["summary_export"]["ok"] is True
     assert result["summary_export"]["csv_path"].endswith("tong-hop-day-kho.csv")
 

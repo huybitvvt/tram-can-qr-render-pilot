@@ -39,6 +39,7 @@ class _GeminiScalePayload(BaseModel):
     qr_readable: bool
     qr_code: str | None
     all_frames_agree: bool
+    display_blank: bool = False
 
 
 class _GeminiPanelPayload(BaseModel):
@@ -56,6 +57,7 @@ _GEMINI_RESPONSE_SCHEMA = {
         "qr_readable": {"type": "boolean"},
         "qr_code": {"type": "string", "nullable": True},
         "all_frames_agree": {"type": "boolean"},
+        "display_blank": {"type": "boolean"},
     },
     "required": [
         "weight_readable",
@@ -63,6 +65,7 @@ _GEMINI_RESPONSE_SCHEMA = {
         "qr_readable",
         "qr_code",
         "all_frames_agree",
+        "display_blank",
     ],
 }
 
@@ -111,6 +114,7 @@ class GeminiWeightSuggestion:
     thinking_tokens: int = 0
     total_tokens: int = 0
     transient_error: bool = False
+    display_blank: bool = False
 
 
 class GeminiWeightReader:
@@ -523,7 +527,12 @@ class GeminiWeightReader:
                 "readable flag false and its value null. For three images, set "
                 "all_frames_agree=false if any visible weight or QR content conflicts. "
                 "For one image, set all_frames_agree=true. Never guess missing segments "
-                "or QR content."
+                "or QR content. Set display_blank=true only when the scale's gross-weight "
+                "display is clearly visible and has no digit glyphs in every supplied image "
+                "(an isolated decimal LED or reflection is not a digit). For a blank display, "
+                "set weight_readable=false and weight_digits=null. Set display_blank=false "
+                "if digits are blurred, obscured, partially lit, conflicting, or the display "
+                "cannot be located."
             )
             contents: list[object] = [prompt]
             contents.extend(
@@ -588,6 +597,9 @@ class GeminiWeightReader:
                 else ""
             )
             agreement = len(sampled) == 1 or bool(payload.all_frames_agree)
+            display_blank = bool(
+                payload.display_blank and agreement and not digits and not payload.weight_readable
+            )
             valid = (
                 payload.weight_readable
                 and agreement
@@ -610,6 +622,7 @@ class GeminiWeightReader:
             raw = (
                 f"GEMINI_FULL:{reading if valid else 'weight-unreadable'}@{self.model}; "
                 f"qr={'readable' if qr_valid else 'unreadable'}; agree={agreement}; "
+                f"display_blank={display_blank}; "
                 f"tokens={input_tokens}+{output_tokens}+{thinking_tokens}"
             )
             with self._lock:
@@ -618,7 +631,7 @@ class GeminiWeightReader:
                 self._input_tokens += input_tokens
                 self._output_tokens += output_tokens
                 self._thinking_tokens += thinking_tokens
-                if valid:
+                if valid or display_blank:
                     self._successes += 1
                 else:
                     self._failures += 1
@@ -635,6 +648,7 @@ class GeminiWeightReader:
                 output_tokens=output_tokens,
                 thinking_tokens=thinking_tokens,
                 total_tokens=total_tokens,
+                display_blank=display_blank,
             )
         except Exception as exc:
             latency = time.perf_counter() - started

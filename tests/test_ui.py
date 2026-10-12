@@ -2062,6 +2062,40 @@ def test_core_capture_reads_qr_in_the_same_frame(tmp_path, monkeypatch) -> None:
     assert result["qr_decoder"] == "zxing"
 
 
+@pytest.mark.parametrize(("kind", "blank", "error", "expected"), [
+    ("core", True, False, 0.0),
+    ("product", True, False, None),
+    ("core", False, False, None),
+    ("core", False, True, None),
+])
+def test_only_confirmed_blank_core_display_becomes_zero(tmp_path, monkeypatch, kind, blank, error, expected):
+    class Reader:
+        def read(self, frames, *, unit):
+            return GeminiWeightSuggestion(None, unit, False, True,
+                "GEMINI ERROR: timeout" if error else "GEMINI_FULL:weight-unreadable",
+                0.1, display_blank=blank)
+
+        def status(self):
+            return {"enabled": True}
+
+        def close(self):
+            pass
+
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None, gemini_reader=Reader(), weight_engine="gemini")
+    monkeypatch.setattr(service, "_decode_qr", lambda _frame: {"ok": True, "found": False})
+    try:
+        result = service.analyze(np.full((600, 800, 3), 180, dtype=np.uint8), "0.1,0.1,0.9,0.9", "kg", capture_kind=kind)
+        assert result["weight"] == expected
+        assert result["weight_found"] is (expected is not None)
+        if expected == 0.0:
+            assert "CORE_BLANK=1" in result["weight_raw"]
+            assert result["gemini_attempts"] == 1
+    finally:
+        service.close()
+        store.close()
+
+
 def test_unreadable_gemini_full_frame_retries_one_led_crop(tmp_path, monkeypatch) -> None:
     class FakeGeminiReader:
         def __init__(self):

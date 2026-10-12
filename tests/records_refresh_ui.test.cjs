@@ -27,10 +27,11 @@ function setup(){
     formatRecordWeight:n=>Number.isFinite(n)?String(n):'--',productCodeFromQr:()=>'',
     appendProductionDeleteAction(){},extraRoundsFromRaw:()=>'',loadWeighBatches:async()=>{},
     matchesRecordsStatusFilters:()=>true,canSelectForNhapKho:()=>true,
+    canSelectProductionRecord:()=>true,recordsSelectionKey:()=>'',
     paintNhapKhoSelectBtn(){},appendNhapKhoStatusCell(){},syncSelectAllNhapKho(){},
     status(){},
   });
-  vm.runInContext('let recordsLoading=false,recordsRequestId=0,productionRowsByEvent={},selectedNhapKhoIds=new Set(),nhapKhoSelectedEventIds=[];\n'+script.slice(start,end),ctx);
+  vm.runInContext('let recordsLoading=false,recordsRequestId=0,productionRowsByEvent={},selectedNhapKhoIds=new Set(),nhapKhoSelectedEventIds=[],productionSelectionFilter="",productionAllSelectedFilter="",recordsSelectionBusy=false;\n'+script.slice(start,end),ctx);
   return {ctx,body,pending,calls};
 }
 
@@ -49,4 +50,14 @@ test('fresh local row wins over an older list request after save',async()=>{
   pending.older.resolve({items:[]});
   await old;
   assert.equal(body.children[0].cells[2],'QR-SAVED');
+});
+
+test('refresh keeps selected rows beyond the visible page',async()=>{
+  const {ctx,pending}=setup();
+  vm.runInContext("productionRowsByEvent={offpage:{event_id:'offpage',qr_code:'SP_204'}};selectedNhapKhoIds.add('offpage');",ctx);
+  const loading=ctx.loadRecords();
+  pending.older.resolve({items:[]});
+  await loading;
+  assert.equal(vm.runInContext("selectedNhapKhoIds.has('offpage')",ctx),true);
+  assert.equal(vm.runInContext("productionRowsByEvent.offpage.qr_code",ctx),'SP_204');
 });

@@ -66,6 +66,7 @@ function confirmContext(api) {
     fields[id] = { disabled: false };
   }
   const context = vm.createContext({ nhapKhoBusy: false, nhapKhoSelectedEventIds: ['e1'],
+    productionAllSelectedFilter: '',
     selectedNhapKhoIds: new Set(['e1']), $: id => fields[id], api,
     status: (field, message, kind) => Object.assign(field, { message, kind }),
     setManualSyncRunning: () => {}, closeNhapKhoModal: () => {}, loadRecords: async () => {},
@@ -94,4 +95,21 @@ test('reports recovered receipts as warehouse waiting, not a newly created recei
   assert.match(fields.productionRecordsStatus.message, /PN1, PN2/);
   assert.match(fields.productionRecordsStatus.message, /dùng lại 1 QR/);
   assert.strictEqual(fields.productionRecordsStatus.kind, 'ok');
+});
+
+test('reports the full roll count and exports a receipt even when every QR is a duplicate', async () => {
+  let summary, marked;
+  const { context, fields } = confirmContext(async () => ({
+    saved_count: 0, duplicate_count: 1, report_count: 1,
+    ma_phieu: 'PN-DUP', ma_phieu_list: ['PN-DUP'], processed_event_ids: ['e1'],
+  }));
+  context.rememberNhapKhoPush = entry => { summary = entry; };
+  context.markProductionRowsPushed = ids => { marked = Array.from(ids); };
+  await context.confirmNhapKho();
+  assert.match(fields.productionRecordsStatus.message, /đủ 1 cuộn/);
+  assert.match(fields.productionRecordsStatus.message, /Bỏ qua 1 QR/);
+  assert.equal(fields.productionRecordsStatus.kind, 'ok');
+  assert.equal(summary.so_luong, 1);
+  assert.equal(summary.ma_phieu, 'PN-DUP');
+  assert.deepEqual(marked, ['e1']);
 });

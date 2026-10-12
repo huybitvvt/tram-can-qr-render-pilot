@@ -51,6 +51,13 @@ test('an unreadable AI response leaves the weight empty',async()=>{
  assert.match(messages.at(-1),/màn hình cân mờ/);
 });
 
+test('a confirmed blank core reading keeps zero visible in the round and session',async()=>{
+ const {session,round}=await analyzeWith({weight_found:true,weight:0,weight_raw:'CORE_BLANK=1',quality_pass:true,step_saved:false,unit:'kg'});
+ assert.equal(round.weight,'0');
+ assert.equal(session.weight,'0');
+ assert.equal(round.analyzedWeight,0);
+});
+
 test('camera status stops saying analyzing after image analysis completes',()=>{
  const pill={textContent:'',style:{color:''}},session={state:'analyzing',stream:null,panelStream:null};
  const ctx=vm.createContext({current:()=>session,$:()=>pill});

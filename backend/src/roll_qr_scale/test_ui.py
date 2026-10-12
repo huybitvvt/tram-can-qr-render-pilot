@@ -4597,6 +4597,7 @@ class StationUIService:
                 if (
                     crop_is_available
                     and suggestion.value is None
+                    and not (capture_kind == "core" and getattr(suggestion, "display_blank", False))
                     and not antigravity_used
                     and not self._gemini_request_failed(suggestion)
                 ):
@@ -4611,6 +4612,9 @@ class StationUIService:
                     suggestion = fallback
                     roi_method += "+full-frame-retry"
                 gemini_suggestion = suggestion.value
+                if capture_kind == "core" and getattr(suggestion, "display_blank", False):
+                    gemini_suggestion = 0.0
+                    suggestion_raw += "; CORE_BLANK=1; cân lõi trống = 0"
                 gemini_latency_seconds = sum(item.latency_seconds for item in suggestions)
                 gemini_input_tokens = sum(item.input_tokens for item in suggestions)
                 gemini_output_tokens = sum(item.output_tokens for item in suggestions)
@@ -4637,7 +4641,7 @@ class StationUIService:
                         "decoder": "gemini-full-frame",
                         "qr_roi": None,
                     }
-                if suggestion.value is None:
+                if gemini_suggestion is None:
                     reading = WeightReading(
                         None,
                         unit,
@@ -4647,7 +4651,7 @@ class StationUIService:
                     recognition_source = "none"
                 else:
                     reading = WeightReading(
-                        suggestion.value,
+                        gemini_suggestion,
                         suggestion.unit,
                         True,
                         (

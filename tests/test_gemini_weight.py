@@ -7,6 +7,24 @@ import pytest
 from roll_qr_scale.gemini_weight import GeminiWeightReader
 
 
+@pytest.mark.parametrize(("digits", "readable", "agreement", "blank"), [
+    (None, False, True, True),
+    ("1.04", True, True, False),
+    (None, False, False, False),
+])
+def test_gemini_distinguishes_blank_display_from_a_weight_or_frame_conflict(digits, readable, agreement, blank):
+    client = FakeClient({
+        "weight_readable": readable, "weight_digits": digits, "display_blank": True,
+        "qr_readable": False, "qr_code": None, "all_frames_agree": agreement,
+    })
+    reader = GeminiWeightReader("secret-key", client=client)
+    result = reader.read([np.zeros((80, 120, 3), dtype=np.uint8)] * 3)
+    assert result.display_blank is blank
+    if blank:
+        assert result.value is None
+    assert "Set display_blank=true only" in client.models.calls[0]["contents"][0]
+
+
 class FakeModels:
     def __init__(self, payload: dict[str, object]) -> None:
         self.payload = payload

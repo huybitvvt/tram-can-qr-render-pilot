@@ -565,6 +565,10 @@ def write_nhap_kho_batch(
 
     saved_by_code: dict[str, dict[str, object]] = {}
     duplicate_codes: set[str] = set()
+    event_qrs = {
+        str(item.get("event_id") or "").strip(): str(item.get("ma_sp_quet") or "").strip()
+        for item in items if str(item.get("event_id") or "").strip()
+    }
     codes = [item["fullCode"] for item in unique_items]
     existing = _load_existing_nhap_kho(
         supabase_url, api_key, codes, timeout=timeout
@@ -618,6 +622,29 @@ def write_nhap_kho_batch(
         elif not recover(item, row):
             duplicate_codes.add(item["fullCode"])
 
+    # A retry after the cloud-status update failed must reuse the report,
+    # including reports whose QR lines were all skipped as duplicates.
+    if duplicate_codes and event_qrs:
+        first_event = (
+            next(iter(event_qrs)).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        previous_reports = _postgrest_request(
+            "GET", supabase_url, api_key, "phieu_nhap",
+            params={"select": "ma_phieu,ghi_chu,status", "ghi_chu": f"like.*{first_event}*", "limit": 50},
+            timeout=timeout,
+        )
+        for previous in previous_reports if isinstance(previous_reports, list) else []:
+            if not isinstance(previous, dict):
+                continue
+            try:
+                note = json.loads(str(previous.get("ghi_chu") or ""))
+            except (ValueError, TypeError):
+                continue
+            if (isinstance(note, dict) and note.get("source") == "TramCanQR"
+                    and note.get("event_qrs") == event_qrs):
+                ma_phieu = str(previous.get("ma_phieu") or ma_phieu)
+                break
+
     header: dict[str, object] | None = None
     header_fields: dict[str, object] = {
         "ngay": ngay or None,
@@ -626,6 +653,9 @@ def write_nhap_kho_batch(
         "ghi_chu": json.dumps({
             "source": "TramCanQR",
             "events": {item["fullCode"]: item["eventId"] for item in unique_items if item["eventId"]},
+            "event_qrs": event_qrs,
+            "so_cuon": len(items),
+            "duplicate_codes": sorted(duplicate_codes),
         }, ensure_ascii=False),
     }
     if ca:
@@ -635,7 +665,7 @@ def write_nhap_kho_batch(
     if nguoi_lap:
         header_fields["nguoi_lap"] = nguoi_lap
 
-    if pending or any(row.get("ma_phieu") == ma_phieu for row in saved_by_code.values()):
+    if pending or duplicate_codes or any(row.get("ma_phieu") == ma_phieu for row in saved_by_code.values()):
         existing_header = _postgrest_request(
             "GET",
             supabase_url,
@@ -672,7 +702,7 @@ def write_nhap_kho_batch(
             if not isinstance(updated, list) or not updated:
                 raise RuntimeError("Phiếu vừa được chốt; không thể lưu thêm mã")
             header = updated[0] if isinstance(updated[0], dict) else None
-        elif pending:
+        elif pending or duplicate_codes:
             inserted = _postgrest_request(
                 "POST",
                 supabase_url,
@@ -757,10 +787,19 @@ def write_nhap_kho_batch(
                     duplicate_codes.add(item["fullCode"])
             pending = next_pending
 
+    saved_event_ids = [
+        item["eventId"] for item in unique_items
+        if item["fullCode"] in saved_by_code and item["eventId"]
+    ]
+    duplicate_event_ids = [event_id for event_id in event_qrs if event_id not in saved_event_ids]
+    duplicate_codes.update(event_qrs[event_id] for event_id in duplicate_event_ids)
     return {
         "success": True,
+        "ma_phieu": ma_phieu if header else next((str(row["ma_phieu"]) for row in saved_by_code.values()), ma_phieu),
         "header": header,
         "saved": list(saved_by_code.values()),
+        "saved_event_ids": saved_event_ids,
+        "duplicate_event_ids": duplicate_event_ids,
         "duplicateCodes": sorted(duplicate_codes),
         "source": kho_db_label(),
     }
@@ -1051,6 +1090,7 @@ def confirm_nhap_kho(
         may=may.strip(),
         items=warehouse_items,
     )
+    ma_phieu = str(batch.get("ma_phieu") or ma_phieu)
     saved_codes = {
         normalize_qr_key(str(row.get("ma_sp_quet") or ""))
         for row in (batch.get("saved") or [])
@@ -1061,17 +1101,21 @@ def confirm_nhap_kho(
         for code in (batch.get("duplicateCodes") or [])
         if str(code or "").strip()
     ]
+    saved_ids = set(batch.get("saved_event_ids") or []) if "saved_event_ids" in batch else None
     saved_rows = [
         row
         for row in preview
-        if normalize_qr_key(str(row.get("qr_code") or "")) in saved_codes
+        if (str(row.get("event_id") or "") in saved_ids if saved_ids is not None
+            else normalize_qr_key(str(row.get("qr_code") or "")) in saved_codes)
     ]
-    if not saved_rows:
-        raise RuntimeError(
-            f"Không ghi được mã mới. {len(duplicates)} mã QR đã có trong nhap_kho."
-            if duplicates
-            else "Không ghi được mã QR vào nhap_kho."
-        )
+    duplicate_keys = {normalize_qr_key(code) for code in duplicates}
+    duplicate_ids = set(batch.get("duplicate_event_ids") or []) if "duplicate_event_ids" in batch else None
+    duplicate_rows = [row for row in preview if (
+        str(row.get("event_id") or "") in duplicate_ids if duplicate_ids is not None
+        else normalize_qr_key(str(row.get("qr_code") or "")) in duplicate_keys
+    )]
+    if len(saved_rows) + len(duplicate_rows) != len(preview):
+        raise RuntimeError("Chưa xử lý đủ mã QR trong phiếu; hãy bấm Nhập kho lại")
 
     receipts_by_code = {
         normalize_qr_key(str(row.get("ma_sp_quet") or "")): str(row.get("ma_phieu") or ma_phieu)
@@ -1081,6 +1125,8 @@ def confirm_nhap_kho(
     for row in saved_rows:
         receipt = receipts_by_code[normalize_qr_key(str(row.get("qr_code") or ""))]
         groups.setdefault(receipt, []).append(row)
+    if duplicate_rows:
+        groups.setdefault(ma_phieu, []).extend(duplicate_rows)
     status_update: dict[str, object] = {}
     for receipt, group in groups.items():
         group_ids = [str(row["event_id"]) for row in group]
@@ -1109,9 +1155,9 @@ def confirm_nhap_kho(
     try:
         summary_export = append_nhap_kho_summary_row(
             {
-                "ma_phieu": ma_phieu,
+                "ma_phieu": ma_phieu if duplicate_rows or batch.get("header") else next(iter(groups)),
                 "ma_sp": ma_sp.strip(),
-                "so_luong": len(saved_rows),
+                "so_luong": len(preview),
                 "ngay": ngay,
                 "ca": ca.strip(),
                 "may": may.strip(),
@@ -1124,12 +1170,14 @@ def confirm_nhap_kho(
 
     return {
         "ok": True,
-        "ma_phieu": next(iter(groups)),
+        "ma_phieu": ma_phieu if duplicate_rows or batch.get("header") else next(iter(groups)),
         "ma_phieu_list": list(groups),
         "saved": [str(row.get("qr_code") or "") for row in saved_rows],
         "saved_count": len(saved_rows),
+        "report_count": len(preview),
+        "processed_event_ids": event_ids,
         "duplicateCodes": duplicates,
-        "duplicate_count": len(duplicates),
+        "duplicate_count": len(duplicate_rows),
         "recovered_count": sum(bool(row.get("recovered")) for row in (batch.get("saved") or []) if isinstance(row, dict)),
         "nhap_kho_trang_thai": NHAP_KHO_DA,
         "nhap_kho_luc": luc,
