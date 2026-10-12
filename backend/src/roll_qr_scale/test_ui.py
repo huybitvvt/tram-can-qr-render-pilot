@@ -2559,6 +2559,7 @@ class StationUIService:
         if gemini_night_readers is not None:
             self.gemini_shift_readers["night"] = gemini_night_readers
         self.gemini_key_manager = gemini_key_manager
+        self._gemini_key_update_lock = threading.RLock()
         self._retired_gemini_readers: list[GeminiWeightReader] = []
         # A failed key is quarantined for the lifetime of this backend
         # process. Requests routed to that shift then stay on the healthy
@@ -2695,11 +2696,15 @@ class StationUIService:
     def _gemini_other_slot(slot: str) -> str:
         return "night" if slot == "day" else "day"
 
-    def _mark_gemini_slot_failed(self, slot: str) -> None:
+    def _mark_gemini_slot_failed(self, slot: str, reader: object | None = None) -> None:
         """Quarantine a key and route its shifts to the other configured key."""
 
         alternate = self._gemini_other_slot(slot)
         with self._lock:
+            if reader is not None and all(
+                current is not reader for current in self.gemini_shift_readers.get(slot, ())
+            ):
+                return  # An old in-flight request must not quarantine a swapped key.
             self._gemini_failed_slots.add(slot)
             if (
                 alternate in self.gemini_shift_readers
@@ -2948,9 +2953,10 @@ class StationUIService:
     def replace_gemini_key(self, api_key: str) -> dict[str, object]:
         if self.gemini_key_manager is None:
             raise ValueError("Chức năng đổi Gemini key chưa được cấu hình")
-        self._install_gemini_readers(
-            self.gemini_key_manager.replace_shift_key("day", api_key), slot="day"
-        )
+        with self._gemini_key_update_lock:
+            self._install_gemini_readers(
+                self.gemini_key_manager.replace_shift_key("day", api_key), slot="day"
+            )
         return {
             "ok": True,
             "changed": True,
@@ -2963,8 +2969,9 @@ class StationUIService:
     def save_gemini_backup_key(self, api_key: str) -> dict[str, object]:
         if self.gemini_key_manager is None:
             raise ValueError("Chức năng Gemini key dự phòng chưa được cấu hình")
-        readers = self.gemini_key_manager.replace_shift_key("night", api_key)
-        self._install_gemini_readers(readers, slot="night")
+        with self._gemini_key_update_lock:
+            readers = self.gemini_key_manager.replace_shift_key("night", api_key)
+            self._install_gemini_readers(readers, slot="night")
         key_id = self.gemini_key_manager.key_id(api_key)
         return {
             "ok": True,
@@ -2976,11 +2983,35 @@ class StationUIService:
             "message": "Đã kiểm tra và lưu Key ca đêm cho 12C2",
         }
 
-    def switch_gemini_key(self, slot: str) -> dict[str, object]:
-        raise ValueError(
-            "Không cho chuyển key thủ công: 12C1 luôn dùng Key ca ngày, "
-            "12C2 luôn dùng Key ca đêm"
-        )
+    def save_gemini_spare_key(self, api_key: str) -> dict[str, object]:
+        if self.gemini_key_manager is None:
+            raise ValueError("Chức năng Gemini key phụ chưa được cấu hình")
+        with self._gemini_key_update_lock:
+            key_id = self.gemini_key_manager.save_spare(api_key)
+        return {"ok": True, "saved": True, "stored_encrypted": True,
+                "key_id": key_id, "slot": "spare",
+                "message": "Đã kiểm tra và lưu key phụ dùng chung cho hai ca"}
+
+    def switch_gemini_key(
+        self, shift: str, *, swap_id: str, expected_revision: str,
+    ) -> dict[str, object]:
+        if self.gemini_key_manager is None:
+            raise ValueError("Chức năng Gemini key phụ chưa được cấu hình")
+        normalized = str(shift).strip().upper()
+        if normalized not in {"12C1", "12C2", "HC1", "HC2", "HC3", "CA CHUẨN ĐÀ NẴNG"}:
+            raise ValueError("Hãy chọn ca hợp lệ trước khi đổi key phụ")
+        slot = self._gemini_slot_for_shift(normalized)
+        with self._gemini_key_update_lock:
+            readers = self.gemini_key_manager.swap_spare(
+                slot, swap_id=swap_id, expected_revision=expected_revision,
+            )
+            self._install_gemini_readers(readers, slot=slot)
+            key_status = self.gemini_key_manager.status()
+        return {"ok": True, "changed": True, "stored_encrypted": True,
+                "slot": slot, "key_id": key_status[f"{slot}_key_id"],
+                "spare_key_id": key_status["spare_key_id"],
+                "key_revision": key_status["key_revision"],
+                "message": f"Đã đổi key phụ cho ca {shift}. Key cũ của ca đã thành key phụ"}
 
     @staticmethod
     def _roi_text(roi: NormalizedROI | None) -> str:
@@ -3783,7 +3814,7 @@ class StationUIService:
         try:
             result = detector(frame)
         except Exception as primary_error:
-            self._mark_gemini_slot_failed(active_slot)
+            self._mark_gemini_slot_failed(active_slot, reader)
             fallback_target = self._gemini_fallback_reader_from_slot(
                 recognition_profile, active_slot
             )
@@ -3796,7 +3827,7 @@ class StationUIService:
             try:
                 result = fallback_detector(frame)
             except Exception as fallback_error:
-                self._mark_gemini_slot_failed(fallback_slot)
+                self._mark_gemini_slot_failed(fallback_slot, fallback_reader)
                 raise RuntimeError(
                     f"Gemini primary lỗi: {primary_error}; fallback lỗi: {fallback_error}"
                 ) from fallback_error
@@ -3897,7 +3928,7 @@ class StationUIService:
         try:
             result = reader.read_panel_regions(cropped)
         except Exception as primary_error:
-            self._mark_gemini_slot_failed(active_slot)
+            self._mark_gemini_slot_failed(active_slot, reader)
             fallback_target = self._gemini_fallback_reader_from_slot(
                 recognition_profile, active_slot
             )
@@ -3907,7 +3938,7 @@ class StationUIService:
             try:
                 result = fallback_reader.read_panel_regions(cropped)
             except Exception as fallback_error:
-                self._mark_gemini_slot_failed(fallback_slot)
+                self._mark_gemini_slot_failed(fallback_slot, fallback_reader)
                 raise RuntimeError(
                     f"Gemini primary lỗi: {primary_error}; fallback lỗi: {fallback_error}"
                 ) from fallback_error
@@ -4564,7 +4595,7 @@ class StationUIService:
                     and self._gemini_request_failed(suggestion)
                 ):
                     if not getattr(suggestion, "transient_error", False):
-                        self._mark_gemini_slot_failed(gemini_active_key_slot)
+                        self._mark_gemini_slot_failed(gemini_active_key_slot, selected_ai_reader)
                     fallback_target = self._gemini_fallback_reader_from_slot(
                         recognition_profile, gemini_active_key_slot
                     )
@@ -4573,7 +4604,7 @@ class StationUIService:
                         try:
                             fallback_suggestion = fallback_reader.read(ai_frames, unit=unit)
                         except Exception:
-                            self._mark_gemini_slot_failed(fallback_slot)
+                            self._mark_gemini_slot_failed(fallback_slot, fallback_reader)
                             raise
                         suggestions.append(fallback_suggestion)
                         gemini_attempts = 2
@@ -4584,7 +4615,7 @@ class StationUIService:
                             self._gemini_request_failed(fallback_suggestion)
                             and not getattr(fallback_suggestion, "transient_error", False)
                         ):
-                            self._mark_gemini_slot_failed(fallback_slot)
+                            self._mark_gemini_slot_failed(fallback_slot, fallback_reader)
                         provider_source = f"gemini-fallback-{fallback_slot}"
                         suggestion_raw = (
                             f"PRIMARY KEY ERROR: {suggestion.raw}; "
@@ -4715,7 +4746,7 @@ class StationUIService:
             )
             suggestions = [suggestion]
             if self._gemini_request_failed(suggestion):
-                self._mark_gemini_slot_failed(gemini_active_key_slot)
+                self._mark_gemini_slot_failed(gemini_active_key_slot, selected_gemini_reader)
                 fallback_target = self._gemini_fallback_reader_from_slot(
                     recognition_profile, gemini_active_key_slot
                 )
@@ -4724,14 +4755,14 @@ class StationUIService:
                     try:
                         fallback_suggestion = fallback_reader.read(frames, unit=unit)
                     except Exception:
-                        self._mark_gemini_slot_failed(fallback_slot)
+                        self._mark_gemini_slot_failed(fallback_slot, fallback_reader)
                         raise
                     suggestions.append(fallback_suggestion)
                     gemini_fallback_used = True
                     gemini_fallback_key_slot = fallback_slot
                     gemini_active_key_slot = fallback_slot
                     if self._gemini_request_failed(fallback_suggestion):
-                        self._mark_gemini_slot_failed(fallback_slot)
+                        self._mark_gemini_slot_failed(fallback_slot, fallback_reader)
                     suggestion = fallback_suggestion
             gemini_suggestion = suggestion.value
             gemini_attempts = len(suggestions)
@@ -5723,6 +5754,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             accurate_timeout=args.gemini_accurate_timeout,
             initial_key=os.environ.get("ROLL_SCALE_GEMINI_API_KEY", ""),
             initial_backup_key=os.environ.get("ROLL_SCALE_GEMINI_BACKUP_API_KEY", ""),
+            initial_spare_key=os.environ.get("ROLL_SCALE_GEMINI_SPARE_API_KEY", ""),
             rpm_limit=_env_positive_int(
                 "ROLL_SCALE_GEMINI_RPM_LIMIT", DEFAULT_GEMINI_RPM_LIMIT
             ),
@@ -7365,10 +7397,19 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         service.save_gemini_backup_key(str(payload.get("api_key", ""))),
                     )
                     return
+                if self.path == "/api/gemini/spare-key":
+                    self.send_json(
+                        200, service.save_gemini_spare_key(str(payload.get("api_key", ""))),
+                    )
+                    return
                 if self.path == "/api/gemini/key-slot":
                     self.send_json(
                         200,
-                        service.switch_gemini_key(str(payload.get("slot", ""))),
+                        service.switch_gemini_key(
+                            str(payload.get("shift", "")),
+                            swap_id=str(payload.get("swap_id", "")),
+                            expected_revision=str(payload.get("expected_revision", "")),
+                        ),
                     )
                     return
                 if self.path == "/api/panel/regions":

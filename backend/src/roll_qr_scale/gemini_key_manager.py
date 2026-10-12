@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
+import uuid
 from typing import Callable
 
 from .codex_oauth import EncryptedCodexTokenStore
@@ -27,6 +28,7 @@ class GeminiKeyManager:
         accurate_timeout: float,
         initial_key: str,
         initial_backup_key: str = "",
+        initial_spare_key: str = "",
         rpm_limit: int = 15,
         tpm_limit: int = 250_000,
         rpd_limit: int = 500,
@@ -47,6 +49,7 @@ class GeminiKeyManager:
         self.rpd_limit = max(1, int(rpd_limit))
         self.initial_key = initial_key.strip()
         self.initial_backup_key = initial_backup_key.strip()
+        self.initial_spare_key = initial_spare_key.strip()
         self.reader_factory = reader_factory
         self._lock = threading.RLock()
         self._source = "environment" if self.initial_key else "none"
@@ -56,6 +59,8 @@ class GeminiKeyManager:
         self._backup_configured = False
         self._active_slot = "primary"
         self._last_error = ""
+        self._spare_key_id = ""
+        self._key_revision = ""
 
     @staticmethod
     def key_id(api_key: str) -> str:
@@ -112,35 +117,66 @@ class GeminiKeyManager:
         return value
 
     def load_shift_keys(self) -> dict[str, str]:
-        """Load the two fixed shift keys without a process-wide active slot.
-
-        The legacy primary/backup selector is retained for older clients, but
-        production capture routes 12C1 to ``day`` and 12C2 to ``night`` on
-        every request. This prevents one operator changing the key used by the
-        other shift.
-        """
-
-        errors: list[str] = []
+        """Load the shift assignments and shared spare, including legacy stores."""
         try:
-            day_key, day_source, _ = self._primary_key()
-        except Exception as exc:
-            errors.append(f"{type(exc).__name__}: {str(exc).strip()}")
-            day_key = self.initial_key
-            day_source = "environment" if day_key else "none"
-        try:
-            night_key = self._backup_key()
-        except Exception as exc:
-            errors.append(f"{type(exc).__name__}: {str(exc).strip()}")
-            night_key = ""
+            saved, keys = self._read_shift_keys(allow_partial=True)
+        except Exception:
+            # Read failures must never trigger a write that replaces saved keys.
+            keys = {"day": self.initial_key, "night": self.initial_backup_key,
+                    "spare": self.initial_spare_key}
+            with self._lock:
+                self._adopt_shift_keys({}, keys)
+                self._last_error = "Chưa đọc được kho key mã hóa. Kiểm tra mạng và thử lại."
+            return keys
         with self._lock:
-            self._source = day_source
-            self._key_id = self.key_id(day_key)
-            self._primary_key_id = self._key_id
-            self._backup_key_id = self.key_id(night_key)
-            self._backup_configured = bool(night_key)
-            self._active_slot = "automatic-by-shift"
-            self._last_error = "; ".join(errors)[:300]
-        return {"day": day_key, "night": night_key}
+            self._adopt_shift_keys(saved, keys)
+        return keys
+
+    def _read_shift_keys(self, *, allow_partial: bool = False) -> tuple[dict, dict[str, str]]:
+        saved = (self.store.read() if self.store.configured else None) or {}
+        ring = saved.get("shift_keys")
+        if isinstance(ring, dict):
+            return saved, {slot: str(ring.get(slot) or "").strip()
+                           for slot in ("day", "night", "spare")}
+        # Strict reads during mutation: do not erase a legacy night key if
+        # its store is temporarily unreachable.
+        try:
+            night = self._saved_key(self.backup_store) or self.initial_backup_key
+        except Exception:
+            if not allow_partial:
+                raise
+            night = self.initial_backup_key
+        return saved, {
+            "day": str(saved.get("api_key") or self.initial_key).strip(),
+            "night": night,
+            "spare": self.initial_spare_key,
+        }
+
+    @staticmethod
+    def _revision(saved: dict, keys: dict[str, str]) -> str:
+        return str(saved.get("key_revision") or hashlib.sha256(
+            "\0".join(keys[slot] for slot in ("day", "night", "spare")).encode("utf-8")
+        ).hexdigest())
+
+    def _adopt_shift_keys(self, saved: dict, keys: dict[str, str]) -> None:
+        self._source = "supabase-encrypted" if saved else ("environment" if keys["day"] else "none")
+        self._key_id = self._primary_key_id = self.key_id(keys["day"])
+        self._backup_key_id = self.key_id(keys["night"])
+        self._backup_configured = bool(keys["night"])
+        self._spare_key_id = self.key_id(keys["spare"])
+        self._key_revision = self._revision(saved, keys)
+        self._active_slot = "automatic-by-shift"
+        self._last_error = ""
+
+    def _write_shift_keys(self, keys: dict[str, str], *, swap_id: str = "", slot: str = "") -> None:
+        # All assignments are encrypted in ONE record and ONE write. A failed
+        # swap can never persist only one half and lose the old key.
+        saved = {"api_key": keys["day"], "provider": "gemini-shifts",
+                 "active_slot": "automatic-by-shift", "shift_keys": dict(keys),
+                 "key_revision": uuid.uuid4().hex,
+                 "last_swap_id": swap_id, "last_swap_slot": slot}
+        self.store.write(saved)
+        self._adopt_shift_keys(saved, keys)
 
     def create_readers(
         self,
@@ -225,7 +261,8 @@ class GeminiKeyManager:
         value = api_key.strip()
         assignment = re.fullmatch(
             r"(?:export\s+)?(?:ROLL_SCALE_GEMINI_API_KEY|"
-            r"ROLL_SCALE_GEMINI_BACKUP_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY)"
+            r"ROLL_SCALE_GEMINI_BACKUP_API_KEY|ROLL_SCALE_GEMINI_SPARE_API_KEY|"
+            r"GEMINI_API_KEY|GOOGLE_API_KEY)"
             r"\s*=\s*(.+)",
             value,
         )
@@ -377,35 +414,66 @@ class GeminiKeyManager:
         GeminiWeightReader,
         GeminiWeightReader,
     ]:
-        """Validate, persist and build readers for one fixed shift slot."""
-
-        if slot == "day":
-            readers = self.replace(api_key)
-            with self._lock:
-                self._active_slot = "automatic-by-shift"
-            return readers
-        if slot != "night":
+        """Replace one assignment while preserving both other keys."""
+        if slot not in {"day", "night"}:
             raise ValueError("Khe Gemini key phải là day hoặc night")
         value = self._validate_format(api_key)
         self.validate(value)
-        primary, _, _ = self._primary_key()
-        if value == primary:
-            raise ValueError("Key ca đêm phải khác Key ca ngày")
-        if self.backup_store is None or not self.backup_store.configured:
-            raise ValueError("Kho Key ca đêm chưa được cấu hình")
-        readers = self.create_readers(value)
-        try:
-            self.backup_store.write({"api_key": value, "provider": "gemini-night"})
-        except Exception:
-            for reader in readers:
-                reader.close()
-            raise
         with self._lock:
-            self._backup_configured = True
-            self._backup_key_id = self.key_id(value)
-            self._active_slot = "automatic-by-shift"
-            self._last_error = ""
+            _, keys = self._read_shift_keys()
+            if any(value == key for other, key in keys.items() if other != slot):
+                raise ValueError("Key ca ngày, ca đêm và key phụ phải khác nhau")
+            readers = self.create_readers(value)
+            keys[slot] = value
+            try:
+                self._write_shift_keys(keys)
+            except Exception:
+                for reader in readers:
+                    reader.close()
+                raise
         return readers
+
+    def save_spare(self, api_key: str) -> str:
+        value = self._validate_format(api_key)
+        self.validate(value)
+        with self._lock:
+            _, keys = self._read_shift_keys()
+            if value in (keys["day"], keys["night"]):
+                raise ValueError("Key phụ phải khác Key ca ngày và Key ca đêm")
+            keys["spare"] = value
+            self._write_shift_keys(keys)
+        return self.key_id(value)
+
+    def swap_spare(self, slot: str, *, swap_id: str, expected_revision: str) -> tuple:
+        if slot not in {"day", "night"}:
+            raise ValueError("Khe Gemini key phải là day hoặc night")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,80}", swap_id) or not expected_revision:
+            raise ValueError("Thiếu mã yêu cầu đổi key. Tải lại trang rồi thử lại.")
+        with self._lock:
+            saved, keys = self._read_shift_keys()
+            # Retrying after a lost HTTP response must not swap the keys back.
+            if saved.get("last_swap_id") == swap_id:
+                if saved.get("last_swap_slot") != slot:
+                    raise ValueError("Mã yêu cầu đổi key đã dùng cho ca khác")
+                readers = self.create_readers(keys[slot])
+                self._adopt_shift_keys(saved, keys)
+                return readers
+            if self._revision(saved, keys) != expected_revision:
+                raise ValueError("Cấu hình key đã thay đổi. Tải lại trang rồi thử lại.")
+            if not keys["spare"] or not keys[slot]:
+                raise ValueError("Hãy cấu hình key phụ và key của ca trước khi đổi")
+            if keys["spare"] == keys[slot]:
+                raise ValueError("Key phụ đang trùng key của ca")
+            keys[slot], keys["spare"] = keys["spare"], keys[slot]
+            # Build locally without calling the stalled Google endpoint again.
+            readers = self.create_readers(keys[slot])
+            try:
+                self._write_shift_keys(keys, swap_id=swap_id, slot=slot)
+            except Exception:
+                for reader in readers:
+                    reader.close()
+                raise
+            return readers
 
     def activate(
         self,
@@ -454,14 +522,12 @@ class GeminiKeyManager:
         with self._lock:
             return {
                 "change_enabled": self.store.configured,
-                "backup_change_enabled": bool(
-                    self.backup_store is not None and self.backup_store.configured
-                ),
-                "switch_enabled": bool(
-                    self.store.configured
-                    and self.backup_store is not None
-                    and self.backup_store.configured
-                ),
+                "backup_change_enabled": self.store.configured,
+                "spare_change_enabled": self.store.configured,
+                "switch_enabled": self.store.configured and bool(self._spare_key_id),
+                "spare_configured": bool(self._spare_key_id),
+                "spare_key_id": self._spare_key_id or None,
+                "key_revision": self._key_revision or None,
                 "source": self._source,
                 "key_id": self._key_id or None,
                 "primary_key_id": self._primary_key_id or None,

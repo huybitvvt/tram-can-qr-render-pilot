@@ -3820,8 +3820,9 @@ def test_ui_does_not_offer_fake_gemini_profile_when_backend_is_local() -> None:
     assert 'id="geminiKeyBtn"' in TEST_UI_HTML
     assert 'id="geminiBackupKeyBtn"' in TEST_UI_HTML
     assert 'id="geminiBackupApiKeyInput" type="password"' in TEST_UI_HTML
-    assert 'id="useGeminiBackupBtn"' in TEST_UI_HTML
-    assert 'id="useGeminiPrimaryBtn"' in TEST_UI_HTML
+    assert 'id="swapGeminiSpareBtn"' in TEST_UI_HTML
+    assert 'id="geminiSpareApiKeyInput" type="password"' in TEST_UI_HTML
+    assert "'/api/gemini/spare-key'" in TEST_UI_HTML
     assert 'id="settingsBtn"' in TEST_UI_HTML
     assert 'id="settingsPanel"' in TEST_UI_HTML
     assert "function syncSettingsHint()" in TEST_UI_HTML

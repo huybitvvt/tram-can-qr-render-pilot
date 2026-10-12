@@ -189,6 +189,7 @@ def test_shift_keys_are_loaded_independently_and_report_safe_ids() -> None:
     assert current.load_shift_keys() == {
         "day": "day-key-value-123456789",
         "night": "night-key-value-1234567",
+        "spare": "",
     }
     status = current.status()
     assert status["active_slot"] == "automatic-by-shift"
@@ -206,11 +207,10 @@ def test_replace_night_shift_key_does_not_replace_day_key(monkeypatch) -> None:
     readers = current.replace_shift_key("night", "night-key-value-1234567")
 
     assert all(reader.api_key == "night-key-value-1234567" for reader in readers)
-    assert day_store.value == {"api_key": "day-key-value-123456789"}
-    assert night_store.value == {
-        "api_key": "night-key-value-1234567",
-        "provider": "gemini-night",
+    assert day_store.value["shift_keys"] == {
+        "day": "day-key-value-123456789", "night": "night-key-value-1234567", "spare": "",
     }
+    assert night_store.value is None
 
 
 def test_gemini_store_uses_legacy_compatible_encrypted_secret_action() -> None:
@@ -309,6 +309,147 @@ def test_validation_calls_capture_model_with_supplied_auth_key(validation_client
     assert client.closed
 
 
+@pytest.fixture
+def key_ring(monkeypatch):
+    store = MemoryStore({"api_key": "day-key-value-123456789"})
+    night_store = MemoryStore({"api_key": "night-key-value-1234567"})
+    current = manager(store, backup_store=night_store)
+    monkeypatch.setattr(current, "validate", lambda key: None)
+    current.load_shift_keys()
+    current.save_spare("spare-key-value-1234567")
+    return current, store, night_store
+
+
+@pytest.mark.parametrize("slot", ["day", "night"])
+def test_spare_swap_preserves_other_shift_and_survives_restart(key_ring, monkeypatch, slot):
+    current, store, night_store = key_ring
+    original = current.load_shift_keys()
+    revision = current.status()["key_revision"]
+    # Switching already configured keys must not contact Google again.
+    monkeypatch.setattr(current, "validate", lambda key: pytest.fail("Google called during swap"))
+    readers = current.swap_spare(slot, swap_id="request-swap-00000001", expected_revision=revision)
+    other = "night" if slot == "day" else "day"
+    assert all(reader.api_key == original["spare"] for reader in readers)
+    expected = {slot: original["spare"], "spare": original[slot], other: original[other]}
+    assert current.load_shift_keys() == expected
+    assert manager(store, backup_store=night_store).load_shift_keys() == expected
+    assert night_store.value == {"api_key": "night-key-value-1234567"}
+    assert current.status()["key_revision"] != revision
+    assert all(key not in str(current.status()) for key in expected.values())
+
+
+def test_three_keys_rotate_across_both_shifts(key_ring):
+    current, _, _ = key_ring
+    original = current.load_shift_keys()
+    for index, slot in enumerate(("day", "night", "day")):
+        current.swap_spare(slot, swap_id=f"request-swap-{index:08d}",
+                           expected_revision=current.status()["key_revision"])
+    assert current.load_shift_keys() == {
+        "day": original["night"], "night": original["day"], "spare": original["spare"],
+    }
+
+
+def test_repeated_swap_request_does_not_reverse_roles(key_ring):
+    current, store, _ = key_ring
+    revision = current.status()["key_revision"]
+    current.swap_spare("night", swap_id="request-swap-00000001", expected_revision=revision)
+    saved = dict(store.value)
+    current.swap_spare("night", swap_id="request-swap-00000001", expected_revision=revision)
+    assert store.value == saved
+    with pytest.raises(ValueError, match="ca khác"):
+        current.swap_spare("day", swap_id="request-swap-00000001", expected_revision=revision)
+    with pytest.raises(ValueError, match="đã thay đổi"):
+        current.swap_spare("day", swap_id="request-swap-00000002", expected_revision=revision)
+
+
+def test_swap_retry_after_committed_write_loses_response(key_ring, monkeypatch):
+    current, store, _ = key_ring
+    revision = current.status()["key_revision"]
+    original_write = store.write
+    created = []
+    current.reader_factory = lambda key, **kwargs: (created.append(FakeReader(key, **kwargs)) or created[-1])
+    def ambiguous_write(value):
+        original_write(value)
+        raise TimeoutError("response lost")
+    monkeypatch.setattr(store, "write", ambiguous_write)
+    with pytest.raises(TimeoutError):
+        current.swap_spare("day", swap_id="request-swap-00000001", expected_revision=revision)
+    assert all(reader.closed for reader in created)
+    # Retry reads the committed record; it does not write or call Google.
+    readers = current.swap_spare("day", swap_id="request-swap-00000001", expected_revision=revision)
+    assert all(reader.api_key == "spare-key-value-1234567" and not reader.closed for reader in readers)
+    assert current.load_shift_keys()["spare"] == "day-key-value-123456789"
+
+
+def test_failed_swap_write_preserves_assignments_and_closes_clients(key_ring, monkeypatch):
+    current, store, _ = key_ring
+    before = dict(store.value)
+    status = current.status()
+    created = []
+    current.reader_factory = lambda key, **kwargs: (created.append(FakeReader(key, **kwargs)) or created[-1])
+    monkeypatch.setattr(store, "write", lambda value: (_ for _ in ()).throw(RuntimeError("store down")))
+    with pytest.raises(RuntimeError, match="store down"):
+        current.swap_spare("day", swap_id="request-swap-00000001", expected_revision=status["key_revision"])
+    assert store.value == before
+    assert current.status() == status
+    assert len(created) == 4 and all(reader.closed for reader in created)
+
+
+@pytest.mark.parametrize("slot", ["day", "night", "spare"])
+def test_saving_one_assignment_keeps_other_two_and_rejects_duplicates(key_ring, slot):
+    current, store, _ = key_ring
+    original = current.load_shift_keys()
+    save = current.save_spare if slot == "spare" else lambda value: current.replace_shift_key(slot, value)
+    with pytest.raises(ValueError, match="khác"):
+        save(original["day" if slot != "day" else "spare"])
+    save("new-key-value-123456789")
+    expected = dict(original, **{slot: "new-key-value-123456789"})
+    assert store.value["shift_keys"] == expected
+
+
+def test_legacy_store_read_failure_never_overwrites_night_key(monkeypatch):
+    store = MemoryStore({"api_key": "day-key-value-123456789"})
+    night = MemoryStore(error=RuntimeError("night store unreachable"))
+    current = manager(store, backup_store=night)
+    assert current.load_shift_keys()["day"] == "day-key-value-123456789"
+    monkeypatch.setattr(current, "validate", lambda key: None)
+    with pytest.raises(RuntimeError, match="unreachable"):
+        current.save_spare("spare-key-value-1234567")
+    assert store.value == {"api_key": "day-key-value-123456789"}
+
+
+def test_service_hot_swap_keeps_inflight_client_and_ignores_its_late_failure(key_ring, tmp_path):
+    from roll_qr_scale.storage import MeasurementStore
+    from roll_qr_scale.test_ui import StationUIService
+
+    current, _, _ = key_ring
+    keys = current.load_shift_keys()
+    day = current.create_readers(keys["day"])
+    night = current.create_readers(keys["night"])
+    store = MeasurementStore(tmp_path / "measurement.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None, gemini_reader=day[0],
+                              gemini_flash31_reader=day[1], gemini_flash37_reader=day[2],
+                              gemini_accurate_reader=day[3], gemini_night_readers=night,
+                              gemini_key_manager=current, weight_engine="gemini", auto_sync=False)
+    try:
+        service._mark_gemini_slot_failed("day", day[0])
+        assert service._gemini_active_slot("day") == "night"
+        result = service.switch_gemini_key("12C1", swap_id="request-swap-00000001",
+                                           expected_revision=current.status()["key_revision"])
+        assert result["key_id"] == current.key_id(keys["spare"])
+        assert service._gemini_reader_for("fast", "day").api_key == keys["spare"]
+        assert service._gemini_reader_for("fast", "night") is night[0]
+        assert service._gemini_active_slot("day") == "day"
+        assert all(not reader.closed for reader in day)
+        service._mark_gemini_slot_failed("day", day[0])
+        assert service._gemini_active_slot("day") == "day"
+        assert "day" not in service._gemini_failed_slots
+    finally:
+        service.close()
+        store.close()
+    assert all(reader.closed for reader in (*day, *night))
+
+
 @pytest.mark.parametrize("slot", ["day", "night"])
 def test_normalized_key_is_persisted_and_activated_for_only_selected_shift(
     validation_client, slot,
@@ -326,11 +467,10 @@ def test_normalized_key_is_persisted_and_activated_for_only_selected_shift(
     )
 
     assert all(reader.api_key == "AQ.new-key-value-123456789" for reader in readers)
-    selected = day_store if slot == "day" else night_store
-    assert selected.value["api_key"] == "AQ.new-key-value-123456789"
-    assert (night_store.value if slot == "day" else day_store.value) == (
-        old_night if slot == "day" else old_day
-    )
+    assert day_store.value["shift_keys"][slot] == "AQ.new-key-value-123456789"
+    other = "night" if slot == "day" else "day"
+    assert day_store.value["shift_keys"][other] == (old_night if slot == "day" else old_day)["api_key"]
+    assert night_store.value == old_night
     assert current.status()[f"{slot}_key_id"] == current.key_id(
         "AQ.new-key-value-123456789"
     )

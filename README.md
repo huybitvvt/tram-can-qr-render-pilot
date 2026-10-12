@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc63`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc63/TramCanQR-Setup-0.2.0-rc63.exe).
+>    Bản `0.2.0-rc64`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc64/TramCanQR-Setup-0.2.0-rc64.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc63.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc64.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -432,15 +432,16 @@ Backend giữ một tiến trình `stream-json` chạy nền và làm nóng ngay
 đăng nhập. Các lần chụp sau tái sử dụng agent đó thay vì khởi động lại `agy`;
 tiến trình được đóng cùng gateway và tự tạo lại nếu CLI bị dừng.
 
-Hai mục `Key ca ngày · 12C1` và `Key ca đêm · 12C2` cho phép quản trị thay key
-mà không sửa biến môi trường và không redeploy. Backend tự chọn key từ ca của
-từng request; không có nút chuyển key thủ công nên hai ca không thể dùng nhầm
-key do trạng thái chung. Hai key được giữ riêng trong kho bí mật Supabase qua
-các lần deploy. Backend kiểm tra key mới
-trực tiếp với Google; chỉ khi hợp lệ mới
-mã hóa Fernet và lưu qua Edge Function vào `roll_scale_secrets`, sau đó thay cả
-reader Nhanh và Chính xác trong tiến trình đang chạy. Key hiện tại không bao giờ
-được trả về browser. Nếu Supabase/Google lỗi, key cũ tiếp tục được dùng.
+Ba mục `Key ca ngày · 12C1`, `Key ca đêm · 12C2` và `Key phụ Gemini` cho phép
+lưu key khi ứng dụng đang chạy. Backend chọn vị trí day/night theo ca của từng
+request. Nút **Đổi sang key phụ** hoán đổi key của ca đang chọn với key phụ dùng
+chung; ca còn lại giữ nguyên. Ba vị trí lưu chung trong một bản ghi Fernet qua
+Edge Function vào `roll_scale_secrets`; giữ qua khởi động lại. Bản cũ dùng hai
+kho riêng được đọc và chuyển sang bản ghi chung khi lưu hoặc hoán đổi lần đầu.
+Key mới được kiểm tra trực tiếp với Google trước khi lưu. Hoán đổi key đã lưu
+không gọi Google lại; các yêu cầu tiếp theo dùng key vừa đổi, yêu cầu đang chạy
+giữ client cũ. Mỗi yêu cầu hoán đổi có mã riêng và phiên bản cấu hình để thử lại
+sau lỗi mạng không đổi ngược hai key. Giá trị key không được trả về browser.
 
 ### Đọc cân qua RS232/USB
 
@@ -707,4 +708,4 @@ Bản 0.2.0-rc60: lưu ảnh local trước, đọc AI ở nền theo từng ô 
 
 Bản 0.2.0-rc61: tự đẩy các dòng Chờ đồng bộ mỗi 10 phút khi AI rảnh; tạm dừng giữa các phiếu khi AI bắt đầu chạy. Thử lại DNS khi lưu key Gemini và báo đúng tên miền lỗi. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc61.md).
 
-Bản 0.2.0-rc63: khôi phục ô Ghi chú dưới khung camera; khôi phục kiểm tra tiến trình đồng bộ khi mở trang. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc63.md).
+Bản 0.2.0-rc64: khôi phục ô Ghi chú dưới khung camera; khôi phục kiểm tra tiến trình đồng bộ khi mở trang. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc64.md).
