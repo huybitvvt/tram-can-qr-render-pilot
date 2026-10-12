@@ -77,3 +77,35 @@ test('manual sync previews and sends the complete selected filter without Cloudi
   assert.match(confirmText,/Không đẩy ảnh lên Cloudinary/);
   assert.doesNotMatch(confirmText,/Supabase \/ Cloudinary/);
 });
+
+test('production sync and list filtering preserve the open capture and use lower filters',async()=>{
+  const upper={date:'2026-10-12',shift:'12C1',machine:'UPPER',order:'LSX-OPEN',bi:0.16,productCode:'OPEN-SP'};
+  const round={eventId:'open',saved:false,coreImage:'core.jpg',productImage:'sp.jpg',coreAiPending:true,weight:'0',productWeight:'',qr:'OPEN-SP_1'};
+  const before=JSON.stringify({upper,round});
+  const nodes={recordsFilterProductCode:{value:'FILTER-SP'},productionRecordsStatus:{hidden:true}};
+  const requests=[];
+  const ctx=vm.createContext({
+    $:id=>nodes[id],sourceContext:upper,stations:[{rounds:[round]}],
+    readRecordsFilterFields:()=>({date:'2026-10-11',shift:'12C2',machine:'LOWER',order:'LSX-OPEN',bi:0.16}),
+    selectedNhapKhoIds:new Set(['saved','draft']),productionRowsByEvent:{saved:{event_id:'saved'},draft:{event_id:'draft',error_only:true}},
+    sourceLabel:fields=>fields.machine,status(){},confirm:()=>true,clearTimeout(){},setTimeout:()=>1,
+    persistSourceFromFields:()=>assert.fail('sync must not persist the capture editor'),
+    saveSourceContext:()=>assert.fail('sync/filter must not change capture metadata'),
+    loadProductionOrders:()=>assert.fail('list filters must not reload the capture order'),
+    loadRecords:async()=>{},
+    api:async(path,options)=>{requests.push([path,JSON.parse(options.body)]);return {total:1,counts:{measurements:1}}},
+  });
+  for(const name of ['async function applyRecordsFilters(','function sourceQuery(','function productionSyncFilters(','function manualSyncCounts(','function setManualSyncRunning(','function manualSyncStatusEl(','async function previewManualSync(','async function startManualSync(','function activeProductionDraftIds(']){
+    vm.runInContext(line(name),ctx);
+  }
+  vm.runInContext('let manualSyncTimer=0,manualSyncStatusHost="productionRecordsStatus"',ctx);
+  await ctx.startManualSync(true);
+  await ctx.applyRecordsFilters();
+  assert.deepEqual(requests.map(([path])=>path),['/api/manual-sync/preview','/api/manual-sync/start']);
+  assert.deepEqual(requests[0][1],{date_from:'2026-10-11',date_to:'2026-10-11',shift:'12C2',machine:'LOWER',production_order:'LSX-OPEN',qr_code:'FILTER-SP',scope:'production',skip_cloudinary:true,event_ids:['saved']});
+  assert.equal(JSON.stringify({upper,round}),before);
+  const query=new URLSearchParams(ctx.recordsListQuery());
+  assert.equal(query.get('machine'),'LOWER');
+  assert.equal(query.get('include_drafts'),'0');
+  assert.deepEqual([...ctx.activeProductionDraftIds()],['open']);
+});

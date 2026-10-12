@@ -16,7 +16,7 @@ function setup(){
   const count={classList:{add(){},remove(){}},setAttribute(){}};
   const nodes={recordsBody:body,shiftCount:count,productionRecordsStatus:{hidden:true}};
   const ctx=vm.createContext({
-    $:id=>nodes[id],recordsListQuery:()=>'',sourceLabel:()=>'',
+    $:id=>nodes[id],recordsListQuery:()=>'',sourceLabel:()=>'',readRecordsFilterFields:()=>({}),
     api:url=>{calls.push(url);return calls.length===1?pending.older.promise:pending.fresh.promise},
     document:{createElement:tag=>({tag,cells:[],dataset:{},addEventListener(){},appendChild(child){this.cells.push(child)}})},
     recordCell:(row,value)=>{row.cells.push(value);return {}},
@@ -60,4 +60,17 @@ test('refresh keeps selected rows beyond the visible page',async()=>{
   await loading;
   assert.equal(vm.runInContext("selectedNhapKhoIds.has('offpage')",ctx),true);
   assert.equal(vm.runInContext("productionRowsByEvent.offpage.qr_code",ctx),'SP_204');
+});
+
+test('refresh never inserts an unsaved photo backup into the saved records table',async()=>{
+  const {ctx,body,pending}=setup();
+  const loading=ctx.loadRecords();
+  pending.older.resolve({measurement_count:1,error_count:1,total_count:2,items:[
+    {event_id:'draft',qr_code:'QR-DRAFT',error_only:true,captured_at:'2026-10-12T13:00:00'},
+    {event_id:'saved',qr_code:'QR-SAVED',core_weight:0,product_weight:7.5,captured_at:'2026-10-12T12:00:00'},
+  ]});
+  await loading;
+  assert.equal(body.children.length,1);
+  assert.equal(body.children[0].cells[2],'QR-SAVED');
+  assert.equal(vm.runInContext('Boolean(productionRowsByEvent.draft)',ctx),false);
 });

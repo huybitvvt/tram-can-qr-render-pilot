@@ -1590,9 +1590,13 @@ def _photo_draft_display_items(
 def _local_production_items(
     store: MeasurementStore,
     limit: int,
+    *,
+    include_photo_drafts: bool = True,
     **filters: object,
 ) -> list[dict[str, object]]:
     measurements = _local_measurement_items(store, max(limit, 200), **filters)
+    if not include_photo_drafts:
+        return measurements[:limit]
     measurement_ids = {
         str(item.get("event_id") or "").strip() for item in measurements
     }
@@ -1606,6 +1610,20 @@ def _local_production_items(
     items = measurements + photo_items
     items.sort(key=lambda item: str(item.get("captured_at") or ""), reverse=True)
     return items[:limit]
+
+
+def _local_photo_draft_items(
+    store: MeasurementStore,
+    **filters: object,
+) -> list[dict[str, object]]:
+    measurement_ids = _local_measurement_event_ids(store)
+    items = [
+        item
+        for item in _photo_draft_display_items(store.photo_draft_source_rows(), **filters)
+        if str(item.get("event_id") or "").strip() not in measurement_ids
+    ]
+    items.sort(key=lambda item: str(item.get("captured_at") or ""), reverse=True)
+    return items
 
 
 def _local_measurement_event_ids(
@@ -1683,9 +1701,13 @@ def _local_error_parent_ids(
 
 def _local_production_counts(
     store: MeasurementStore,
+    *,
+    include_photo_drafts: bool = True,
     **filters: object,
 ) -> tuple[int, int]:
     measurement_ids = _local_measurement_event_ids(store, **filters)
+    if not include_photo_drafts:
+        return len(measurement_ids), 0
     error_ids = _local_error_parent_ids(store, **filters) - measurement_ids
     return len(measurement_ids | error_ids), len(error_ids)
 
@@ -6316,6 +6338,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             if parsed.path == "/api/measurements":
                 query = urllib.parse.parse_qs(parsed.query)
                 local_only = str(query.get("local_only", ["0"])[0]) == "1"
+                include_photo_drafts = str(query.get("include_drafts", ["1"])[0]) != "0"
+                drafts_only = str(query.get("drafts_only", ["0"])[0]) == "1"
                 try:
                     limit = max(1, min(int(query.get("limit", ["50"])[0]), 200))
                 except ValueError:
@@ -6340,8 +6364,26 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     "production_order": production_order,
                     "qr_code": qr_code,
                 }
+                if drafts_only:
+                    drafts = _local_photo_draft_items(store, **list_filters)
+                    self.send_json(
+                        200,
+                        {
+                            "ok": True,
+                            "source": "local",
+                            "drafts_only": True,
+                            "total_count": len(drafts),
+                            "measurement_count": 0,
+                            "count_exact": True,
+                            "offset": offset,
+                            "limit": limit,
+                            "items": drafts[offset : offset + limit],
+                        },
+                    )
+                    return
                 local_total_count, local_error_count = _local_production_counts(
                     store,
+                    include_photo_drafts=include_photo_drafts,
                     **list_filters,
                 )
                 supabase_url = _supabase_project_url()
@@ -6406,7 +6448,9 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "offset": offset,
                             "limit": limit,
                             "items": _local_production_items(
-                                store, offset + limit, **list_filters
+                                store, offset + limit,
+                                include_photo_drafts=include_photo_drafts,
+                                **list_filters,
                             )[offset : offset + limit],
                         },
                     )
@@ -6423,7 +6467,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         count_error = str(exc)
                 remote_error_rows: list[dict[str, object]] | None = None
                 remote_error_parent_ids: set[str] | None = None
-                if supabase_url and publishable_key:
+                if include_photo_drafts and supabase_url and publishable_key:
                     try:
                         remote_error_rows = fetch_supabase_photo_drafts(
                             supabase_url,
@@ -6481,6 +6525,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if str(item.get("event_id") or "").strip()
                     not in local_measurement_ids
                 ]
+                if not include_photo_drafts:
+                    error_parent_ids = set()
+                    error_count = 0
+                    error_items = []
                 local_unsynced_items = (
                     _local_measurement_items(
                         store,

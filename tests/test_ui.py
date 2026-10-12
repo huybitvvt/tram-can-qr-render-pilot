@@ -2837,6 +2837,96 @@ def test_supabase_table_window_fetches_more_than_one_remote_page(monkeypatch) ->
     ]
 
 
+def test_saved_records_and_manual_sync_keep_unfinished_photo_drafts_separate(tmp_path, monkeypatch) -> None:
+    import json
+    import urllib.request
+
+    server, service = test_ui_module.create_server(
+        test_ui_module.build_parser().parse_args([
+            "--db", str(tmp_path / "measurements.db"),
+            "--captures", str(tmp_path / "captures"),
+            "--yolo-model", "", "--port", "0",
+        ])
+    )
+    store = service.store
+    frame = np.zeros((80, 120, 3), dtype=np.uint8)
+    tags = "SOURCE_DATE=2026-10-12; SOURCE_SHIFT=12C1; SOURCE_MACHINE=M1"
+    saved = store.save("SAVED_1", 3, "kg", frame, "manual", needs_sync=True, weight_raw=tags)
+    parent_id = str(uuid.uuid4())
+    drafts = []
+    for parent in (parent_id, saved.event_id):
+        draft, _ = store.save_photo_draft_idempotent(
+            frame, event_id=str(uuid.uuid4()), parent_event_id=parent,
+            capture_kind="core", needs_sync=True, work_date="2026-10-12",
+            shift="12C1", machine="M1",
+        )
+        drafts.append(draft)
+    sent = []
+
+    def send(_url, payload, _image_path, _token):
+        sent.append(payload["event_id"])
+        return {"ok": True, "event_id": payload["event_id"], "id": 1,
+                "image_url": "https://images.example/saved.jpg",
+                "image_public_id": "roll-captures/saved"}
+
+    worker = OutboxSyncWorker(store, "https://example.invalid", "token", send=send)
+    controller = ManualSyncController(store, worker)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address
+
+    def get(query):
+        with urllib.request.urlopen(f"http://{host}:{port}/api/measurements?{query}") as response:
+            return json.loads(response.read())
+
+    try:
+        query = "local_only=1&work_date=2026-10-12&shift=12C1&machine=M1"
+        official = get(query + "&include_drafts=0")
+        assert official["total_count"] == official["measurement_count"] == 1
+        assert official["error_count"] == 0
+        assert [item["event_id"] for item in official["items"]] == [saved.event_id]
+        backups = get(query + "&drafts_only=1&include_drafts=0")
+        assert backups["measurement_count"] == 0
+        assert backups["total_count"] == 1
+        assert [item["event_id"] for item in backups["items"]] == [parent_id]
+        assert get(query + "&drafts_only=1&offset=1")["items"] == []
+        filters = {"scope": "production", "date_from": "2026-10-12", "date_to": "2026-10-12",
+                   "shift": "12C1", "machine": "M1", "skip_cloudinary": True}
+        assert controller.preview(filters)["counts"]["photo_drafts"] == 0
+        assert controller.preview(filters)["total"] == 1
+        controller.start(filters)
+        deadline = time.monotonic() + 3
+        while controller.status()["state"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert controller.status()["state"] == "complete"
+        assert controller.status()["synced"] == 1, controller.status()["last_error"]
+        assert sent == [saved.event_id]
+        assert store.get(parent_id) is None
+        for draft in drafts:
+            assert store.get_photo_draft(draft.event_id).sync_status == "pending"
+            assert Path(draft.image_path).is_file()
+        assert get(query + "&include_drafts=0")["total_count"] == 1
+
+        monkeypatch.setattr(test_ui_module, "_supabase_project_url", lambda: "https://example.invalid")
+        monkeypatch.setattr(test_ui_module, "_supabase_read_key", lambda: "public")
+        monkeypatch.setattr(test_ui_module, "fetch_supabase_table", lambda *_args, **_kwargs: official["items"])
+        monkeypatch.setattr(test_ui_module, "fetch_supabase_table_count", lambda *_args, **_kwargs: 1)
+        def reject_drafts(*_args, **_kwargs):
+            pytest.fail("Saved-record query must not fetch cloud photo drafts")
+        monkeypatch.setattr(test_ui_module, "fetch_supabase_photo_drafts", reject_drafts)
+        cloud = get("work_date=2026-10-12&include_drafts=0")
+        assert cloud["total_count"] == cloud["measurement_count"] == 1
+        assert cloud["error_count"] == 0
+        assert [item["event_id"] for item in cloud["items"]] == [saved.event_id]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        if service.sync_worker is not None:
+            service.sync_worker.stop()
+        service.close()
+
+
 def test_local_production_items_show_unread_photos_as_one_visible_row(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     parent_id = "31c3db88-2c7d-4a35-b5f0-3a83e9a6745a"
