@@ -20,7 +20,7 @@ function setup(){
     api:url=>{calls.push(url);return calls.length===1?pending.older.promise:pending.fresh.promise},
     document:{createElement:tag=>({tag,cells:[],dataset:{},addEventListener(){},appendChild(child){this.cells.push(child)}})},
     recordCell:(row,value)=>{row.cells.push(value);return {}},
-    renderShiftCount(){},rebuildProductionQrIndex(){},
+    renderShiftCount(){throw new Error('List filters must not render the capture count')},refreshShiftCount:async()=>1,rebuildProductionQrIndex(){},
     productWeightFromRaw:()=>NaN,biWeightFromRaw:()=>0,nvlWeight:(p,c,b)=>p-c-b,
     optionalRecordWeight:value=>value==null?NaN:Number(value),
     recordErrorStatus:()=>'',recordErrorReason:()=>'',recordImages(){},

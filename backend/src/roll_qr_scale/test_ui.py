@@ -5018,6 +5018,12 @@ class StationUIService:
         machine: str = "",
         frame_sha256: str | None = None,
     ) -> dict[str, object]:
+        if (
+            frame is None or frame.size == 0
+            or product_frame is None or product_frame.size == 0
+            or _raw_tag(weight_raw, "CORE_IMAGE_MISSING") == "1"
+        ):
+            raise ValueError("Mỗi cuộn cần đủ ảnh lõi và ảnh sản phẩm mới được lưu phiếu cân")
         qr_code = qr_code.strip()
         if not qr_code:
             try:
@@ -6338,6 +6344,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             if parsed.path == "/api/measurements":
                 query = urllib.parse.parse_qs(parsed.query)
                 local_only = str(query.get("local_only", ["0"])[0]) == "1"
+                count_only = str(query.get("count_only", ["0"])[0]) == "1"
                 include_photo_drafts = str(query.get("include_drafts", ["1"])[0]) != "0"
                 drafts_only = str(query.get("drafts_only", ["0"])[0]) == "1"
                 try:
@@ -6447,7 +6454,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "count_exact": True,
                             "offset": offset,
                             "limit": limit,
-                            "items": _local_production_items(
+                            "items": [] if count_only else _local_production_items(
                                 store, offset + limit,
                                 include_photo_drafts=include_photo_drafts,
                                 **list_filters,
@@ -7474,6 +7481,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     return
                 raw_frame = str(payload.get("image", "") or "")
                 product_frame_raw = str(payload.get("product_image", "") or "")
+                if self.path == "/api/capture" and (not raw_frame or not product_frame_raw):
+                    raise ValueError("Mỗi cuộn cần đủ ảnh lõi và ảnh sản phẩm mới được lưu phiếu cân")
                 if raw_frame:
                     frame = decode_image(raw_frame)
                 elif product_frame_raw:

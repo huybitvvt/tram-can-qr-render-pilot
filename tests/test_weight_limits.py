@@ -38,7 +38,7 @@ def test_capture_saves_weights_above_old_limits(tmp_path, core, product, machine
         with patch.object(service, "quality_result", return_value=({"issues": []}, True)):
             service.capture("ROLL-001", core, "kg", np.zeros((600, 800, 3), dtype=np.uint8),
                             weight_raw=f"SOURCE_MACHINE={machine}; ERROR_STATUS=error; ERROR_REASON=confirmed",
-                            product_weight=product)
+                            product_weight=product, product_frame=np.zeros((600, 800, 3), dtype=np.uint8))
         assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 1
     finally:
         service.close()

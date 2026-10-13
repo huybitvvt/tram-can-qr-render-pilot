@@ -133,25 +133,23 @@ test('save stays disabled until both core and product images exist',()=>{
  assert.equal(nodes.saveBtn.disabled,true);assert.match(messages.at(-1).message,/Lý do lỗi/);
  round.errorReason='Damaged';ctx.refreshCompletionState(session);assert.equal(nodes.saveBtn.disabled,false);
 });
-test('official request keeps one photo and null weights with automatic error reason',()=>{
+test('official request requires both photos even when AI weights or QR are missing',()=>{
  const ctx=vm.createContext({validWeightValue:value=>String(value??'').trim()!==''&&Number(value)>=0,
   sourceRawTags:()=> 'SOURCE_DATE=2026-09-24',sourceContext:{date:'2026-09-24',shift:'HC1',machine:'M1',order:'',bi:'0.16'},
-  normalizeBiWeight:()=>0.16,newEventId:()=> 'event-1',roundOwnsSessionBinding:()=>false});
+  normalizeBiWeight:()=>0.16,newEventId:()=> 'event-1',roundOwnsSessionBinding:()=>false,roundHasBothImages:round=>Boolean(round.coreImage&&round.productImage)});
  const start=script.indexOf('function captureBodyForRound(');
  vm.runInContext(script.slice(start,script.indexOf('\nasync function saveUnboundRound(',start)),ctx);
  const session={unit:'kg',stationId:'station-01',cameraId:'camera-01'};
  const round={eventId:'event-1',coreImage:'core-photo',productImage:'',weight:'',productWeight:'',qr:'',errorStatus:'ok',errorReason:''};
- const body=ctx.captureBodyForRound(session,round,0,false);
- assert.equal(body.image,'core-photo');assert.equal(body.product_image,'');
+ assert.throws(()=>ctx.captureBodyForRound(session,round,0,false),/đủ ảnh lõi và ảnh sản phẩm/);
+ round.productImage='product-photo';const body=ctx.captureBodyForRound(session,round,0,false);
+ assert.equal(body.image,'core-photo');assert.equal(body.product_image,'product-photo');
  assert.equal(body.qr_code,'');assert.equal(body.weight,null);assert.equal(body.product_weight,null);
  assert.equal(body.error_status,'error');assert.match(body.error_reason,/AI không đọc được cân lõi và cân sản phẩm/);
- assert.match(body.error_reason,/Chưa có ảnh cân sản phẩm/);
+ assert.doesNotMatch(body.error_reason,/Chưa có ảnh/);
  assert.equal(body.require_complete_evidence,undefined);
  round.coreImage='';round.productImage='product-photo';round.productWeight='8.25';
- const productOnly=ctx.captureBodyForRound(session,round,0,false);
- assert.equal(productOnly.image,'');assert.equal(productOnly.product_image,'product-photo');
- assert.equal(productOnly.weight,null);assert.equal(productOnly.product_weight,8.25);
- assert.match(productOnly.weight_raw,/CORE_IMAGE_MISSING=1/);
+ assert.throws(()=>ctx.captureBodyForRound(session,round,0,false),/đủ ảnh lõi và ảnh sản phẩm/);
 });
 test('an AI reading from a poor image may save when the weights are known',()=>{
  const {ctx,session,nodes,messages}=setup();const round=session.rounds[0];

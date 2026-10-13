@@ -95,7 +95,7 @@ test('production sync and list filtering preserve the open capture and use lower
     loadRecords:async()=>{},
     api:async(path,options)=>{requests.push([path,JSON.parse(options.body)]);return {total:1,counts:{measurements:1}}},
   });
-  for(const name of ['async function applyRecordsFilters(','function sourceQuery(','function productionSyncFilters(','function manualSyncCounts(','function setManualSyncRunning(','function manualSyncStatusEl(','async function previewManualSync(','async function startManualSync(','function activeProductionDraftIds(']){
+  for(const name of ['async function applyRecordsFilters(','function sourceQuery(','function productionSyncFilters(','function manualSyncCounts(','function setManualSyncRunning(','function manualSyncStatusEl(','async function previewManualSync(','async function startManualSync(']){
     vm.runInContext(line(name),ctx);
   }
   vm.runInContext('let manualSyncTimer=0,manualSyncStatusHost="productionRecordsStatus"',ctx);
@@ -107,5 +107,5 @@ test('production sync and list filtering preserve the open capture and use lower
   const query=new URLSearchParams(ctx.recordsListQuery());
   assert.equal(query.get('machine'),'LOWER');
   assert.equal(query.get('include_drafts'),'0');
-  assert.deepEqual([...ctx.activeProductionDraftIds()],['open']);
+  assert.doesNotMatch(html,/id="photoDraftBackups"|id="photoDraftBody"|id="refreshPhotoDraftsBtn"/);
 });

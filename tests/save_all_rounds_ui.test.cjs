@@ -49,6 +49,20 @@ test('Enter saves only rounds with both images and moves the incomplete round to
  assert.match(messages.at(-1),/đã dồn lên thành lần 1 và 2/);
 });
 
+test('one complete roll saves while three other rolls remain incomplete',async()=>{
+ const calls=[];
+ const {ctx,session}=setup(async index=>{
+  calls.push(index);session.rounds[index].coreImage='';session.rounds[index].productImage='';session.rounds[index].qr='';session.rounds[index].weight='';session.rounds[index].productWeight='';
+ });
+ session.roundCount=4;
+ session.rounds.push({...session.rounds[1],coreImage:'core-3',productImage:''},{...session.rounds[1],coreImage:'',productImage:'product-4'});
+ await ctx.saveAllRounds();
+ assert.deepEqual(calls,[0]);
+ assert.equal(session.rounds.filter(round=>round.coreImage||round.productImage).length,3);
+ assert.equal(session.rounds.some(round=>round.coreImage==='core-3'),true);
+ assert.equal(session.rounds.some(round=>round.productImage==='product-4'),true);
+});
+
 test('a failed complete round stays at the top and the saved slot becomes empty below',async()=>{
  const calls=[];
  const {ctx,session,messages}=setup(async index=>{

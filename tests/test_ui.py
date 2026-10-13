@@ -315,7 +315,7 @@ def test_expired_ai_analysis_falls_back_to_durable_browser_images() -> None:
 def test_ui_capture_decodes_qr_and_saves_stable_manual_weight(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
-    result = service.capture("", 125.4, "kg", make_qr_frame("ROLL-WEB-001"))
+    result = service.capture("", 125.4, "kg", make_qr_frame("ROLL-WEB-001"), product_frame=make_qr_frame("ROLL-WEB-001"))
     row = store.connection.execute(
         "SELECT qr_code,weight,unit,weight_source,qr_source,weight_stable,sync_status "
         "FROM measurements"
@@ -428,31 +428,24 @@ def test_ui_capture_auto_marks_unreadable_weights_as_error(tmp_path) -> None:
         store.close()
 
 
-def test_ui_capture_saves_documented_ai_failure_with_one_photo(tmp_path) -> None:
+def test_ui_capture_rejects_single_photo_even_when_ai_failure_is_documented(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     event_id = str(uuid.uuid4())
     try:
-        result = service.capture(
-            "ROLL-AI-MISS",
-            None,
-            "kg",
-            frame,
-            event_id=event_id,
-            weight_raw=(
-                "CORE_MISSING=1; PRODUCT_WEIGHT=unread; "
-                "ERROR_STATUS=error; ERROR_REASON=AI không đọc được số cân"
-            ),
-        )
-        saved = store.get(event_id)
-        assert result["event_id"] == event_id
-        assert saved is not None
-        assert saved.weight is None
-        assert saved.product_weight is None
-        assert Path(saved.image_path).is_file()
-        assert not saved.product_image_path
-        assert "PHOTO_QUALITY_OVERRIDE=1" in saved.weight_raw
+        with pytest.raises(ValueError, match="đủ ảnh lõi và ảnh sản phẩm"):
+            service.capture(
+                "ROLL-AI-MISS", None, "kg", frame, event_id=event_id,
+                weight_raw="CORE_MISSING=1; PRODUCT_WEIGHT=unread; ERROR_STATUS=error; ERROR_REASON=AI",
+            )
+        with pytest.raises(ValueError, match="đủ ảnh lõi và ảnh sản phẩm"):
+            service.capture(
+                "ROLL-AI-MISS", None, "kg", frame, event_id=event_id,
+                product_frame=frame, weight_raw="CORE_IMAGE_MISSING=1; ERROR_STATUS=error",
+            )
+        assert store.get(event_id) is None
+        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 0
     finally:
         service.close()
         store.close()
@@ -467,6 +460,7 @@ def test_ui_capture_without_qr_or_weights_creates_official_local_ticket(tmp_path
         result = service.capture(
             "", None, "kg", frame, event_id=event_id,
             weight_raw="PRODUCT_WEIGHT=unread",
+            product_frame=frame,
         )
         saved = store.get(event_id)
         assert result["event_id"] == event_id
@@ -477,7 +471,7 @@ def test_ui_capture_without_qr_or_weights_creates_official_local_ticket(tmp_path
         assert saved.qr_source == "none"
         assert saved.sync_status == "local"
         assert Path(saved.image_path).is_file()
-        assert not saved.product_image_path
+        assert Path(saved.product_image_path).is_file()
         assert "ERROR_STATUS=error" in saved.weight_raw
         assert "AI không đọc được cân lõi và cân sản phẩm" in saved.weight_raw
         assert "Chưa nhận diện được mã QR" in saved.weight_raw
@@ -697,6 +691,7 @@ def test_ui_save_retries_cloud_failure_from_durable_outbox(tmp_path) -> None:
         13.04,
         "kg",
         make_qr_frame("EVIDENCE-OFFLINE"),
+        product_frame=make_qr_frame("EVIDENCE-OFFLINE"),
     )
     saved = store.get(str(result["event_id"]))
     assert result["sync_status"] == "pending"
@@ -711,6 +706,8 @@ def test_ui_save_retries_cloud_failure_from_durable_outbox(tmp_path) -> None:
         "id": 502,
         "image_url": "https://images.example/retried.jpg",
         "image_public_id": "roll-captures/retried",
+        "product_image_url": "https://images.example/retried-product.jpg",
+        "product_image_public_id": "roll-captures/retried-product",
     }
     assert worker.sync_once(include_deferred=True) == 1
     retried = store.get(str(result["event_id"]))
@@ -1150,6 +1147,7 @@ def test_capture_accepts_machine_from_save_endpoint_and_persists_source(tmp_path
         station_id="station-01",
         camera_id="camera-01",
         machine="Máy tái chế",
+        product_frame=make_qr_frame("MT-MN008_TEST"),
     )
     saved = store.get(str(result["event_id"]))
 
@@ -1182,6 +1180,7 @@ def test_capture_canonicalizes_to_operator_selected_machine_before_save(tmp_path
         station_id="station-01",
         camera_id="camera-01",
         machine="Máy cách nhiệt",
+        product_frame=make_qr_frame("MT-MN005_STALE"),
     )
     saved = store.get(str(result["event_id"]))
 
@@ -1782,6 +1781,7 @@ def test_gemini_allows_successful_low_resolution_full_image(tmp_path) -> None:
         frame,
         vision_confirmed=True,
         weight_raw="GEMINI_FULL:test",
+        product_frame=frame,
     )
 
     service.close()
@@ -1982,6 +1982,7 @@ def test_zoomed_core_evidence_keeps_analysis_binding_for_final_save(
         station_id="station-01",
         camera_id="camera-01",
         frame_sha256=str(analysis["frame_sha256"]),
+        product_frame=evidence,
     )
     row = store.get(event_id)
 
@@ -2452,12 +2453,12 @@ def test_ui_capture_blocks_same_frame_but_allows_consecutive_new_frames(tmp_path
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None, duplicate_window=5)
     frame = make_qr_frame("ROLL-WEB-DUPLICATE")
-    service.capture("ROLL-WEB-DUPLICATE", 20, "kg", frame)
+    service.capture("ROLL-WEB-DUPLICATE", 20, "kg", frame, product_frame=frame)
     with pytest.raises(ValueError, match="khung hình mới"):
-        service.capture("ROLL-WEB-DUPLICATE", 20, "kg", frame)
+        service.capture("ROLL-WEB-DUPLICATE", 20, "kg", frame, product_frame=frame)
     next_frame = frame.copy()
     next_frame[0, 0] = 0
-    result = service.capture("ROLL-WEB-DUPLICATE", 20, "kg", next_frame)
+    result = service.capture("ROLL-WEB-DUPLICATE", 20, "kg", next_frame, product_frame=next_frame)
     assert result["event_id"]
     assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 2
     store.close()
@@ -2467,7 +2468,7 @@ def test_ui_rejects_invalid_weight_and_image(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(store, None, None, None)
     with pytest.raises(ValueError, match="không âm"):
-        service.capture("ROLL-WEB-BAD", -1, "kg", make_qr_frame("ROLL-WEB-BAD"))
+        service.capture("ROLL-WEB-BAD", -1, "kg", make_qr_frame("ROLL-WEB-BAD"), product_frame=make_qr_frame("ROLL-WEB-BAD"))
     with pytest.raises(ValueError, match="base64"):
         decode_image("not-base64")
     store.close()
@@ -2885,6 +2886,13 @@ def test_saved_records_and_manual_sync_keep_unfinished_photo_drafts_separate(tmp
         assert official["total_count"] == official["measurement_count"] == 1
         assert official["error_count"] == 0
         assert [item["event_id"] for item in official["items"]] == [saved.event_id]
+        with monkeypatch.context() as count_patch:
+            def reject_loading_images(*_args, **_kwargs):
+                pytest.fail("Live count must not load measurement rows or images")
+            count_patch.setattr(test_ui_module, "_local_production_items", reject_loading_images)
+            live_count = get(query + "&include_drafts=0&count_only=1")
+        assert live_count["measurement_count"] == live_count["total_count"] == 1
+        assert live_count["items"] == []
         backups = get(query + "&drafts_only=1&include_drafts=0")
         assert backups["measurement_count"] == 0
         assert backups["total_count"] == 1
@@ -3007,8 +3015,8 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "data.measurement_count" in TEST_UI_HTML
     assert "data.measurement_count==null?null:Number(data.measurement_count)" in TEST_UI_HTML
     assert "local_only=1" in TEST_UI_HTML
-    assert "data.error_count" in TEST_UI_HTML
-    assert "ảnh AI lỗi không tính" in TEST_UI_HTML
+    assert "count_only:'1'" in TEST_UI_HTML
+    assert "ảnh chờ AI hoặc chưa lưu không tính" in TEST_UI_HTML
     assert "maybePromptRollBatchConfirm" in TEST_UI_HTML
     assert 'id="openRollBatchBtn"' in TEST_UI_HTML
     assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
@@ -4022,7 +4030,7 @@ def test_bound_capture_is_idempotent_and_keeps_analysis_id(tmp_path, monkeypatch
         product_weight=21.15,
         **kwargs,
     )
-    retry = service.capture("ROLL-BOUND-001", 1.15, "kg", frame, True, "OCR", **kwargs)
+    retry = service.capture("ROLL-BOUND-001", 1.15, "kg", frame, True, "OCR", **kwargs, product_frame=frame)
     row = store.get(event_id)
     service.close()
     store.close()
@@ -4365,83 +4373,77 @@ def test_measurement_pages_do_not_repeat_synced_local_rows(tmp_path, monkeypatch
         service.store.close()
 
 
-def test_capture_allows_omitted_core_weight_and_product_image_fallback(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(test_ui_module, "_supabase_project_url", lambda: "")
-    monkeypatch.setattr(test_ui_module, "_supabase_read_key", lambda: "")
-    monkeypatch.setattr(test_ui_module, "_ingest_api_url", lambda: "")
-    monkeypatch.setattr(test_ui_module, "_ingest_api_token", lambda: "")
+@pytest.mark.parametrize("missing_image", ["image", "product_image"])
+def test_capture_endpoint_rejects_missing_image_then_saves_one_complete_roll(tmp_path, monkeypatch, missing_image) -> None:
     import json
-    import threading
+    import urllib.error
     import urllib.request
 
     server, service = test_ui_module.create_server(
-        test_ui_module.build_parser().parse_args(
-            [
-                "--db",
-                str(tmp_path / "measurements.db"),
-                "--captures",
-                str(tmp_path / "captures"),
-                "--yolo-model",
-                "",
-                "--port",
-                "0",
-            ]
-        )
+        test_ui_module.build_parser().parse_args([
+            "--db", str(tmp_path / "measurements.db"),
+            "--captures", str(tmp_path / "captures"),
+            "--yolo-model", "", "--port", "0",
+        ])
     )
+    monkeypatch.setattr(test_ui_module, "_supabase_project_url", lambda: "")
+    monkeypatch.setattr(test_ui_module, "_ingest_api_url", lambda: "")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     host, port = server.server_address
-
     frame = np.zeros((600, 800, 3), dtype=np.uint8)
     encoded = image_data_url(frame)
-
-    # Send capture without core weight or image, only product_image & product_weight
-    req = urllib.request.Request(
-        f"http://{host}:{port}/api/capture",
-        data=json.dumps(
-            {
-                "qr_code": "",
-                "product_weight": 7.5,
-                "unit": "kg",
-                "product_image": encoded,
-                "work_date": "2026-09-22",
-                "shift": "12C1",
-                "machine": "MÁY BAO BÌ 11",
-            }
-        ).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+    parent_id, draft_id = str(uuid.uuid4()), str(uuid.uuid4())
+    station = service.station_configs[0]
+    draft = service.capture_photo_draft(
+        frame, event_id=draft_id, parent_event_id=parent_id, capture_kind="core",
+        work_date="2026-10-13", shift="12C1", machine="M1",
+        station_id=str(station["station_id"]), camera_id=str(station["camera_id"]),
     )
-    with urllib.request.urlopen(req) as resp:
-        res = json.loads(resp.read().decode("utf-8"))
-        assert res["ok"] is True
-        assert res["weight"] is None
-        assert res["qr_code"] == ""
+    payload = {
+        "event_id": parent_id, "qr_code": "SP_1", "weight": None, "product_weight": 7.5,
+        "unit": "kg", "image": encoded, "product_image": encoded,
+        "work_date": "2026-10-13", "shift": "12C1", "machine": "M1",
+        "error_status": "error", "error_reason": "AI không đọc được số cân",
+    }
 
-    # Verify that GET /api/measurements immediately returns this local record
-    list_req = urllib.request.Request(f"http://{host}:{port}/api/measurements?limit=50&work_date=2026-09-22")
-    with urllib.request.urlopen(list_req) as resp:
-        list_res = json.loads(resp.read().decode("utf-8"))
-        assert list_res["ok"] is True
-        assert len(list_res["items"]) >= 1
-        item = next(i for i in list_res["items"] if i["event_id"] == res["event_id"])
-        assert item["core_weight"] is None
-        assert item["product_weight"] == 7.5
-        assert item["error_status"] == "error"
-        assert "Chưa nhận diện được mã QR" in item["error_reason"]
-        assert item["has_core_image"] is False
-        assert item["has_product_image"] is True
+    def post(body):
+        return urllib.request.urlopen(urllib.request.Request(
+            f"http://{host}:{port}/api/capture", data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        ))
 
-    local_req = urllib.request.Request(
-        f"http://{host}:{port}/api/measurements?limit=50&work_date=2026-09-22&local_only=1"
-    )
-    with urllib.request.urlopen(local_req) as resp:
-        local_res = json.loads(resp.read().decode("utf-8"))
-        assert local_res["source"] == "local"
-        assert any(i["event_id"] == res["event_id"] for i in local_res["items"])
+    def count():
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/api/measurements?local_only=1&include_drafts=0&count_only=1"
+        ) as response:
+            return json.loads(response.read())["measurement_count"]
 
-    server.shutdown()
-    server.server_close()
-    thread.join(timeout=2.0)
-    if service.sync_worker is not None:
-        service.sync_worker.stop()
-    service.close()
+    try:
+        incomplete = {**payload, missing_image: ""}
+        with pytest.raises(urllib.error.HTTPError) as rejected:
+            post(incomplete)
+        assert rejected.value.code == 422
+        assert "đủ ảnh lõi và ảnh sản phẩm" in json.loads(rejected.value.read())["message"]
+        assert service.store.get(parent_id) is None
+        assert count() == 0
+        stored_draft = service.store.get_photo_draft(draft_id)
+        assert stored_draft is not None and Path(stored_draft.image_path).is_file()
+        with post(payload) as response:
+            saved = json.loads(response.read())
+        assert saved["event_id"] == parent_id
+        row = service.store.get(parent_id)
+        assert row is not None
+        assert Path(row.image_path).is_file() and Path(row.product_image_path).is_file()
+        assert row.weight is None and row.product_weight == pytest.approx(7.5)
+        assert count() == 1
+        with post(payload) as response:
+            retry = json.loads(response.read())
+        assert retry["duplicate"] is True and count() == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+        if service.sync_worker is not None:
+            service.sync_worker.stop()
+        service.close()
