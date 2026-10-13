@@ -338,6 +338,16 @@ def test_spare_swap_preserves_other_shift_and_survives_restart(key_ring, monkeyp
     assert all(key not in str(current.status()) for key in expected.values())
 
 
+def test_first_saved_spare_is_ready_after_restart_without_reentry(key_ring):
+    current, store, night_store = key_ring
+    reloaded = manager(store, backup_store=night_store)
+    assert reloaded.load_shift_keys() == current.load_shift_keys()
+    status = reloaded.status()
+    assert status["spare_configured"] is True and status["switch_enabled"] is True
+    assert status["spare_key_id"] == current.key_id("spare-key-value-1234567")
+    assert status["stored_encrypted"] is True
+
+
 def test_three_keys_rotate_across_both_shifts(key_ring):
     current, _, _ = key_ring
     original = current.load_shift_keys()

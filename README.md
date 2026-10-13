@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc67`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc67/TramCanQR-Setup-0.2.0-rc67.exe).
+>    Bản `0.2.0-rc68`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc68/TramCanQR-Setup-0.2.0-rc68.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc67.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc68.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -709,3 +709,5 @@ Bản 0.2.0-rc60: lưu ảnh local trước, đọc AI ở nền theo từng ô 
 Bản 0.2.0-rc61: tự đẩy các dòng Chờ đồng bộ mỗi 10 phút khi AI rảnh; tạm dừng giữa các phiếu khi AI bắt đầu chạy. Thử lại DNS khi lưu key Gemini và báo đúng tên miền lỗi. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc61.md).
 
 Bản 0.2.0-rc67: thanh đếm tự cập nhật theo nguồn cân phía trên, độc lập với bộ lọc dưới; bỏ bảng ảnh tạm và giữ ảnh chưa lưu trong ô cân kể cả khi AI lỗi. Mỗi cuộn cần đủ ảnh lõi và ảnh SP để lưu riêng, không cần đủ cả bốn cuộn. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc67.md).
+
+Bản 0.2.0-rc68: tách Dùng key để áp dụng ngay key phụ đã lưu và Đổi key để mở ô nhập; lưu một lần rồi dùng lại, kể cả khi mở lại ứng dụng. Xem [ghi chú phát hành](docs/release-notes-0.2.0-rc68.md).
