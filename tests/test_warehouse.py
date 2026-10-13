@@ -129,6 +129,32 @@ def test_warehouse_names_fall_back_to_receipts_if_catalog_is_unavailable(monkeyp
     assert warehouse.fetch_finished_goods_warehouses("url", "key") == ["Kho thành phẩm 1"]
 
 
+def test_fetch_product_names_uses_latest_name_and_caches(monkeypatch) -> None:
+    from roll_qr_scale import warehouse
+
+    calls = []
+
+    def request(_method, _url, _key, table, *, params, timeout):
+        calls.append(params)
+        assert table == "nhap_kho"
+        if params["ma_sp"].startswith("in."):
+            return [
+                {"ma_sp": "MN-BB486", "ten_sp": "Bao bì khổ 1.2m mới"},
+                {"ma_sp": "MN-BB486", "ten_sp": "Bao bì khổ 1.2m cũ"},
+                {"ma_sp": "MN-SAME", "ten_sp": "MN-SAME"},
+            ]
+        return [{"ma_sp": "MN-BUSY", "ten_sp": "Mang busy"}] if params["ma_sp"] == "eq.MN-BUSY" else []
+
+    monkeypatch.setattr(warehouse, "_PRODUCT_NAME_CACHE", {})
+    monkeypatch.setattr(warehouse, "_postgrest_request", request)
+    codes = ["MN-BB486", "MN-SAME", "MN-BUSY"]
+    expected = {"MN-BB486": "Bao bì khổ 1.2m mới", "MN-BUSY": "Mang busy"}
+    assert warehouse.fetch_product_names("url", "key", codes) == expected
+    assert len(calls) == 3
+    assert warehouse.fetch_product_names("url", "key", codes) == expected
+    assert len(calls) == 3
+
+
 def test_nhap_kho_summary_writes_csv_json(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ROLL_SCALE_NHAP_KHO_EXPORT_DIR", str(tmp_path))
     saved = append_nhap_kho_summary_row(

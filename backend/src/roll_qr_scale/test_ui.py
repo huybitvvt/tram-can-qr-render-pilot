@@ -76,6 +76,7 @@ from .warehouse import (
     confirm_nhap_kho,
     default_finished_goods_warehouse_name,
     fetch_finished_goods_warehouses,
+    fetch_product_names,
     filter_waiting_candidates,
     is_waiting_nhap_kho,
     kho_configured,
@@ -448,6 +449,36 @@ def _product_codes_for_order(
 
 def _production_order_product_text(row: dict[str, object]) -> str:
     return _row_field(row, PRODUCTION_ORDER_PRODUCT_FIELDS)
+
+
+def _product_names_from_master(rows: list[dict[str, object]]) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for row in rows:
+        code = _production_order_product_code(row)
+        name = str(_production_order_product_text(row) or "").strip()
+        if code and name and name != code and code not in names:
+            names[code] = name
+    return names
+
+
+def _product_names_for_codes(
+    codes: list[str],
+    master_rows: list[dict[str, object]],
+) -> dict[str, str]:
+    """Map Mã SP -> tên SP: LSX master first, then nhap_kho history in kho DB."""
+    wanted = [code for code in dict.fromkeys(codes) if code]
+    if not wanted:
+        return {}
+    master_names = _product_names_from_master(master_rows)
+    names = {code: master_names[code] for code in wanted if code in master_names}
+    missing = [code for code in wanted if code not in names]
+    if missing and kho_configured():
+        try:
+            fetched = fetch_product_names(kho_supabase_url(), kho_supabase_key(), missing)
+            names.update({code: fetched[code] for code in missing if fetched.get(code)})
+        except Exception:  # noqa: BLE001 - names are optional; codes still work
+            pass
+    return names
 
 
 def _shifts_match(row_shift: str, wanted: str) -> bool:
@@ -6321,6 +6352,9 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 product_codes = _product_codes_for_order(
                     product_codes_by_order, production_order
                 )
+                product_names = _product_names_for_codes(
+                    _product_codes_for_order(product_codes_by_order), master_rows
+                )
                 self.send_json(
                     200,
                     {
@@ -6334,6 +6368,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         "orders": orders,
                         "product_codes": product_codes,
                         "product_codes_by_order": product_codes_by_order,
+                        "product_names": product_names,
                         "shifts": db_shifts,
                         "machines": db_machines,
                         "suggestions": suggestions,

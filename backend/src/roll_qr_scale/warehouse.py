@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -440,6 +441,84 @@ def _postgrest_in_filter(values: list[str]) -> str:
         safe = str(value).replace("\\", "\\\\").replace('"', '\\"')
         quoted.append(f'"{safe}"')
     return f"in.({','.join(quoted)})"
+
+
+PRODUCT_NAME_CACHE_TTL_SECONDS = 600.0
+_PRODUCT_NAME_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def _product_names_from_rows(rows: object) -> dict[str, str]:
+    names: dict[str, str] = {}
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict):
+            continue
+        code = str(row.get("ma_sp") or "").strip()
+        name = str(row.get("ten_sp") or "").strip()
+        if code and name and name != code and code not in names:
+            names[code] = name
+    return names
+
+
+def fetch_product_names(
+    supabase_url: str,
+    api_key: str,
+    codes: list[str],
+    *,
+    timeout: float = 8.0,
+    max_single_lookups: int = 30,
+) -> dict[str, str]:
+    cleaned = [
+        code
+        for code in dict.fromkeys(str(item or "").strip() for item in codes)
+        if code
+    ]
+    now = time.monotonic()
+    names: dict[str, str] = {}
+    missing: list[str] = []
+    for code in cleaned:
+        cached = _PRODUCT_NAME_CACHE.get(code)
+        if cached and now - cached[0] < PRODUCT_NAME_CACHE_TTL_SECONDS:
+            if cached[1]:
+                names[code] = cached[1]
+        else:
+            missing.append(code)
+    if not missing or not supabase_url or not api_key:
+        return names
+    found: dict[str, str] = {}
+    for offset in range(0, len(missing), 100):
+        chunk = missing[offset : offset + 100]
+        rows = _postgrest_request(
+            "GET", supabase_url, api_key, "nhap_kho",
+            params={
+                "select": "ma_sp,ten_sp",
+                "ma_sp": _postgrest_in_filter(chunk),
+                "ten_sp": "not.is.null",
+                "order": "created_at.desc",
+                "limit": 1000,
+            },
+            timeout=timeout,
+        )
+        found.update(_product_names_from_rows(rows))
+    # A busy code can fill the shared row limit, so look up the rest one by one.
+    for code in [code for code in missing if code not in found][:max_single_lookups]:
+        rows = _postgrest_request(
+            "GET", supabase_url, api_key, "nhap_kho",
+            params={
+                "select": "ma_sp,ten_sp",
+                "ma_sp": f"eq.{code}",
+                "ten_sp": "not.is.null",
+                "order": "created_at.desc",
+                "limit": 1,
+            },
+            timeout=timeout,
+        )
+        found.update(_product_names_from_rows(rows))
+    for code in missing:
+        name = found.get(code, "")
+        _PRODUCT_NAME_CACHE[code] = (now, name)
+        if name:
+            names[code] = name
+    return names
 
 
 def check_nhap_kho_codes(

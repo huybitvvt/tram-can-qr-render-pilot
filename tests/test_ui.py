@@ -2609,6 +2609,9 @@ def test_ui_records_table_shows_bi_and_nvl_weights() -> None:
     assert 'id="sourceProductCodeToggle"' in TEST_UI_HTML
     assert "function setSourceProductCodeOptions(" in TEST_UI_HTML
     assert "function applyProductCodesFromOrders(" in TEST_UI_HTML
+    assert 'id="sourceProductName"' in TEST_UI_HTML
+    assert "data.product_names" in TEST_UI_HTML
+    assert "source-option-name" in TEST_UI_HTML
     assert "params.set('production_order'" in TEST_UI_HTML
     assert "setSourceOrderOptions" in TEST_UI_HTML
     assert "sanitizeOrder" in TEST_UI_HTML
@@ -3097,6 +3100,34 @@ def test_product_codes_grouped_by_production_order() -> None:
         "MT-TCN0015",
     ]
     assert test_ui_module._product_codes_for_order(merged, "LSX-B") == ["BB-PE50"]
+
+
+def test_product_names_prefer_master_then_kho_history(monkeypatch) -> None:
+    master_rows = [
+        {"ma_lsx": "LSX-A", "ma_sp": "MT-TCN0013", "ten_hang": "Tấm cách nhiệt 13"},
+        {"ma_lsx": "LSX-B", "ma_sp": "BB-PE50", "ten_hang": "BB-PE50"},
+    ]
+    asked: list[list[str]] = []
+
+    def fake_fetch(url, key, codes):
+        asked.append(list(codes))
+        return {"BB-PE50": "Bao bì PE 50", "MT-TCN0013": "kho name"}
+
+    monkeypatch.setattr(test_ui_module, "kho_configured", lambda: True)
+    monkeypatch.setattr(test_ui_module, "kho_supabase_url", lambda: "https://kho")
+    monkeypatch.setattr(test_ui_module, "kho_supabase_key", lambda: "key")
+    monkeypatch.setattr(test_ui_module, "fetch_product_names", fake_fetch)
+    names = test_ui_module._product_names_for_codes(
+        ["MT-TCN0013", "BB-PE50", "MN-X"], master_rows
+    )
+    assert names == {"MT-TCN0013": "Tấm cách nhiệt 13", "BB-PE50": "Bao bì PE 50"}
+    assert asked == [["BB-PE50", "MN-X"]]
+
+    def broken_fetch(url, key, codes):
+        raise RuntimeError("getaddrinfo failed")
+
+    monkeypatch.setattr(test_ui_module, "fetch_product_names", broken_fetch)
+    assert test_ui_module._product_names_for_codes(["MN-X"], []) == {}
 
 
 def test_production_orders_read_master_table_rows() -> None:
