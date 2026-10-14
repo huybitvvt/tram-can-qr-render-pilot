@@ -417,10 +417,11 @@ def test_ui_capture_auto_marks_unreadable_weights_as_error(tmp_path) -> None:
         )
         saved = store.get(result["event_id"])
         assert saved is not None
-        assert saved.weight is None
+        assert saved.weight == 0
+        assert "CORE_AUTO_ZERO=1" in saved.weight_raw
         assert saved.product_weight is None
         assert "ERROR_STATUS=error" in saved.weight_raw
-        assert "ERROR_REASON=AI không đọc được cân lõi và cân sản phẩm" in saved.weight_raw
+        assert "ERROR_REASON=AI không đọc được cân sản phẩm" in saved.weight_raw
         assert "PHOTO_QUALITY_OVERRIDE=1" in saved.weight_raw
         assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 1
     finally:
@@ -467,13 +468,13 @@ def test_ui_capture_without_qr_or_weights_creates_official_local_ticket(tmp_path
         assert result["qr_code"] == ""
         assert saved is not None
         assert saved.qr_code == ""
-        assert saved.weight is None and saved.product_weight is None
+        assert saved.weight == 0 and saved.product_weight is None
         assert saved.qr_source == "none"
         assert saved.sync_status == "local"
         assert Path(saved.image_path).is_file()
         assert Path(saved.product_image_path).is_file()
         assert "ERROR_STATUS=error" in saved.weight_raw
-        assert "AI không đọc được cân lõi và cân sản phẩm" in saved.weight_raw
+        assert "AI không đọc được cân sản phẩm" in saved.weight_raw
         assert "Chưa nhận diện được mã QR" in saved.weight_raw
         assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 1
         assert store.connection.execute("SELECT COUNT(*) FROM photo_drafts").fetchone()[0] == 0
@@ -4466,7 +4467,7 @@ def test_capture_endpoint_rejects_missing_image_then_saves_one_complete_roll(tmp
         row = service.store.get(parent_id)
         assert row is not None
         assert Path(row.image_path).is_file() and Path(row.product_image_path).is_file()
-        assert row.weight is None and row.product_weight == pytest.approx(7.5)
+        assert row.weight == 0 and row.product_weight == pytest.approx(7.5)
         assert count() == 1
         with post(payload) as response:
             retry = json.loads(response.read())

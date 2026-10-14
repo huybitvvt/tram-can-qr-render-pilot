@@ -2131,18 +2131,13 @@ def _persist_measurement_edit(
                 remote_item = item
         except Exception as exc:
             cloud_error = str(exc)
-    persist_raw = str(weight_raw or "").strip()
-    if not persist_raw:
-        if work_date:
-            persist_raw = _upsert_raw_tag(persist_raw, "SOURCE_DATE", work_date)
-        if shift:
-            persist_raw = _upsert_raw_tag(persist_raw, "SOURCE_SHIFT", shift)
-        if machine:
-            persist_raw = _upsert_raw_tag(persist_raw, "SOURCE_MACHINE", machine)
-        if production_order:
-            persist_raw = _upsert_raw_tag(
-                persist_raw, "SOURCE_PRODUCTION_ORDER", production_order
-            )
+    persist_raw = str(weight_raw or existing_raw).strip()
+    for tag, value in (
+        ("SOURCE_DATE", work_date), ("SOURCE_SHIFT", shift),
+        ("SOURCE_MACHINE", machine), ("SOURCE_PRODUCTION_ORDER", production_order),
+    ):
+        if value:
+            persist_raw = _upsert_raw_tag(persist_raw, tag, value)
     persist_raw = _upsert_raw_tag(
         persist_raw, "PRODUCT_WEIGHT",
         f"{product_weight:g}" if product_weight is not None else "unread",
@@ -2165,6 +2160,8 @@ def _persist_measurement_edit(
             product_weight=product_weight,
             weight_raw=persist_raw,
         )
+        if cloud_error and existing is not None and existing.sync_status == "synced":
+            store.mark_sync_failed(event_id, cloud_error)
     except KeyError:
         if remote_item is None:
             raise ValueError(
@@ -4254,6 +4251,7 @@ class StationUIService:
         recognition_profile: str = "fast",
         recognition_provider: str = "gemini",
         only: str = "",
+        client_qr_code: str = "",
     ) -> dict[str, object]:
         """Read saved error photos and promote a complete pair to a measurement."""
         try:
@@ -4282,8 +4280,6 @@ class StationUIService:
             if draft is None:
                 continue
             readings[kind] = draft.reread_weight
-            if only == "qr" or (only in {"core", "product"} and kind != only):
-                continue
             path = Path(draft.image_path)
             if not path.is_file():
                 errors[kind] = "Ảnh local không còn trên máy"
@@ -4291,6 +4287,8 @@ class StationUIService:
             try:
                 frame = decode_image_bytes(path.read_bytes())
                 frames[kind] = frame
+                if only == "qr" or (only in {"core", "product"} and kind != only):
+                    continue
                 result = self.analyze(
                     frame, "auto", "kg",
                     recognition_profile=recognition_profile,
@@ -4301,7 +4299,11 @@ class StationUIService:
                     context_shift=draft.shift,
                 )
                 if not result.get("weight_found"):
-                    errors[kind] = "AI chưa đọc được số cân"
+                    if kind == "core" and readings[kind] is None:
+                        readings[kind] = 0.0
+                        self.store.set_photo_draft_reread_weight(draft.event_id, 0.0)
+                    else:
+                        errors[kind] = "AI chưa đọc được số cân"
                     continue
                 weight = float(result["weight"])
                 if not math.isfinite(weight) or weight < 0:
@@ -4309,11 +4311,19 @@ class StationUIService:
                 self.store.set_photo_draft_reread_weight(draft.event_id, weight)
                 readings[kind] = weight
             except Exception as exc:
-                errors[kind] = str(exc)[:240]
+                if kind == "core" and kind in frames and readings[kind] is None:
+                    readings[kind] = 0.0
+                    self.store.set_photo_draft_reread_weight(draft.event_id, 0.0)
+                else:
+                    errors[kind] = str(exc)[:240]
 
         product = chosen["product"]
-        qr_code = next((draft.qr_code for draft in drafts if draft.qr_code), "")
-        qr_source = next((draft.qr_source for draft in drafts if draft.qr_code), "none")
+        qr_draft = next(
+            (chosen[kind] for kind in ("product", "core") if chosen[kind] and chosen[kind].qr_code),
+            None,
+        )
+        qr_code = qr_draft.qr_code if qr_draft else ""
+        qr_source = qr_draft.qr_source if qr_draft else "none"
         if only == "qr":
             draft = chosen["product"]
             found_qr = False
@@ -4326,7 +4336,7 @@ class StationUIService:
                 else:
                     try:
                         frames["product"] = decode_image_bytes(path.read_bytes())
-                        decoded = _decode_product_qr_for_reread(self, frames["product"])
+                        decoded = _decode_product_qr_for_reread(self, frames["product"], client_qr_code)
                         found = str(decoded.get("qr_code") or "").strip()
                         if decoded.get("qr_found") and found:
                             qr_code = found
@@ -4344,6 +4354,8 @@ class StationUIService:
                 decoded = _decode_product_qr_for_reread(self, frames["product"])
                 qr_code = str(decoded.get("qr_code") or "").strip()
                 qr_source = str(decoded.get("qr_decoder") or "none")
+                if qr_code:
+                    self.store.set_photo_draft_qr(product.event_id, qr_code, qr_source)
             except Exception as exc:
                 errors["qr"] = str(exc)[:240]
 
@@ -4353,6 +4365,7 @@ class StationUIService:
             and readings.get("core") is not None
             and readings.get("product") is not None
             and qr_code and "core" in frames and "product" in frames
+            and not errors
         ):
             core = chosen["core"]
             assert core is not None
@@ -4361,6 +4374,8 @@ class StationUIService:
                     readings["core"], readings["product"], "kg",
                     product.machine or core.machine,
                 )
+                if readings["core"] > readings["product"]:
+                    raise ValueError("Cân lõi phải ≤ cân SP")
             except ValueError as exc:
                 errors["weights"] = str(exc)[:240]
                 return {
@@ -5072,6 +5087,10 @@ class StationUIService:
             raise ValueError("Đơn vị không hợp lệ")
         if weight is not None and (not math.isfinite(weight) or weight < 0):
             raise ValueError("Số cân phải là số không âm")
+        if weight is None:
+            weight = 0.0
+            weight_raw = _upsert_raw_tag(weight_raw, "CORE_MISSING", "0")
+            weight_raw = _upsert_raw_tag(weight_raw, "CORE_AUTO_ZERO", "1")
         machine = machine.strip()
         station_source: dict[str, object] | None = None
         if station_id and camera_id:
@@ -5109,9 +5128,6 @@ class StationUIService:
             weight_raw = _upsert_raw_tag(weight_raw, "PHOTO_QUALITY_OVERRIDE", "1")
 
         missing = []
-        if weight is None:
-            missing.append("cân lõi")
-            weight_raw = _upsert_raw_tag(weight_raw, "CORE_MISSING", "1")
         if product_weight is None and _raw_tag(weight_raw, "PRODUCT_WEIGHT").lower() == "unread":
             missing.append("cân sản phẩm")
         automatic_reasons = []
@@ -7161,6 +7177,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         raise ValueError("Thiếu event_id")
                     if not qr_code:
                         raise ValueError("Mã SP không được trống")
+                    if len(qr_code) > 512 or any(ord(character) < 32 for character in qr_code):
+                        raise ValueError("Mã QR không hợp lệ")
+                    if not math.isfinite(core_weight) or not math.isfinite(product_weight):
+                        raise ValueError("Khối lượng phải là số hữu hạn không âm")
                     if core_weight < 0 or product_weight < 0:
                         raise ValueError("Khối lượng phải ≥ 0")
                     if core_weight > product_weight:
@@ -7173,6 +7193,12 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         raise ValueError("Thiếu Lý do lỗi")
                     if error_status == "ok":
                         error_reason = ""
+                    local = store.get(event_id)
+                    manual_raw = str(getattr(local, "weight_raw", "") or "")
+                    manual_raw = _upsert_raw_tag(manual_raw, "HUMAN_CONFIRMED_CORE", f"{core_weight:g}")
+                    manual_raw = _upsert_raw_tag(manual_raw, "HUMAN_CONFIRMED_PRODUCT", f"{product_weight:g}")
+                    manual_raw = _upsert_raw_tag(manual_raw, "PRODUCT_ENTRY_CODE", qr_code)
+                    manual_raw = _upsert_raw_tag(manual_raw, "CORE_AUTO_ZERO", "0")
                     self.send_json(
                         200,
                         _persist_measurement_edit(
@@ -7187,6 +7213,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             production_order=production_order,
                             error_status=error_status,
                             error_reason=error_reason,
+                            weight_raw=manual_raw,
                         ),
                     )
                     return
@@ -7327,7 +7354,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             raise ValueError("AI trả số cân không hợp lệ") from exc
                         if not math.isfinite(new_weight) or new_weight < 0:
                             raise ValueError("Số cân AI đọc được không hợp lệ")
-                    elif kind == "core" or not qr_result.get("qr_found"):
+                    elif kind == "core" and previous_core in (None, 0.0):
+                        new_weight = 0.0
+                        weight_raw = _upsert_raw_tag(weight_raw, "CORE_AUTO_ZERO", "1")
+                    else:
                         detail = f": {weight_error}" if weight_error else ""
                         raise ValueError(
                             "AI không đọc được số cân từ ảnh "
@@ -7343,6 +7373,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     if kind == "core":
                         assert new_weight is not None
                         core_weight = new_weight
+                        if weight_found:
+                            weight_raw = _upsert_raw_tag(weight_raw, "CORE_AUTO_ZERO", "0")
                         weight_raw = _upsert_raw_tag(
                             weight_raw, "HUMAN_CONFIRMED_CORE", f"{new_weight:g}"
                         )
@@ -7442,6 +7474,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             recognition_profile=str(payload.get("recognition_profile") or "fast"),
                             recognition_provider=str(payload.get("recognition_provider") or "gemini"),
                             only=str(payload.get("only") or "").strip().lower(),
+                            client_qr_code=str(payload.get("client_qr_code") or "").strip(),
                         ),
                     )
                     return

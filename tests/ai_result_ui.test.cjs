@@ -44,11 +44,17 @@ test('an AI weight remains visible when image quality fails',async()=>{
  assert.match(messages.at(-1),/ảnh tối/);
 });
 
-test('an unreadable AI response leaves the weight empty',async()=>{
+test('an unreadable core response defaults to zero and records the fallback',async()=>{
  const {round,messages}=await analyzeWith({weight_found:false,weight:null,quality_pass:true,step_saved:false,quality:{issues:['màn hình cân mờ']},unit:'kg'});
- assert.equal(round.weight,'');
- assert.match(messages.at(-1),/AI CHƯA ĐỌC ĐƯỢC CÂN LÕI/);
+ assert.equal(round.weight,'0');
+ assert.match(round.analyzedRaw,/CORE_AUTO_ZERO=1/);
+ assert.match(messages.at(-1),/CÂN LÕI TỰ ĐẶT 0/);
  assert.match(messages.at(-1),/màn hình cân mờ/);
+});
+
+test('an unreadable product response stays empty',async()=>{
+ const {round}=await analyzeWith({weight_found:false,weight:null,quality_pass:true,step_saved:false,unit:'kg'},'product');
+ assert.equal(round.productWeight,'');
 });
 
 test('a confirmed blank core reading keeps zero visible in the round and session',async()=>{

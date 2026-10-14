@@ -127,6 +127,7 @@ test('failed AI keeps its durable photo and capture metadata',async()=>{
  jobs[0].reject(Error('provider unavailable'));await first;
  assert.equal(photos.length,1);assert.equal(photos[0].shift,'12C1');assert.equal(jobs[0].body.shift,'12C1');
  assert.equal(session.rounds[0].coreImage,'photo-1');assert.ok(session.rounds[0].corePhotoCaptureId);
+ assert.equal(session.rounds[0].weight,'0');assert.match(session.rounds[0].analyzedRaw,/CORE_AUTO_ZERO=1/);
  assert.equal(session.rounds[0].coreAiPending,false);assert.match(messages.at(-1),/ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP/);
  assert.equal(session.rounds[0].saved,false);assert.match(messages.at(-1),/CHƯA LƯU PHIẾU/);
  assert.match(messages.at(-1),/Ảnh giữ ở ô cân phía trên/);assert.doesNotMatch(messages.at(-1),/vào Danh sách/);

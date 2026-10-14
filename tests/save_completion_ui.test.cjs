@@ -144,8 +144,9 @@ test('official request requires both photos even when AI weights or QR are missi
  assert.throws(()=>ctx.captureBodyForRound(session,round,0,false),/đủ ảnh lõi và ảnh sản phẩm/);
  round.productImage='product-photo';const body=ctx.captureBodyForRound(session,round,0,false);
  assert.equal(body.image,'core-photo');assert.equal(body.product_image,'product-photo');
- assert.equal(body.qr_code,'');assert.equal(body.weight,null);assert.equal(body.product_weight,null);
- assert.equal(body.error_status,'error');assert.match(body.error_reason,/AI không đọc được cân lõi và cân sản phẩm/);
+ assert.equal(body.qr_code,'');assert.equal(body.weight,0);assert.equal(body.product_weight,null);
+ assert.equal(body.vision_confirmed,false);assert.match(body.weight_raw,/CORE_AUTO_ZERO=1/);
+ assert.equal(body.error_status,'error');assert.match(body.error_reason,/AI không đọc được cân sản phẩm/);
  assert.doesNotMatch(body.error_reason,/Chưa có ảnh/);
  assert.equal(body.require_complete_evidence,undefined);
  round.coreImage='';round.productImage='product-photo';round.productWeight='8.25';

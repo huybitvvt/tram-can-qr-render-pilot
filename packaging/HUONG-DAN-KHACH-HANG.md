@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc69` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc70` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc69.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc70.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -45,15 +45,29 @@ Nếu AI lỗi, ảnh vẫn được giữ trên máy để đọc lại trong D
 
 Trong mỗi thẻ **Lần 1**, **Lần 2**, bấm nút lưu ngay dưới thẻ để chỉ lưu
 lần đó. Nhấn **Enter** hoặc nút **Lưu tất các lần** để lưu mọi lần đang có
-dữ liệu. Chỉ cần ít nhất một ảnh, nút **Lưu phiếu cân** ghi phiếu chính thức ngay
-cả khi chưa đọc được QR hoặc một hay cả hai số cân. Ô chưa đọc được để trống;
-hệ thống tự ghi trạng thái/lý do lỗi. Ảnh lỗi AI vẫn được giữ riêng để đọc lại,
+dữ liệu. Mỗi lượt cần đủ hai ảnh lõi và SP. Nút **Lưu phiếu cân** ghi phiếu
+chính thức cả khi chưa đọc được QR hoặc cân SP; hệ thống ghi trạng thái/lý do
+lỗi. Nếu AI không đọc được ảnh lõi, cân lõi tự đặt 0; cân SP không đọc được
+vẫn để trống. Ảnh lỗi AI vẫn được giữ riêng để đọc lại,
 nhưng nút Lưu tạo phiếu cân chính thức.
 Sau khi lưu thành công, ảnh của đúng lần đó biến mất để cân tiếp; lần khác
 chưa lưu vẫn còn. Dòng **Đang chờ** trong danh sách nghĩa là bản ghi đã nằm
 trong DB local và cần được đồng bộ thủ công lên Supabase/Cloudinary. Nếu màn hình
 báo chưa lưu được ảnh, giữ nguyên ảnh và bấm lại nút để thử lại.
 Xác nhận số cuộn là thao tác riêng, không ngăn lưu từng lần cân hay ảnh chờ.
+
+### Sửa QR hoặc số cân trong bảng dưới
+
+Tại **Danh sách lần cân**, bấm **Sửa tay** trên đúng dòng cần xử lý. Quét/nhập
+Mã QR, kiểm tra cân lõi và cân SP rồi bấm **Lưu sửa**. Mã SP tự lấy từ Mã QR.
+Cân lõi thiếu mặc định 0; bắt buộc có QR và cân SP, cân lõi không được lớn hơn
+cân SP. Hai ảnh, thời gian chụp và danh tính lượt cân được giữ nguyên.
+Lỗi thiếu QR/số cân được xoá sau khi sửa đủ; lỗi chất lượng ghi tay vẫn giữ
+trừ khi người vận hành đổi Trạng thái lỗi.
+
+Muốn đọc lại QR từ ảnh đã lưu: **Ảnh SP → Quét QR**. Bộ đọc giống lúc quét
+camera; thao tác chỉ cập nhật QR của dòng đó, không chạy lại AI cân. Nếu QR
+vẫn không đọc được, dùng **Sửa tay**. Thiếu QR hoặc cân SP vẫn là dòng lỗi.
 
 ### Đồng bộ thủ công
 

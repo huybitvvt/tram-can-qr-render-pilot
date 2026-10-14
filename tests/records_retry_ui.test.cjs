@@ -24,7 +24,7 @@ function setup(response){
   const retryEnd=script.indexOf('\nfunction appendProductionDeleteAction(',retryStart);
   assert.ok(retryStart>=0&&retryEnd>retryStart);
   vm.runInContext(script.slice(retryStart,retryEnd),ctx);
-  for(const name of ['productionDeleteDetails','appendProductionDeleteAction']){
+  for(const name of ['productionDeleteDetails','appendProductionDeleteAction','appendProductionEditAction']){
     const line=script.split('\n').find(value=>value.startsWith('function '+name+'(')||value.startsWith('async function '+name+'('));
     assert.ok(line,name);
     vm.runInContext(line,ctx);
