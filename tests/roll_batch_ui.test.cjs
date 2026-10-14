@@ -81,14 +81,19 @@ test('confirmation preview shows estimated new rolls rather than the target mile
  vm.runInContext(script.slice(start,script.indexOf('\nfunction nextRollBatchMilestone(',start)),ctx);
  ctx.openRollBatchModal(144,20);
  assert.equal(node('rollBatchCount').textContent,'Số lượng xác nhận: 16 cuộn');
- assert.match(node('rollBatchNote').textContent,/Đã đạt tối đa 16 cuộn\/đợt/);
+ assert.match(node('rollBatchNote').textContent,/Xác nhận thủ công đợt 9/);
+ assert.doesNotMatch(node('rollBatchNote').textContent,/Đã đạt tối đa/);
  assert.notEqual(node('rollBatchDate').textContent,'--');
  assert.notEqual(node('rollBatchTime').textContent,'--');
+ ctx.openRollBatchModal(144,11);
+ assert.equal(node('rollBatchCount').textContent,'Số lượng xác nhận: 7 cuộn');
+ assert.doesNotMatch(node('rollBatchNote').textContent,/Đã đạt tối đa/);
  ctx.openRollBatchModal(144,null);
- assert.equal(node('rollBatchCount').textContent,'Số lượng xác nhận: 16 cuộn');
+ assert.equal(node('rollBatchCount').textContent,'Chưa lấy được số lượng cuộn');
+ assert.equal(vm.runInContext('rollBatchPendingQuantity',ctx),0);
 });
 
-test('machine limits default to thermal 30, packaging 16, Da Nang 10 and can be changed separately',()=>{
+test('packaging machines use the entered threshold without the old 16-roll cap',()=>{
  const saved=new Map(),nodes={sourceShift:{value:'HC1'},sourceMachine:{value:'MÁY CÁCH NHIỆT 11'},rollBatchSize:{value:'24'}},context={shift:'HC1',machine:'MÁY CÁCH NHIỆT 11'};
  const ctx=vm.createContext({sourceContext:context,sanitizeMachine:value=>String(value||'').trim(),
   localStorage:{getItem:key=>saved.get(key)||null,setItem:(key,value)=>saved.set(key,value)},
@@ -105,12 +110,18 @@ test('machine limits default to thermal 30, packaging 16, Da Nang 10 and can be 
  ctx.saveRollBatchSize();
  assert.equal(ctx.rollBatchSize(),24);
  context.machine='MÁY BAO BÌ 16';nodes.sourceMachine.value=context.machine;
- assert.equal(ctx.rollBatchSize(),16);
+ assert.equal(ctx.rollBatchSize(),30);
+ assert.equal(ctx.rollBatchMachineLimit({shift:'HC1',machine:'Máy bất kỳ'}),30);
+ saved.set(ctx.rollBatchSizeKey(context),'16');
+ assert.equal(ctx.rollBatchSize(),16); // Preserve an explicitly saved setting.
  saved.set(ctx.rollBatchSizeKey(context),'30');
- assert.equal(ctx.rollBatchSize(),16);
+ assert.equal(ctx.rollBatchSize(),30);
  ctx.saveRollBatchSize();
- assert.equal(nodes.rollBatchSize.value,'16');
- assert.equal(nodes.rollBatchSize.max,'16');
+ assert.equal(ctx.rollBatchSize(),24);
+ assert.equal(nodes.rollBatchSize.max,'30');
+ nodes.rollBatchSize.value='31';ctx.saveRollBatchSize();
+ assert.equal(nodes.rollBatchSize.value,'24');
+ assert.equal(ctx.rollBatchSize(),24);
  context.shift='Ca chuẩn Đà Nẵng';
  assert.equal(ctx.rollBatchSize(),10);
  context.machine='MÁY CÁCH NHIỆT 11';
@@ -125,7 +136,8 @@ test('cloud batch limit agrees with the station limit',()=>{
  assert.ok(match);
  const ctx=vm.createContext({});
  vm.runInContext(match[0].replace(/: string|: number/g,''),ctx);
- assert.equal(ctx.maxWeighBatchSize('HC1','MÁY BAO BÌ 16'),16);
+ assert.equal(ctx.maxWeighBatchSize('HC1','MÁY BAO BÌ 16'),30);
+ assert.equal(ctx.maxWeighBatchSize('HC1','Máy bất kỳ'),30);
  assert.equal(ctx.maxWeighBatchSize('HC1','Máy cách nhiệt 11'),30);
  assert.equal(ctx.maxWeighBatchSize('Ca chuẩn Đà Nẵng','Máy cách nhiệt 11'),10);
 });

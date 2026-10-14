@@ -122,8 +122,7 @@ MAX_REQUEST_BYTES = 24 * 1024 * 1024
 def _max_weigh_batch_size(shift: str, machine: str) -> int:
     if shift == "Ca chuẩn Đà Nẵng":
         return 10
-    normalized = unicodedata.normalize("NFKD", machine).encode("ascii", "ignore").decode("ascii")
-    return 30 if re.search(r"cach\W*nhiet", normalized, re.IGNORECASE) else 16
+    return 30
 
 
 SESSION_COOKIE_NAME = "tram_can_session"

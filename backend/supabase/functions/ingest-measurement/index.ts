@@ -16,8 +16,7 @@ const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 function maxWeighBatchSize(shift: string, machine: string): number {
   if (shift === "Ca chuẩn Đà Nẵng") return 10;
-  const normalized = machine.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
-  return /CACH\W*NHIET/.test(normalized) ? 30 : 16;
+  return 30;
 }
 
 function normalizeEventId(value: unknown): string {

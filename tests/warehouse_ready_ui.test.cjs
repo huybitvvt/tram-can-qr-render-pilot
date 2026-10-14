@@ -35,6 +35,20 @@ test('the small target controls the popup; 74 local tickets do not trigger it be
  assert.equal(JSON.stringify(f.round),before);
 });
 
+test('a packaging machine set to 24 rolls waits for 24 synced tickets instead of 16',async()=>{
+ const f=setup();f.fields.shift='HC1';f.fields.machine='MÁY BAO BÌ 16';f.ctx.target=24;
+ f.ctx.sourceContext=f.fields;f.ctx.sanitizeMachine=value=>String(value||'').trim();
+ vm.runInContext(script.split('\n').find(line=>line.startsWith('const ROLL_BATCH_SIZE_PREFIX=')),f.ctx);
+ for(const name of ['function rollBatchSizeKey(','function rollBatchMachineLimit(','function rollBatchSize(']){
+  vm.runInContext(script.split('\n').find(line=>line.startsWith(name)),f.ctx);
+ }
+ f.storage.set(f.ctx.rollBatchSizeKey(f.fields),'24');
+ await f.poll(16);assert.equal(f.nodes.warehouseReadyModal.hidden,true);
+ await f.poll(23);assert.equal(f.nodes.warehouseReadyModal.hidden,true);
+ assert.match(f.requests.at(-1).url,/warehouse_batch_size=24/);
+ await f.poll(24);assert.equal(f.nodes.warehouseReadyTitle.textContent,'Đã đủ 24 cuộn, vui lòng đẩy kho');
+});
+
 test('the polling timer notices a completed sync without saving another roll or refreshing the table',async()=>{
  const f=setup();f.ctx.startShiftCountPolling();
  f.requests[0].resolve(f.result(29));await f.ctx.refreshShiftCount();

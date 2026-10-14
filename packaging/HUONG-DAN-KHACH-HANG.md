@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc71` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc72` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc71.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc72.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -251,10 +251,12 @@ bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`
 - Ô **Ca** luôn có lựa chọn **Ca chuẩn Đà Nẵng**. Ô **Máy** cho chọn trong
   danh sách hoặc gõ tên máy mới, kể cả khi trạm đã có tên máy mặc định trong
   cấu hình. Nhập **LSX** rồi bấm **Áp dụng** trước khi cân.
-- Ô **Tối đa cuộn/đợt** lưu riêng cho từng máy: mặc định máy cách nhiệt 30,
-  máy bao bì 16, ca chuẩn Đà Nẵng 10. Có thể giảm mức này, nhưng không vượt
-  giới hạn của từng máy. Nếu Đà Nẵng
-  dùng ca khác, đặt ô này về 10 cho từng máy.
+- Ô **Tối đa cuộn/đợt** là ngưỡng nhắc đẩy kho, lưu riêng cho từng máy;
+  không phải số cuộn cố định mỗi xe. Máy cách nhiệt, máy bao bì và máy khác
+  đều cho nhập 1–30, mặc định 30 nếu chưa đặt mức. Không còn tự ép về 16.
+  Mức đã nhập tay được giữ nguyên, kể cả 16; muốn nhắc ở 24 thì nhập 24.
+  Ca chuẩn Đà Nẵng vẫn giữ giới hạn 10. Nếu Đà Nẵng dùng ca khác,
+  đặt ô này về 10 cho từng máy.
 - Bấm **Xác nhận đợt cân** để chốt số cuộn thực tế đã đồng bộ, kể cả trước
   mức tối đa. Đợt sau tiếp tục từ mốc đã chốt; các đợt cũ vẫn giữ nguyên.
 - Chọn **2 lần · 4 cân**. Bấm ô cần chụp hoặc dùng `Space` để lần lượt cân lõi

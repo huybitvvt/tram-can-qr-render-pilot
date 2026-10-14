@@ -98,7 +98,8 @@ def test_auto_sync_can_be_disabled_and_requires_device_credentials(tmp_path, mon
 @pytest.mark.parametrize(
     ("shift", "machine", "expected"),
     [
-        ("HC1", "MÁY BAO BÌ 16", 16),
+        ("HC1", "MÁY BAO BÌ 16", 30),
+        ("HC1", "Máy bất kỳ", 30),
         ("HC1", "Máy cách nhiệt 11", 30),
         ("HC1", "May cach-nhiet 11", 30),
         ("Ca chuẩn Đà Nẵng", "Máy cách nhiệt 11", 10),
@@ -108,8 +109,10 @@ def test_weigh_batch_limit_per_machine(shift: str, machine: str, expected: int) 
     assert test_ui_module._max_weigh_batch_size(shift, machine) == expected
 
 
-def test_weigh_batch_can_be_confirmed_and_printed_from_local_db(tmp_path) -> None:
+@pytest.mark.parametrize("batch_size", [10, 17, 24, 30])
+def test_weigh_batch_can_be_confirmed_and_printed_from_local_db(tmp_path, batch_size) -> None:
     import json
+    import urllib.parse
     import urllib.request
 
     args = test_ui_module.build_parser().parse_args([
@@ -122,7 +125,7 @@ def test_weigh_batch_can_be_confirmed_and_printed_from_local_db(tmp_path) -> Non
         "SP_001", 0.82, "kg", np.zeros((80, 120, 3), dtype=np.uint8),
         "manual", weight_raw=(
             "SOURCE_DATE=2026-09-25; SOURCE_SHIFT=HC1; "
-            "SOURCE_MACHINE=Máy 1; SOURCE_PRODUCTION_ORDER=LSX-1; "
+            "SOURCE_MACHINE=MÁY BAO BÌ 16; SOURCE_PRODUCTION_ORDER=LSX-1; "
             "PRODUCT_WEIGHT=5.92"
         ),
     )
@@ -134,16 +137,18 @@ def test_weigh_batch_can_be_confirmed_and_printed_from_local_db(tmp_path) -> Non
         request = urllib.request.Request(
             base + "/api/weighing-batches/confirm",
             data=json.dumps({
-                "work_date": "2026-09-25", "shift": "HC1", "machine": "Máy 1",
-                "production_order": "LSX-1", "milestone": 10, "batch_size": 10,
+                "work_date": "2026-09-25", "shift": "HC1", "machine": "MÁY BAO BÌ 16",
+                "production_order": "LSX-1", "milestone": batch_size, "batch_size": batch_size,
             }).encode(),
             headers={"Content-Type": "application/json"}, method="POST",
         )
         with urllib.request.urlopen(request) as response:
             confirmed = json.load(response)
         with urllib.request.urlopen(
-            base + "/api/weighing-batches?work_date=2026-09-25&shift=HC1"
-            "&machine=M%C3%A1y%201&production_order=LSX-1"
+            base + "/api/weighing-batches?" + urllib.parse.urlencode({
+                "work_date": "2026-09-25", "shift": "HC1", "machine": "MÁY BAO BÌ 16",
+                "production_order": "LSX-1",
+            })
         ) as response:
             listed = json.load(response)
         assert confirmed["item"]["sync_status"] in {"local", "pending"}
