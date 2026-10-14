@@ -14,7 +14,7 @@ function setup(){
  const nodes={shiftCount:{classList:{add(...names){names.forEach(n=>classes.add(n))},remove(...names){names.forEach(n=>classes.delete(n))}},setAttribute(){}},shiftCountValue:{textContent:'--'},shiftCountDetail:{textContent:''}};
  const doc={hidden:false,addEventListener:(name,fn)=>events[name]=fn};
  const ctx=vm.createContext({
-  $:id=>nodes[id],readSourceFields:()=>({...fields}),URLSearchParams,workflowMode:'production',stations:[{rounds:[round]}],
+  $:id=>nodes[id],readSourceFields:()=>({...fields}),rollBatchSize:()=>30,URLSearchParams,workflowMode:'production',stations:[{rounds:[round]}],
   sourceLabel:value=>[value.date,value.shift,value.machine,value.order].join(' · '),document:doc,window:{addEventListener:(name,fn)=>events[name]=fn},
   api:url=>{const pending=deferred();requests.push({url,...pending});return pending.promise},
   setInterval:(fn,ms)=>{timers.push({fn,ms});return timers.length},clearInterval(){},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length},clearTimeout(){},

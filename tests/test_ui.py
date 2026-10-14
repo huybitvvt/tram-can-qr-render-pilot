@@ -3021,7 +3021,7 @@ def test_shift_count_is_visible_and_refreshes_after_save_and_filter_changes() ->
     assert "local_only=1" in TEST_UI_HTML
     assert "count_only:'1'" in TEST_UI_HTML
     assert "ảnh chờ AI hoặc chưa lưu không tính" in TEST_UI_HTML
-    assert "maybePromptRollBatchConfirm" in TEST_UI_HTML
+    assert "maybePromptWarehouseReady" in TEST_UI_HTML
     assert 'id="openRollBatchBtn"' in TEST_UI_HTML
     assert "ẢNH ĐÃ ĐƯỢC LƯU ĐỘC LẬP" in TEST_UI_HTML
     assert 'id="shiftCountDetail"' in TEST_UI_HTML

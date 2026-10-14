@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc70` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc71` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc70.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc71.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -68,6 +68,20 @@ trừ khi người vận hành đổi Trạng thái lỗi.
 Muốn đọc lại QR từ ảnh đã lưu: **Ảnh SP → Quét QR**. Bộ đọc giống lúc quét
 camera; thao tác chỉ cập nhật QR của dòng đó, không chạy lại AI cân. Nếu QR
 vẫn không đọc được, dùng **Sửa tay**. Thiếu QR hoặc cân SP vẫn là dòng lỗi.
+
+### Popup nhắc đẩy kho
+
+Ô nhỏ **Tối đa cuộn/đợt** là ngưỡng nhắc (ví dụ 30), không lấy số lớn ở
+**Số lượng trong ca**. Khi có đủ phiếu hợp lệ đã đồng bộ Supabase và còn
+chờ đẩy kho theo Ngày/Ca/Máy/LSX/Mã SP đang chọn, ứng dụng hiện
+**Đã đủ 30 cuộn, vui lòng đẩy kho**. Popup ghi rõ số cuộn và nguồn cân.
+Bấm **Đã hiểu**, kiểm tra bảng dưới và thao tác đẩy kho như bình thường.
+
+Phiếu chưa đồng bộ, phiếu lỗi, ảnh chưa lưu thành phiếu và phiếu đã đẩy kho
+không tính vào ngưỡng này. Cùng một đợt chờ không bị nhắc liên tục, kể cả
+khi tải lại trang; sau khi đẩy kho, đợt tiếp theo đủ cuộn sẽ được nhắc lại.
+Lịch tự đồng bộ vẫn là 10 phút/lần khi AI rảnh. Nút **Xác nhận đợt cân**
+trong bảng lịch sử vẫn dùng được khi cần xác nhận thủ công.
 
 ### Đồng bộ thủ công
 

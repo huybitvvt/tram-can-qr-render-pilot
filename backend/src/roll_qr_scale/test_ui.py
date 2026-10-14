@@ -1696,6 +1696,55 @@ def _local_measurement_count(
     return len(_local_measurement_event_ids(store, **filters))
 
 
+def _local_warehouse_ready_summary(
+    store: MeasurementStore,
+    *,
+    batch_size: int,
+    **filters: object,
+) -> dict[str, object]:
+    """Count acknowledged, valid tickets still waiting for warehouse import."""
+    ready_ids: list[str] = []
+    imported_ids: list[str] = []
+    # New or out-of-order sync acknowledgements must not repeat a reminder.
+    # Warehouse imports advance the source's generation for the next batch.
+    for item in reversed(store.measurement_source_rows()):
+        if not _matches_source_filters(item, **filters):
+            continue
+        if read_nhap_kho_status(item) == NHAP_KHO_DA:
+            imported_ids.append(str(item.get("event_id") or ""))
+            continue
+        if item.get("sync_status") != "synced":
+            continue
+        if _item_error_status(item) == "error" or not str(item.get("qr_code") or "").strip():
+            continue
+        raw = str(item.get("weight_raw") or "")
+        if _raw_tag(raw, "CORE_MISSING") == "1":
+            continue
+        try:
+            core = float(item.get("weight"))
+            product = float(
+                item["product_weight"] if item.get("product_weight") is not None
+                else _raw_tag(raw, "PRODUCT_WEIGHT")
+            )
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(core) or not math.isfinite(product) or not 0 <= core <= product:
+            continue
+        event_id = str(item.get("event_id") or "").strip()
+        if event_id:
+            ready_ids.append(event_id)
+    signature = ""
+    if len(ready_ids) >= batch_size:
+        signature = hashlib.sha256(
+            json.dumps([imported_ids, batch_size], separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+    return {
+        "warehouse_ready_count": len(ready_ids),
+        "warehouse_ready_batch_size": batch_size,
+        "warehouse_ready_signature": signature,
+    }
+
+
 def _local_error_parent_ids(
     store: MeasurementStore,
     *,
@@ -6485,6 +6534,18 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             value for value in (fallback_error, str(exc)) if value
                         )
                 if remote_items is None:
+                    warehouse_ready = {}
+                    if count_only:
+                        try:
+                            batch_size = int(query.get("warehouse_batch_size", ["30"])[0])
+                            if not 1 <= batch_size <= 30:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            self.send_json(400, {"ok": False, "message": "Số cuộn/đợt phải từ 1 đến 30"})
+                            return
+                        warehouse_ready = _local_warehouse_ready_summary(
+                            store, batch_size=batch_size, **list_filters,
+                        )
                     self.send_json(
                         200,
                         {
@@ -6503,6 +6564,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             "synced_measurement_count": 0,
                             "error_count": local_error_count,
                             "count_exact": True,
+                            **warehouse_ready,
                             "offset": offset,
                             "limit": limit,
                             "items": [] if count_only else _local_production_items(

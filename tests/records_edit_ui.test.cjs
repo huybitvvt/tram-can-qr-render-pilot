@@ -68,8 +68,8 @@ test('list editing still reloads the list and uses its own row',async()=>{
 
 test('the capture keyboard handler stays inactive while a row editor is open',()=>{
  let handler,usedCapture=false;
- const ctx=vm.createContext({$:()=>({hidden:false}),document:{addEventListener:(_event,callback)=>{handler=callback}},current:()=>{usedCapture=true}});
- const line=script.split('\n').find(line=>line.startsWith("document.addEventListener('keydown',event=>{if($('listEditModal')"));
+ const ctx=vm.createContext({$:id=>({hidden:id==='warehouseReadyModal'}),document:{addEventListener:(_event,callback)=>{handler=callback}},current:()=>{usedCapture=true}});
+ const line=script.split('\n').find(line=>line.startsWith("document.addEventListener('keydown',event=>{")&&line.includes('const editing=isTextEditingTarget'));
  assert.ok(line);vm.runInContext(line,ctx);
  for(const key of ['Backspace','Enter',' '])handler({key,code:key===' '?'Space':key,target:{}});
  assert.equal(usedCapture,false);
