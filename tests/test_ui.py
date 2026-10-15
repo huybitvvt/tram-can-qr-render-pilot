@@ -4238,6 +4238,82 @@ def test_missing_analysis_binding_falls_back_to_durable_unbound_save(
     assert Path(row.product_image_path).is_file()
 
 
+def test_discard_photo_before_ai_stages_cannot_reopen_the_cancelled_binding(tmp_path) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    event_id = str(uuid.uuid4())
+    frame = np.full((80, 120, 3), 80, dtype=np.uint8)
+    try:
+        photo = service.capture_photo_draft(frame, parent_event_id=event_id, capture_kind="core",
+                                             station_id="station-01", camera_id="camera-01")
+        service.discard_session("station-01", event_id=event_id, strict_event_id=True,
+                                photo_capture_id=photo["capture_id"])
+        with pytest.raises(test_ui_module.SessionConflictError, match="đã được hủy"):
+            service.analyze(frame, "auto", "kg", event_id=event_id, station_id="station-01",
+                            camera_id="camera-01", capture_kind="core",
+                            photo_capture_id=photo["capture_id"])
+        assert service.sessions.statuses()[0]["event_id"] is None
+        assert store.get_photo_draft(photo["capture_id"]) is not None
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.parametrize("kind,capture_round", [("product", 0), ("core", 1)])
+def test_discard_pending_slot_preserves_another_slots_binding(tmp_path, kind, capture_round) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    event_id = str(uuid.uuid4())
+    frame = np.full((80, 120, 3), 80, dtype=np.uint8)
+    binding = service.sessions.stage(frame, event_id=event_id, station_id="station-01", camera_id="camera-01")
+    service.sessions.mark_ready(binding.analysis_id)
+    try:
+        photo = service.capture_photo_draft(frame, parent_event_id=event_id, capture_kind=kind,
+                                             capture_round=capture_round,
+                                             station_id="station-01", camera_id="camera-01")
+        assert service.discard_session("station-01", event_id=event_id, strict_event_id=True,
+                                       photo_capture_id=photo["capture_id"])
+        assert service.sessions.statuses()[0]["analysis_id"] == binding.analysis_id
+        assert service.sessions.statuses()[0]["state"] == "ready"
+        with pytest.raises(test_ui_module.SessionConflictError, match="đã được hủy"):
+            service.stage_evidence_step(frame, event_id=event_id, station_id="station-01",
+                                        kind=kind, capture_round=capture_round, weight=99.9, unit="kg",
+                                        photo_capture_id=photo["capture_id"])
+    finally:
+        service.close()
+        store.close()
+
+
+@pytest.mark.parametrize("kind,other_kind", [("core", "product"), ("product", "core")])
+def test_late_ai_cannot_replace_evidence_from_a_recaptured_photo(tmp_path, kind, other_kind) -> None:
+    store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
+    service = StationUIService(store, None, None, None)
+    event_id = str(uuid.uuid4())
+    old_frame = np.full((80, 120, 3), 80, dtype=np.uint8)
+    new_frame = np.full((80, 120, 3), 180, dtype=np.uint8)
+    old = service.capture_photo_draft(old_frame, parent_event_id=event_id, capture_kind=kind,
+                                      station_id="station-01", camera_id="camera-01")
+    fresh = service.capture_photo_draft(new_frame, parent_event_id=event_id, capture_kind=kind,
+                                        station_id="station-01", camera_id="camera-01")
+    service.capture_photo_draft(old_frame, parent_event_id=event_id, capture_kind=other_kind,
+                                station_id="station-01", camera_id="camera-01")
+    try:
+        staged = service.stage_evidence_step(new_frame, event_id=event_id, station_id="station-01",
+                                              kind=kind, weight=7.5, unit="kg",
+                                              photo_capture_id=fresh["capture_id"])
+        image_path, metadata_path = Path(staged["image_path"]), Path(staged["metadata_path"])
+        expected = image_path.read_bytes(), metadata_path.read_bytes()
+        with pytest.raises(test_ui_module.SessionConflictError, match="bỏ kết quả AI cũ"):
+            service.stage_evidence_step(old_frame, event_id=event_id, station_id="station-01",
+                                        kind=kind, weight=99.9, unit="kg",
+                                        photo_capture_id=old["capture_id"])
+        assert (image_path.read_bytes(), metadata_path.read_bytes()) == expected
+        assert store.connection.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 0
+    finally:
+        service.close()
+        store.close()
+
+
 def test_discard_session_removes_transient_step_evidence(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     service = StationUIService(

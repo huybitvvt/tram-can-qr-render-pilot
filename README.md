@@ -7,7 +7,7 @@
 > 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
 > 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc72`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc72/TramCanQR-Setup-0.2.0-rc72.exe).
+>    Bản `0.2.0-rc73`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc73/TramCanQR-Setup-0.2.0-rc73.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
@@ -88,7 +88,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_windows.ps
 ```
 
 - Bản portable: `dist\TramCanQR\TramCanQR.exe` (phải giữ nguyên cả thư mục đi kèm).
-- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc72.exe` khi máy build có Inno Setup 6.
+- Bộ cài bản hiện tại: `dist\installer\TramCanQR-Setup-0.2.0-rc73.exe` khi máy build có Inno Setup 6.
 - Dữ liệu vận hành được ghi tại `%LOCALAPPDATA%\TramCanQR`, không ghi vào thư mục cài đặt.
 - Model OCR tiếng Anh và model QR demo được bundle để lần chạy đầu không cần tải Internet.
 
@@ -719,3 +719,5 @@ Bản 0.2.0-rc70: cân lõi không đọc được tự đặt 0; sửa QR/số 
 Bản 0.2.0-rc71: đủ số phiếu đã đồng bộ Supabase và còn chờ đẩy kho theo ô Tối đa cuộn/đợt thì hiện popup nhắc đẩy kho. Xem [ghi chú](docs/release-notes-0.2.0-rc71.md).
 
 Bản 0.2.0-rc72: bỏ quy tắc máy bao bì tối đa 16 cuộn; ngưỡng nhắc đẩy kho theo số nhập tay, không tự chốt xe. Xác nhận thủ công không báo đã đạt tối đa khi chưa đủ cuộn. Cần cập nhật Edge Function `ingest-measurement` để đồng bộ đợt trên 16 cuộn. Xem [ghi chú](docs/release-notes-0.2.0-rc72.md).
+
+Bản 0.2.0-rc73: cho bấm Hủy AI, bỏ ảnh khi ô đang chờ AI; bỏ riêng ô đó để chụp lại, giữ ô còn lại và chặn kết quả/ảnh bằng chứng cũ ghi đè ảnh mới. Xem [ghi chú](docs/release-notes-0.2.0-rc73.md).

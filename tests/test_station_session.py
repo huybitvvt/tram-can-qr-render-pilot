@@ -116,6 +116,24 @@ def test_registry_rejects_duplicate_configured_camera_identity(tmp_path) -> None
         registry.configure_camera("station-02", "camera-shared")
 
 
+def test_discard_running_analysis_keeps_its_late_result_out_of_the_replacement(tmp_path) -> None:
+    registry = StationSessionRegistry(tmp_path / "staging", ["station-01"])
+    registry.configure_camera("station-01", "camera-01")
+    event_id = str(uuid.uuid4())
+    old = registry.stage(np.full((80, 120, 3), 80, dtype=np.uint8),
+                         event_id=event_id, station_id="station-01", camera_id="camera-01")
+    assert registry.discard("station-01", event_id=event_id)
+    replacement = registry.stage(np.full((80, 120, 3), 180, dtype=np.uint8),
+                                 event_id=event_id, station_id="station-01", camera_id="camera-01")
+    for finish in (registry.mark_ready, lambda analysis_id: registry.mark_failed(analysis_id, RuntimeError("late failure"))):
+        with pytest.raises(SessionConflictError):
+            finish(old.analysis_id)
+        assert registry.statuses()[0]["analysis_id"] == replacement.analysis_id
+        assert registry.statuses()[0]["state"] == "analyzing"
+    registry.mark_ready(replacement.analysis_id)
+    assert registry.statuses()[0]["state"] == "ready"
+
+
 def test_registry_automatically_restores_active_binding_after_restart(tmp_path) -> None:
     staging = tmp_path / "staging"
     registry = StationSessionRegistry(staging, ["station-01"])

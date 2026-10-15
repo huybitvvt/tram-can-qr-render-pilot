@@ -14,7 +14,7 @@ const tick=()=>new Promise(resolve=>setImmediate(resolve));
 
 function setup({photoFailure=false,count=2}={}){
  let id=0,image=0;
- const photos=[],jobs=[],messages=[],nodes={};
+ const photos=[],jobs=[],messages=[],nodes={},discards=[];
  const session={state:'review',roundCount:count,rounds:[],selectedSlot:{kind:'core',round:0},unit:'kg',stationId:'station-01',cameraId:'camera-01',preview:{},setState(state){this.state=state}};
  const sourceContext={date:'2026-10-10',shift:'12C1',machine:'Máy 1',order:'LSX-1'};
  const ctx=vm.createContext({
@@ -25,19 +25,20 @@ function setup({photoFailure=false,count=2}={}){
   appStatus:{weight_engine:'gemini'},recognitionProfile:{value:'fast'},recognitionProvider:{value:'gemini'},sourceContext,
   api:async(url,options)=>{
    const body=JSON.parse(options.body);
+   if(url==='/api/session/discard'){discards.push(body);return{discarded:true}}
    if(url==='/api/photo-capture'){
     if(photoFailure)throw Error('disk full');
     photos.push(body);return {event_id:body.parent_event_id,capture_id:body.event_id,sync_status:'pending'};
    }
    assert.equal(url,'/api/analyze');
    assert.ok(photos.some(photo=>photo.image===body.image),'image must be committed before AI starts');
-   const job={...deferred(),body};jobs.push(job);return job.promise;
+   const job={...deferred(),body,signal:options.signal};jobs.push(job);return job.promise;
   },
   parseBox:()=>null,qrDuplicateMessage:()=>'',captureQr:{value:''},weight:{value:''},productWeight:{value:''},unit:{value:'kg'},
   $:id=>nodes[id]||null,renderRoundParams(){},updateBoxes(){},syncCaptureProductCodes(){},
   advanceToNextCapture(){},refreshCompletionState(){},weightsReady:()=>false,markWeightThresholdAlerts(){},nextStillCaptureLabel:()=> 'ô tiếp theo',
   roundOverWeightLimit:()=>false,roundHasDuplicateQr:()=>false,roundQualityReady:()=>true,
-  performance:{now:()=>1000},console,
+  performance:{now:()=>1000},console,AbortController,persistEditor(){},selectCaptureSlot(){},showVideo(){},
  });
  for(const name of ['roundQrId','emptyWeighRound','slotAiPending','roundAiPending','sessionAiPending','ownsAiCapture','syncSessionAliases','roundCoreReady','roundProductReady','nextCaptureStep','captureSlot','validWeightValue','aiDetectedWeight','roundHasBothImages','roundReadyToSave','roundCanSave','compactUnsavedRounds'])load(ctx,name);
  session.rounds=Array.from({length:count},()=>ctx.emptyWeighRound());
@@ -46,8 +47,10 @@ function setup({photoFailure=false,count=2}={}){
  for(const [startName,endName] of [['async function persistAiMissPhoto(','\nasync function analyzeCurrent('],["async function analyzeCurrent(kind='core')",'\nasync function discardSlot(']]){
   const start=script.indexOf(startName);vm.runInContext(script.slice(start,script.indexOf(endName,start)),ctx);
  }
+ for(const name of ['roundHasData','slotHasData'])load(ctx,name);
+ vm.runInContext(script.split('\n').find(line=>line.startsWith('async function discardSlot(')),ctx);
  const finish=(job,weight)=>job.resolve({event_id:job.body.event_id,weight_found:true,weight,quality_pass:true,step_saved:true,unit:'kg',evidence_image:'evidence-'+job.body.image});
- return {ctx,session,photos,jobs,messages,sourceContext,finish,nodes};
+ return {ctx,session,photos,jobs,messages,sourceContext,finish,nodes,discards};
 }
 
 test('two images commit while AI is pending and reverse results update their own slots',async()=>{
@@ -110,7 +113,77 @@ test('controls allow the next capture while disabling only the pending slot and 
  assert.equal(nodes.weight.disabled,true);assert.equal(nodes.productWeight.disabled,false);
  session.selectedSlot={kind:'core',round:0};ctx.renderControls();
  assert.equal(nodes.analyzeCoreBtn.disabled,true);assert.equal(nodes.analyzeProductBtn.disabled,false);
- assert.equal(nodes.discardBtn.disabled,true);assert.equal(nodes.photoOnlyBtn.disabled,true);
+ assert.equal(nodes.discardBtn.disabled,false);assert.equal(nodes.photoOnlyBtn.disabled,true);
+});
+
+test('a running product can be discarded without waiting for AI or removing its core',async()=>{
+ const {ctx,session,jobs,finish}=setup();
+ const round=session.rounds[0];round.coreImage='keep-core';round.weight='0';
+ const task=ctx.analyzeCurrent('product');await tick();
+ assert.equal(round.productAiPending,true);await ctx.discardSlot('product',0);await task;
+ assert.equal(jobs[0].signal.aborted,true);assert.equal(round.productAiPending,false);
+ assert.equal(round.productAiRequestId,'');assert.equal(round.productImage,'');assert.equal(round.productWeight,'');
+ assert.equal(round.coreImage,'keep-core');assert.equal(round.weight,'0');
+ assert.equal(session.selectedSlot.kind,'product');assert.equal(session._discardLock,false);
+ finish(jobs[0],99);await tick();assert.equal(round.productImage,'');assert.equal(round.productWeight,'');
+});
+
+test('an aborted core cannot overwrite its replacement or clear the other pending slot',async()=>{
+ const {ctx,session,jobs,finish,discards}=setup();
+ const old=ctx.analyzeCurrent('core');await tick();
+ const round=session.rounds[0];const other=ctx.analyzeCurrent('core');await tick();
+ await ctx.discardSlot('core',0);await old;
+ assert.equal(round.coreAiPending,false);assert.equal(session.rounds[1].coreAiPending,true);
+ assert.equal(discards[0].strict_event_id,true);
+ assert.equal(round.coreImage,'');assert.equal(round.coreAiRequestId,'');
+ const replacement=ctx.analyzeCurrent('core');await tick();
+ finish(jobs[2],0.42);await replacement;const image=round.coreImage;
+ jobs[0].reject(Error('late failure'));await tick();
+ assert.equal(round.coreImage,image);assert.equal(round.weight,'0.42');
+ finish(jobs[1],0.63);await other;assert.equal(session.rounds[1].weight,'0.63');
+});
+
+test('aborting a running request frees an HTTP slot even when its provider never replies',async()=>{
+ const {ctx,session,jobs,finish}=setup({count:4}),tasks=[];
+ for(let i=0;i<4;i++){tasks.push(ctx.analyzeCurrent('core'));await tick()}
+ tasks.push(ctx.analyzeCurrent('product'));await tick();assert.equal(jobs.length,4);
+ await ctx.discardSlot('core',0);await tasks[0];await tick();
+ assert.equal(jobs[0].signal.aborted,true);assert.equal(jobs.length,5);
+ assert.equal(session.rounds[0].productAiPending,true);
+ for(let i=1;i<5;i++)finish(jobs[i],i+0.1);
+ await Promise.all(tasks);assert.equal(vm.runInContext('captureAiActive',ctx),0);
+});
+
+test('discarding a queued request removes it without sending its photo to AI',async()=>{
+ const {ctx,session,jobs,finish}=setup({count:4}),tasks=[];
+ for(const kind of ['core','product'])for(let i=0;i<4;i++){tasks.push(ctx.analyzeCurrent(kind));await tick()}
+ const cancelledImage=session.rounds[2].productImage;
+ await ctx.discardSlot('product',2);await tasks[6];
+ assert.equal(vm.runInContext('captureAiWaiters.length',ctx),3);
+ for(let i=0;i<7;i++){assert.ok(jobs[i]);finish(jobs[i],i+0.1);await tick()}
+ await Promise.all(tasks);
+ assert.equal(jobs.length,7);assert.equal(jobs.some(job=>job.body.image===cancelledImage),false);
+ assert.equal(session.rounds[2].productImage,'');assert.equal(vm.runInContext('captureAiActive',ctx),0);
+});
+
+test('discard invalidates pending results before waiting for backend cleanup',async()=>{
+ const {ctx,session,jobs,finish}=setup(),cleanup=deferred(),original=ctx.api;
+ ctx.api=(url,options)=>url==='/api/session/discard'?cleanup.promise:original(url,options);
+ const task=ctx.analyzeCurrent('core');await tick();const discard=ctx.discardSlot('core',0);
+ finish(jobs[0],0.8);await task;
+ assert.equal(session.rounds[0].weight,'');assert.equal(session.rounds[0].coreAiPending,false);
+ assert.equal(session._discardLock,true);
+ cleanup.resolve({discarded:true});await discard;assert.equal(session.rounds[0].coreImage,'');
+});
+
+test('discard never cancels a saved roll or a database write',async()=>{
+ const {ctx,session,jobs,finish}=setup();const task=ctx.analyzeCurrent('core');await tick();
+ const round=session.rounds[0];round.saved=true;await ctx.discardSlot('core',0);
+ assert.equal(jobs[0].signal.aborted,false);assert.equal(round.coreAiPending,true);
+ round.saved=false;session._saveLock=true;await ctx.discardSlot('core',0);
+ assert.equal(jobs[0].signal.aborted,false);session._saveLock=false;
+ session._saveAllLock=true;await ctx.discardSlot('core',0);assert.equal(jobs[0].signal.aborted,false);
+ session._saveAllLock=false;finish(jobs[0],0.4);await task;
 });
 
 test('failure to save the photo leaves it visible and never calls AI',async()=>{

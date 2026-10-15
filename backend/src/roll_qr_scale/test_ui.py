@@ -2705,6 +2705,7 @@ class StationUIService:
         self._ocr_preload_error: str | None = None
         self._recent: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._cancelled_capture_photos: dict[str, None] = {}
         self.auto_sync = (
             IdlePendingSync(
                 sync_worker, self._inference_is_idle,
@@ -3851,6 +3852,23 @@ class StationUIService:
         )
         return resolved
 
+    def _assert_capture_photo_current(
+        self, photo_capture_id: str, event_id: str, station_id: str,
+        kind: str, capture_round: int,
+    ) -> None:
+        # Caller holds the service lock through the matching stage/write.
+        if photo_capture_id in self._cancelled_capture_photos:
+            raise SessionConflictError("Lượt AI đã được hủy; bỏ kết quả AI cũ")
+        latest = max(
+            (draft for draft in self.store.photo_drafts_for_parent(event_id)
+             if draft.station_id == station_id and draft.capture_kind == kind
+             and draft.capture_round == capture_round),
+            key=lambda draft: draft.id,
+            default=None,
+        )
+        if latest is None or latest.event_id != photo_capture_id:
+            raise SessionConflictError("Ảnh đã được chụp lại; bỏ kết quả AI cũ")
+
     def stage_evidence_step(
         self,
         frame: np.ndarray,
@@ -3861,6 +3879,8 @@ class StationUIService:
         weight: float,
         unit: str,
         qr_code: str = "",
+        photo_capture_id: str = "",
+        capture_round: int = 0,
     ) -> dict[str, object]:
         """Durably save each accepted weighing step before final confirmation."""
         if kind not in {"core", "product", "inventory"}:
@@ -3876,6 +3896,10 @@ class StationUIService:
         if not encoded_ok:
             raise OSError("Không mã hóa được ảnh bằng chứng")
         with self._lock:
+            if photo_capture_id:
+                self._assert_capture_photo_current(
+                    photo_capture_id, event_id, station_id, kind, capture_round,
+                )
             image_path.write_bytes(encoded.tobytes())
             metadata: dict[str, object] = {"event_id": event_id, "station_id": station_id}
             if metadata_path.is_file():
@@ -4124,19 +4148,30 @@ class StationUIService:
             except OSError:
                 pass
 
-    def discard_session(self, station_id: str, *, event_id: str | None = None, strict_event_id: bool = False) -> bool:
-        try:
-            discarded = self.sessions.discard(station_id, event_id=event_id)
-        except AnalysisBindingMismatch:
-            if strict_event_id:
-                raise
-            # The browser may only know the photo event after an AI failure.
-            # Clearing the station binding is safe here and must not prevent
-            # the operator from dropping the failed local preview.
-            discarded = self.sessions.discard(station_id)
-        if event_id:
-            self._cleanup_evidence_steps(station_id, event_id)
-        return discarded
+    def discard_session(
+        self, station_id: str, *, event_id: str | None = None,
+        strict_event_id: bool = False, photo_capture_id: str = "",
+    ) -> bool:
+        with self._lock:
+            if photo_capture_id:
+                photo = self.store.get_photo_draft(photo_capture_id)
+                if photo is None or photo.parent_event_id != event_id or photo.station_id != station_id:
+                    raise AnalysisBindingMismatch("Ảnh hủy không thuộc lượt cân đang chọn")
+                self._cancelled_capture_photos[photo_capture_id] = None
+                if len(self._cancelled_capture_photos) > 2048:
+                    self._cancelled_capture_photos.pop(next(iter(self._cancelled_capture_photos)))
+                if photo.capture_kind != "core" or photo.capture_round != 0:
+                    return True
+            try:
+                discarded = self.sessions.discard(station_id, event_id=event_id)
+            except AnalysisBindingMismatch:
+                if strict_event_id:
+                    raise
+                # Legacy browsers may only know the photo event after an AI failure.
+                discarded = self.sessions.discard(station_id)
+            if event_id:
+                self._cleanup_evidence_steps(station_id, event_id)
+            return discarded
 
     def diagnostic_path_for(self, station_id: str) -> Path | None:
         if self.diagnostic_image is None:
@@ -4251,23 +4286,24 @@ class StationUIService:
             qr_code = ""
             qr_source = "none"
 
-        draft, duplicate = self.store.save_photo_draft_idempotent(
-            frame,
-            qr_code=qr_code,
-            qr_source=qr_source,
-            needs_sync=self.sync_worker is not None,
-            event_id=event_id,
-            parent_event_id=parent_event_id,
-            capture_kind=capture_kind,
-            capture_round=capture_round,
-            work_date=work_date,
-            shift=shift,
-            machine=machine,
-            production_order=production_order,
-            gateway_id=self.gateway_id,
-            station_id=station_id,
-            camera_id=camera_id,
-        )
+        with self._lock:
+            draft, duplicate = self.store.save_photo_draft_idempotent(
+                frame,
+                qr_code=qr_code,
+                qr_source=qr_source,
+                needs_sync=self.sync_worker is not None,
+                event_id=event_id,
+                parent_event_id=parent_event_id,
+                capture_kind=capture_kind,
+                capture_round=capture_round,
+                work_date=work_date,
+                shift=shift,
+                machine=machine,
+                production_order=production_order,
+                gateway_id=self.gateway_id,
+                station_id=station_id,
+                camera_id=camera_id,
+            )
         current = self.store.get_photo_draft(draft.event_id) or draft
         return {
             "ok": True,
@@ -4986,6 +5022,7 @@ class StationUIService:
         context_station_id: str | None = None,
         context_camera_id: str | None = None,
         context_shift: str = "",
+        photo_capture_id: str = "",
     ) -> dict[str, object]:
         additional_frames = list(weight_frames or [])
         if len(additional_frames) >= MAX_BURST_FRAMES:
@@ -5063,12 +5100,17 @@ class StationUIService:
         if not all(identities):
             raise ValueError("Cần đủ event_id, station_id và camera_id")
         assert event_id is not None and station_id is not None and camera_id is not None
-        binding = self.sessions.stage(
-            frame,
-            event_id=event_id,
-            station_id=station_id,
-            camera_id=camera_id,
-        )
+        with self._lock:
+            if photo_capture_id:
+                self._assert_capture_photo_current(
+                    photo_capture_id, event_id, station_id, capture_kind, 0,
+                )
+            binding = self.sessions.stage(
+                frame,
+                event_id=event_id,
+                station_id=station_id,
+                camera_id=camera_id,
+            )
         try:
             self._write_diagnostic(station_id, frame)
             result = self.inference.run(
@@ -6148,9 +6190,13 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             cookie = getattr(self, "session_cookie", None)
             if cookie:
                 self.send_header("set-cookie", cookie)
-            self.end_headers()
-            if include_body:
-                self.wfile.write(body)
+            try:
+                self.end_headers()
+                if include_body:
+                    self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                self.close_connection = True
+                logging.debug("Client disconnected before response was sent")
 
         def send_json(self, status_code: int, payload: dict[str, object]) -> None:
             self.send_bytes(
@@ -7146,6 +7192,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         str(payload.get("station_id", "")),
                         event_id=str(payload["event_id"]) if payload.get("event_id") else None,
                         strict_event_id=payload.get("strict_event_id") is True,
+                        photo_capture_id=str(payload.get("photo_capture_id") or ""),
                     )
                     self.send_json(200, {"ok": True, "discarded": discarded})
                     return
@@ -7710,6 +7757,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             context_station_id=str(payload.get("station_id", "")) or None,
                             context_camera_id=str(payload.get("camera_id", "")) or None,
                             context_shift=str(payload.get("shift", "")),
+                            photo_capture_id=str(payload.get("photo_capture_id") or ""),
                         )
                     except Exception as exc:
                         logging.warning(
@@ -7740,6 +7788,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             weight=float(result["weight"]),
                             unit=str(result.get("unit", payload.get("unit", "kg"))),
                             qr_code=str(result.get("qr_code", "")),
+                            photo_capture_id=str(payload.get("photo_capture_id") or ""),
+                            capture_round=capture_round,
                         )
                         result["step_saved"] = True
                         result["step_image_path"] = staged["image_path"]
