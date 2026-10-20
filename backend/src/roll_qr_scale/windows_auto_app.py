@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 
 from roll_qr_scale import windows_app as desktop
-from roll_qr_scale.test_ui import build_parser, create_server
+from roll_qr_scale.windows_app import build_parser, create_server
 
 APP_NAME = "TramCanQRAuto"
 APP_VERSION = "0.2.0-ai-auto-beta1"
@@ -93,6 +93,7 @@ def main() -> None:
     root = base / APP_NAME
     config = prepare_config(root, base / "TramCanQR")
     desktop.configure_logging(root)
+    os.environ["ROLL_SCALE_CAMERA_LOG_DIR"] = str(root / "logs")
     for key, value in desktop._read_runtime_config(config).items():
         os.environ.setdefault(key, value)
     for key, value in _DEFAULT_CONFIG.items():
@@ -120,6 +121,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--camera-worker":
+        from roll_qr_scale.camera_worker import main as camera_main
+        raise SystemExit(camera_main())
     multiprocessing.freeze_support()
     try:
         main()

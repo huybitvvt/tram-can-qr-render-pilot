@@ -6676,8 +6676,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         return
                     self.send_json(200, {"ok": True, "cameras": cameras})
                     return
-                capture_now = parsed.path == "/api/live/snapshot" and urllib.parse.parse_qs(parsed.query).get("capture") == ["1"]
-                snapshot = camera.capture_snapshot() if capture_now else camera.snapshot()
+                query = urllib.parse.parse_qs(parsed.query)
+                capture_now = parsed.path == "/api/live/snapshot" and query.get("capture") == ["1"]
+                preview_now = parsed.path == "/api/live/snapshot" and not capture_now and query.get("preview") == ["1"]
+                snapshot = camera.capture_snapshot() if capture_now or preview_now else camera.snapshot()
                 if snapshot is None:
                     self.send_json(503, {"ok": False, "message": "Chưa có ảnh camera mới. Kiểm tra camera rồi mở lại nguồn."})
                     return
@@ -6685,13 +6687,21 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 payload = {"ok": True, "frame_id": frame_id, "recognition": recognition}
                 if parsed.path == "/api/live/snapshot":
                     with live_snapshot_cache_lock:
-                        if live_snapshot_cache["frame_id"] != frame_id:
-                            encoded, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                        cache_key = (frame_id, preview_now)
+                        if live_snapshot_cache["frame_id"] != cache_key:
+                            # Preview must keep moving while inference is busy.
+                            # Only the display copy is reduced; capture keeps
+                            # the full camera frame for QR/weight evidence.
+                            if preview_now and max(frame.shape[:2]) > 960:
+                                scale = 960 / max(frame.shape[:2])
+                                frame = cv2.resize(frame, (max(1, round(frame.shape[1] * scale)),
+                                                           max(1, round(frame.shape[0] * scale))), interpolation=cv2.INTER_AREA)
+                            encoded, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80 if preview_now else 95])
                             if not encoded:
                                 self.send_json(503, {"ok": False, "message": "Không mã hóa được ảnh camera"})
                                 return
                             live_snapshot_cache["image"] = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
-                            live_snapshot_cache["frame_id"] = frame_id
+                            live_snapshot_cache["frame_id"] = cache_key
                         payload["image"] = live_snapshot_cache["image"]
                 self.send_json(200, payload)
                 return
@@ -6739,7 +6749,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     {
                         "ok": True,
                         "app_variant": os.environ.get("ROLL_SCALE_APP_VARIANT", "source"),
-                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc76"),
+                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc77"),
                         "pending_count": store.pending_count(),
                         "yolo_enabled": service.weight_engine == "local-yolo" or service.reader.model is not None,
                         "yolo_mode": "local-digit-model+opencv-qr" if service.weight_engine == "local-yolo" else service.reader.yolo_mode,

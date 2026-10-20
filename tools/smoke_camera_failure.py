@@ -95,6 +95,40 @@ with socket.create_connection(('127.0.0.1',int(sys.argv[-2]))) as s:
             request("/api/live/camera", {"source": "0"})
             second = wait_snapshot()
             assert second["frame_id"] > first["frame_id"]
+            entered, resume = threading.Event(), threading.Event()
+            class SlowDetector:
+                def detect_with_details(self, image):
+                    entered.set()
+                    resume.wait(10)
+                    return None
+            camera.detector = SlowDetector()
+            assert entered.wait(5), "Blocked inference was not exercised"
+            stable_pid = opened[-1]._process.pid
+            try:
+                frame_ids, health_times = set(), []
+                deadline = time.monotonic() + 3
+                while time.monotonic() < deadline:
+                    preview = request("/api/live/snapshot?preview=1")
+                    frame_ids.add(preview["frame_id"])
+                    started = time.monotonic()
+                    assert request("/api/health")["ok"]
+                    health_times.append(time.monotonic() - started)
+                    time.sleep(.1)
+                assert len(frame_ids) >= 5, "Preview froze behind inference"
+                assert opened[-1]._process.pid == stable_pid, "Healthy driver restarted"
+                full = request("/api/live/snapshot?capture=1")
+                import base64
+                import numpy as np
+                def image_shape(payload):
+                    data = np.frombuffer(base64.b64decode(payload["image"].split(",", 1)[1]), dtype=np.uint8)
+                    return cv2.imdecode(data, cv2.IMREAD_COLOR).shape
+                assert max(image_shape(preview)[:2]) <= 960
+                assert image_shape(full) == cv2.imread(str(frame_path)).shape
+                print(f"PASS: blocked AI, {len(frame_ids)} distinct preview frames in 3s; "
+                      f"health max {max(health_times)*1000:.0f}ms; same driver PID; capture keeps original dimensions", flush=True)
+            finally:
+                resume.set()
+                camera.detector = None
             process = opened[-1]._process
             process.kill()
             process.wait(timeout=3)

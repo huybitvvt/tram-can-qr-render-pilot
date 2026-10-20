@@ -153,8 +153,16 @@ class LiveCamera:
     def _open(self, source: int | str) -> cv2.VideoCapture:
         if sys.platform == "win32":
             from .camera_process import IsolatedCapture
+            with self._condition:
+                generation = self._source_generation
+
+            def cancelled():
+                with self._condition:
+                    return (self._stop.is_set() or generation != self._source_generation
+                            or source != parse_source(self._source))
+
             return IsolatedCapture(source, self.camera_backend, self.width, self.height, self.fps, self.rtsp_transport,
-                                   cancelled=lambda: self._stop.is_set() or str(source) != self.source)
+                                   cancelled=cancelled)
         if isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://")):
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = f"rtsp_transport;{self.rtsp_transport}"
         is_rtsp = isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://"))
@@ -190,6 +198,13 @@ class LiveCamera:
             except Exception:
                 logger.exception("Camera release failed")
 
+    def _wait_to_reconnect(self, generation: int) -> None:
+        with self._condition:
+            self._condition.wait_for(
+                lambda: self._stop.is_set() or generation != self._source_generation,
+                timeout=self.reconnect_seconds,
+            )
+
     def _capture_loop(self) -> None:
         current_generation = -1
         capture: cv2.VideoCapture | None = None
@@ -213,14 +228,17 @@ class LiveCamera:
                         with self._condition:
                             self._connected = False
                             self._condition.notify_all()
-                        self._stop.wait(self.reconnect_seconds)
+                        self._wait_to_reconnect(generation)
                         continue
                     logger.info("Live camera connected: %s", redact_source(source_text))
                 except Exception:
-                    logger.exception("Could not open live camera source")
+                    with self._condition:
+                        changed = generation != self._source_generation or self._stop.is_set()
+                    if not changed:
+                        logger.exception("Could not open live camera source")
                     self._release_capture(capture)
                     capture = None
-                    self._stop.wait(self.reconnect_seconds)
+                    self._wait_to_reconnect(generation)
                     continue
             try:
                 ok, image = capture.read()
@@ -231,15 +249,18 @@ class LiveCamera:
                 self._release_capture(capture)
                 capture = None
                 with self._condition:
+                    if generation != self._source_generation:
+                        continue
                     self._connected = False
                     self._raw = self._recognized_raw = self._annotated = None
                     self._source_generation += 1
+                    generation = self._source_generation
                     self._frame_id += 1
                     self._event = self._empty_event()
                     self.stabilizer = Stabilizer(self.stabilizer.required_frames)
                     self._jpeg_cache = None
                     self._condition.notify_all()
-                self._stop.wait(self.reconnect_seconds)
+                self._wait_to_reconnect(generation)
                 continue
             with self._condition:
                 if generation != self._source_generation:

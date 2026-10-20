@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc76` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc77` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc76.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc77.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -35,7 +35,7 @@ Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự
 
 ### Chuyển từ Gemini sang local, giữ dữ liệu
 
-Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc76. Dùng cùng tài
+Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc77. Dùng cùng tài
 khoản Windows, giữ nguyên thư mục cài cũ; không cần gỡ ứng dụng. Lưu xong
 lượt cân đang làm trước khi cập nhật. App vẫn là `TramCanQR.exe`, cổng `8080`,
 DB/ảnh/cấu hình vẫn ở `%LOCALAPPDATA%\TramCanQR`. Không di chuyển hay nhập
@@ -57,6 +57,11 @@ Từ rc76, driver camera Windows chạy trong tiến trình riêng. Danh sách U
 liệt kê các cổng để chọn, không mở thử đồng thời nhiều driver. Nếu một cổng
 báo lỗi/không có hình, chọn lại đúng camera (thường USB 0 hoặc 1) và bấm Mở
 camera. Thoát bản Gemini/beta1 nếu bản đó còn giữ camera.
+
+Từ rc77, hình xem trước lấy trực tiếp từ camera, không chờ AI đọc số cân.
+Ảnh xem trước được thu nhỏ để giảm tải; ảnh chụp phiếu cân/kiểm kho vẫn lấy
+khung hình gốc. Driver thử lại khi hụt frame ngắn; mất kết nối thật sẽ tự mở
+lại camera. Không chụp nếu không còn ảnh mới.
 
 Nếu app vẫn tự tắt, lấy phần cuối `logs/app.log`, `logs/camera-driver.log`
 và `logs/native-crash.log` trong `%LOCALAPPDATA%\TramCanQR` để kiểm tra.

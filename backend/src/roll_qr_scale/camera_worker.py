@@ -53,7 +53,7 @@ def main() -> int:
             is_rtsp = isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://"))
             if is_rtsp:
                 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;" + config["rtsp_transport"]
-            name = str(config["backend"] or "AUTO").upper()
+            name = str(config["backend"] or "AUTO").strip().upper()
             backend = None if is_rtsp or name in {"AUTO", "NONE"} else getattr(cv2, name if name.startswith("CAP_") else "CAP_" + name)
             capture = cv2.VideoCapture(source) if backend is None else cv2.VideoCapture(source, backend)
             if not capture.isOpened():
@@ -64,11 +64,21 @@ def main() -> int:
                 capture.set(key, value)
             last_sent = 0.0
             ready = False
+            read_failed_at = None
             while True:
                 ok, frame = capture.read()
                 captured, timestamp = time.monotonic(), time.time()
                 if not ok or frame is None:
-                    return 2
+                    if read_failed_at is None:
+                        read_failed_at = captured
+                    # A dropped USB frame is not a disconnected device. The
+                    # parent bounds startup; after startup allow a short retry
+                    # window before reopening the driver.
+                    if ready and captured - read_failed_at >= 2.0:
+                        return 2
+                    time.sleep(0.05)
+                    continue
+                read_failed_at = None
                 if not ready:
                     # USB devices may take several seconds to deliver their first frame.
                     # Keep the cancellable startup deadline until a real frame exists.

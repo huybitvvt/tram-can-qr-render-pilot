@@ -12032,20 +12032,24 @@
                 try {
                     const source = session.deviceId || "configured";
                     await api("/api/live/camera", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source }) });
+                    if (session.streamGeneration !== generation) return;
                     // Fetch individual JPEG snapshots through api() so auth
                     // headers are sent and the browser decodes each frame
                     // reliably (multipart MJPEG <img> decoding varies).
                     const image = new Image();
                     session.backendImage = image;
                     session.backendMode = true;
+                    const ownsPreview = () => session.backendMode && session.backendImage === image && session.streamGeneration === generation;
                     session.deviceId = source;
                     session.cameraSelect.value = source;
                     const canvas = document.createElement("canvas"), context = canvas.getContext("2d", { alpha: false });
                     let firstSnapshot = null, snapshotError = null;
                     const snapshotDeadline = Date.now() + 30000;
                     while (!firstSnapshot && Date.now() < snapshotDeadline) {
+                        if (!ownsPreview()) return;
                         try {
-                            const candidate = await api("/api/live/snapshot");
+                            const candidate = await api("/api/live/snapshot?preview=1");
+                            if (!ownsPreview()) return;
                             if (candidate.image) firstSnapshot = candidate;
                             else snapshotError = new Error("Backend chưa có ảnh live mới nhất");
                         } catch (error) {
@@ -12065,14 +12069,15 @@
                     canvas.height = image.naturalHeight || Number((appStatus && appStatus.camera_frame_height) || 720);
                     session.backendCanvas = canvas;
                     const drawSnapshot = () => {
-                        if (!session.backendMode || session.backendImage !== image || session.streamGeneration !== generation) return;
+                        if (!ownsPreview()) return;
                         try { context.drawImage(image, 0, 0, canvas.width, canvas.height); } catch {}
                     };
                     drawSnapshot();
                     const pollSnapshot = async () => {
-                        if (!session.backendMode || session.backendImage !== image || session.streamGeneration !== generation) return;
+                        if (!ownsPreview()) return;
                         try {
-                            const snapshot = await api("/api/live/snapshot");
+                            const snapshot = await api("/api/live/snapshot?preview=1");
+                            if (!ownsPreview()) return;
                             if (snapshot.image) {
                                 image.src = snapshot.image;
                                 if (typeof image.decode === "function") await image.decode();
@@ -12080,6 +12085,7 @@
                                     image.onload = resolve;
                                     image.onerror = () => reject(new Error("Không giải mã được ảnh camera"));
                                 });
+                                if (!ownsPreview()) return;
                                 if (image.naturalWidth && image.naturalHeight && (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight)) {
                                     canvas.width = image.naturalWidth;
                                     canvas.height = image.naturalHeight;
@@ -12091,22 +12097,24 @@
                                 }
                             }
                         } catch (error) {
+                            if (!ownsPreview()) return;
                             session.backendSnapshotFailed = true;
                             context.clearRect(0, 0, canvas.width, canvas.height);
                             renderLiveRecognition(session, null, "Mất ảnh camera mới");
                             status(captureStatus, "Mất ảnh camera mới: " + error.message + ". Kiểm tra dây USB hoặc đóng app khác đang dùng camera.", "bad");
                         }
-                        if (session.backendMode && session.backendImage === image && session.streamGeneration === generation)
-                            session.backendSnapshotTimer = setTimeout(pollSnapshot, 200);
+                        if (ownsPreview())
+                            session.backendSnapshotTimer = setTimeout(pollSnapshot, session.backendSnapshotFailed ? 500 : 100);
                     };
                     const stream = canvas.captureStream(Number((appStatus && appStatus.live_stream_fps) || 15));
                     session.stream = stream;
                     session.video.srcObject = stream;
                     session.video.muted = true;
                     session.video.playsInline = true;
-                    session.backendSnapshotTimer = setTimeout(pollSnapshot, 200);
+                    session.backendSnapshotTimer = setTimeout(pollSnapshot, 100);
                     drawSnapshot();
                     await session.video.play();
+                    if (!ownsPreview()) return;
                     showVideo(session);
                     session.setState("live", "LIVE · backend · " + session.stationId, "ready");
                     status(captureStatus, "Backend camera đã mở · " + canvas.width + "×" + canvas.height + " · đang nhận diện QR/số cân.", "ok");
@@ -12213,6 +12221,7 @@
                     ) return;
                     liveRecognitionBusy = true;
                     const discardGeneration = Number(session.liveDiscardGeneration || 0);
+                    const streamGeneration = session.streamGeneration;
                     try {
                         if (session.backendMode) {
                             const snapshot = await api("/api/live/recognition");
@@ -12227,7 +12236,7 @@
                                 weight_raw: readable ? "YOLO local · " + raw : "Chưa đọc đủ số cân rõ nét",
                             };
                             session.liveRecognitionCanvas = { width: event.frame_width, height: event.frame_height };
-                            if (session === current() && session.stream && discardGeneration === Number(session.liveDiscardGeneration || 0)) {
+                            if (session === current() && session.stream && session.streamGeneration === streamGeneration && discardGeneration === Number(session.liveDiscardGeneration || 0)) {
                                 renderLiveRecognition(session, result);
                                 renderLiveDetectionBoxes(session, result);
                             }
@@ -12240,12 +12249,12 @@
                             headers: { "content-type": "application/json" },
                             body: JSON.stringify({ image, roi: "auto", unit: session.unit || "kg", recognition_profile: "local", recognition_provider: "local-yolo" }),
                         });
-                        if (session === current() && session.stream && discardGeneration === Number(session.liveDiscardGeneration || 0)) {
+                        if (session === current() && session.stream && session.streamGeneration === streamGeneration && discardGeneration === Number(session.liveDiscardGeneration || 0)) {
                             renderLiveRecognition(session, result);
                             renderLiveDetectionBoxes(session, result);
                         }
                     } catch (error) {
-                        if (session === current())
+                        if (session === current() && session.streamGeneration === streamGeneration)
                             renderLiveRecognition(session, null, "Lỗi nhận diện: " + error.message);
                     } finally {
                         liveRecognitionBusy = false;
@@ -12609,6 +12618,14 @@
             }
             function drawQrSession(session) {
                 return drawSession(session, 0.96, 2560);
+            }
+            async function captureBackendImage(session) {
+                const generation = session.streamGeneration;
+                const snapshot = await api("/api/live/snapshot?capture=1");
+                if (!session.backendMode || session.streamGeneration !== generation)
+                    throw new Error("Đã đổi camera trong lúc chụp");
+                if (!snapshot.image) throw new Error("Backend chưa có ảnh camera mới");
+                return snapshot.image;
             }
             function waitForVideoFrame(video) {
                 return new Promise((resolve) => {
@@ -13313,12 +13330,12 @@
                 let image;
                 try {
                     if (session.stream) await waitForVideoFrame(session.video);
-                    image = drawQrSession(session);
+                    image = session.backendMode ? await captureBackendImage(session) : drawQrSession(session);
                 } catch (error) {
                     status(captureStatus, error.message, "bad");
                     return;
                 }
-                const clientQr = await decodeClientQr(session.canvas),
+                const clientQr = session.backendMode ? "" : await decodeClientQr(session.canvas),
                     eventId = round.eventId || newEventId(),
                     captureId = newEventId();
                 let rejectedQr = "";
@@ -15700,7 +15717,7 @@
                         await waitBeforeCameraCapture(session, "cân kiểm kho");
                         await waitForVideoFrame(video);
                     }
-                    image = drawQrSession(session);
+                    image = session.backendMode ? await captureBackendImage(session) : drawQrSession(session);
                 } catch (error) {
                     session._analyzeLock = false;
                     session.state = session.stream ? "live" : "idle";
@@ -15708,7 +15725,7 @@
                     status(captureStatus, error.message, "bad");
                     return;
                 }
-                const clientQr = await decodeClientQr(session.canvas),
+                const clientQr = session.backendMode ? "" : await decodeClientQr(session.canvas),
                     eventId = newEventId();
                 state.eventId = eventId;
                 state.image = image;

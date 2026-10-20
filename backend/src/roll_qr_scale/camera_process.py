@@ -28,7 +28,7 @@ def receive_exact(connection: socket.socket, size: int, *, cancelled=None, deadl
         if cancelled is not None and cancelled():
             raise OSError("Camera source changed")
         if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError("Camera startup timed out")
+            raise TimeoutError("Camera worker timed out")
         try:
             part = connection.recv(size - len(chunks))
         except socket.timeout:
@@ -46,12 +46,14 @@ class IsolatedCapture:
 
     def __init__(self, source: int | str, backend: str | None, width: int, height: int,
                  fps: int, rtsp_transport: str = "tcp", *, command: list[str] | None = None,
-                 startup_timeout: float = 20.0, cancelled=None) -> None:
+                 startup_timeout: float = 20.0, frame_timeout: float = 5.0, cancelled=None) -> None:
         self._process: subprocess.Popen | None = None
         self._connection: socket.socket | None = None
         self._reader: threading.Thread | None = None
         self._released = False
         self._opened = False
+        self._cancelled = cancelled
+        self._frame_timeout = frame_timeout
         self._frames: queue.Queue = queue.Queue(maxsize=1)
         self.captured_monotonic = self.captured_timestamp = 0.0
         server = socket.socket()
@@ -91,7 +93,6 @@ class IsolatedCapture:
             connection.sendall(struct.pack("!I", len(config)) + config)
             if receive_exact(connection, 1, cancelled=cancelled, deadline=deadline) != b"R":
                 raise OSError("Không mở được camera. Chọn lại camera USB hoặc kiểm tra camera-driver.log.")
-            connection.settimeout(5.0)
             self._opened = True
             self._reader = threading.Thread(target=self._receive, name="camera-ipc", daemon=True)
             self._reader.start()
@@ -100,6 +101,9 @@ class IsolatedCapture:
             raise
         finally:
             server.close()
+
+    def _is_cancelled(self) -> bool:
+        return self._released or (self._cancelled is not None and self._cancelled())
 
     def _publish(self, frame) -> None:
         try:
@@ -117,40 +121,53 @@ class IsolatedCapture:
     def _receive(self) -> None:
         connection = self._connection
         try:
-            while not self._released:
+            while not self._is_cancelled():
+                deadline = time.monotonic() + self._frame_timeout
                 height, width, size, captured, timestamp = FRAME_HEADER.unpack(
-                    receive_exact(connection, FRAME_HEADER.size))
+                    receive_exact(connection, FRAME_HEADER.size, cancelled=self._is_cancelled, deadline=deadline))
                 if not (0 < size <= MAX_FRAME_BYTES and size == height * width * 3):
                     raise ValueError("Camera worker frame dimensions invalid")
-                data = receive_exact(connection, size)
+                data = receive_exact(connection, size, cancelled=self._is_cancelled, deadline=deadline)
                 frame = np.frombuffer(data, dtype=np.uint8).reshape(height, width, 3)
                 self._publish((frame, captured, timestamp))
-        except (OSError, EOFError, ValueError, struct.error):
-            if not self._released:
+        except (OSError, EOFError, ValueError, struct.error) as error:
+            if not self._is_cancelled():
                 code = self._process.poll()
-                logger.warning("Camera driver disconnected (exit=%s); station server remains running", code)
+                logger.warning("Camera driver disconnected (exit=%s, reason=%s); station server remains running", code, error)
         finally:
             self._opened = False
             self._publish(None)
 
     def isOpened(self) -> bool:
-        return self._opened and not self._released
+        return self._opened and not self._is_cancelled()
 
     def read(self):
-        try:
-            result = self._frames.get(timeout=3.0)
-        except queue.Empty:
-            return False, None
-        if result is None:
-            return False, None
-        frame, self.captured_monotonic, self.captured_timestamp = result
-        if time.monotonic() - self.captured_monotonic > 2.0:
-            return False, None
-        return True, frame
+        deadline = time.monotonic() + self._frame_timeout
+        while not self._is_cancelled():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                result = self._frames.get(timeout=min(0.2, remaining))
+            except queue.Empty:
+                if not self._opened:
+                    break
+                continue
+            if result is None:
+                break
+            frame, captured, timestamp = result
+            # A busy CPU may leave an old frame in the mailbox. Wait for a
+            # current frame instead of restarting a healthy camera driver.
+            if time.monotonic() - captured > 2.0:
+                continue
+            self.captured_monotonic, self.captured_timestamp = captured, timestamp
+            return True, frame
+        return False, None
 
     def release(self) -> None:
         self._released = True
         self._opened = False
+        self._publish(None)
         if self._connection is not None:
             try:
                 self._connection.shutdown(socket.SHUT_RDWR)

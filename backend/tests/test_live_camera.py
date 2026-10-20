@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -84,6 +85,49 @@ class LiveCameraTests(unittest.TestCase):
         self.assertIsNone(event["numeric_value"])
         camera._raw_at = time.monotonic() - 3
         self.assertIsNone(camera.capture_snapshot())
+
+    def test_preview_frames_advance_while_model_is_blocked(self) -> None:
+        entered, unblock = threading.Event(), threading.Event()
+        detector = _FakeDetector()
+        def blocked_detect(image):
+            entered.set()
+            unblock.wait(3)
+            return SimpleNamespace(digits=[], display=None)
+        detector.detect_with_details = blocked_detect
+        camera = LiveCamera("0", detector, _FakeQrDecoder())
+        with patch.object(camera, "_open", side_effect=lambda _: _FakeCapture()):
+            camera.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                first = camera.capture_snapshot()
+                self.assertIsNotNone(first)
+                self.assertIsNone(camera.snapshot())
+                with camera._condition:
+                    advanced = camera._condition.wait_for(lambda: camera._frame_id > first[2], timeout=1)
+                self.assertTrue(advanced)
+                self.assertGreater(camera.capture_snapshot()[2], first[2])
+            finally:
+                unblock.set()
+                camera.stop()
+
+    def test_selecting_new_source_interrupts_reconnect_backoff(self) -> None:
+        failed = threading.Event()
+        camera = LiveCamera("0", _FakeDetector(), _FakeQrDecoder(), reconnect_seconds=30)
+        def open_camera(source):
+            if source == 0:
+                failed.set()
+                raise OSError("Unplugged")
+            return _FakeCapture()
+        with patch.object(camera, "_open", side_effect=open_camera):
+            camera.start()
+            try:
+                self.assertTrue(failed.wait(2))
+                camera.select_source("1")
+                with camera._condition:
+                    connected = camera._condition.wait_for(lambda: camera._connected, timeout=1)
+                self.assertTrue(connected)
+            finally:
+                camera.stop()
 
 
 if __name__ == "__main__":
