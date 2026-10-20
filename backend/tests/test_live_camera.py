@@ -70,6 +70,21 @@ class LiveCameraTests(unittest.TestCase):
         self.assertIsNone(camera.snapshot())
         self.assertEqual(camera.source, "1")
 
+    def test_capture_uses_newest_frame_and_never_reuses_preview_recognition(self) -> None:
+        camera = LiveCamera("0", _FakeDetector(), _FakeQrDecoder())
+        camera._connected = True
+        camera._raw = np.full((2, 2, 3), 90, dtype=np.uint8)
+        camera._frame_id = 12
+        camera._raw_at = time.monotonic()
+        camera._event = {"qr": {"data": "OLD-QR"}, "numeric_value": 99}
+        frame, event, frame_id = camera.capture_snapshot()
+        self.assertEqual(frame_id, 12)
+        self.assertEqual(int(frame[0, 0, 0]), 90)
+        self.assertIsNone(event["qr"])
+        self.assertIsNone(event["numeric_value"])
+        camera._raw_at = time.monotonic() - 3
+        self.assertIsNone(camera.capture_snapshot())
+
 
 if __name__ == "__main__":
     unittest.main()

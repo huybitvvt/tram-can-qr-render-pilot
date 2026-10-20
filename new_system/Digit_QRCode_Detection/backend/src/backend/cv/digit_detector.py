@@ -136,12 +136,34 @@ def _refine_ambiguous_digit(image: np.ndarray, digit: Digit) -> Digit:
     return Digit(int(refined) if isinstance(digit.value, int) else refined, digit.confidence, digit.box, class_id)
 
 
+def top_display_rows(regions: list[DisplayRegion]) -> list[DisplayRegion]:
+    """For aligned multi-row scale displays, use gross (top), never price/total.
+
+    Small lights and unrelated horizontal displays are separate candidates.
+    Failure to recognize the gross row must stay unreadable, rather than
+    falling through to a clearer zero on a lower row.
+    """
+    selected = []
+    for region in regions:
+        below_another_row = any(
+            other is not region
+            and 0.5 <= other.width / max(1, region.width) <= 2
+            and abs((other.x1 + other.x2 - region.x1 - region.x2) / 2) <= max(other.width, region.width) * 0.35
+            and min(other.height, region.height) * 0.35 < region.y1 - other.y1 < max(other.height, region.height) * 3
+            for other in regions
+        )
+        if not below_another_row:
+            selected.append(region)
+    return selected
+
+
 class DigitDetector:
-    def __init__(self, model_path: Path, confidence: float, *, display_colors: Sequence[str] = ("red",), max_candidates: int = 5, image_size: int = 640) -> None:
+    def __init__(self, model_path: Path, confidence: float, *, display_colors: Sequence[str] = ("red",), max_candidates: int = 5, image_size: int = 640, prefer_top_row: bool = False) -> None:
         self.confidence = confidence
         self.display_colors = tuple(display_colors)
         self.max_candidates = max_candidates
         self.image_size = image_size
+        self.prefer_top_row = prefer_top_row
         self.model = YOLO(str(model_path))
         self.model_version = _model_version(self.model.names)
         logger.info("Digit model mapping: %s", self.model_version)
@@ -177,6 +199,8 @@ class DigitDetector:
     def detect_with_details(self, image: np.ndarray) -> DetectionRun:
         started = time.perf_counter()
         candidates = locate_display_candidates(image, colors=self.display_colors, max_candidates=self.max_candidates)
+        if self.prefer_top_row:
+            candidates = top_display_rows(candidates)
         logger.debug("display locator: candidates=%s regions=%s", len(candidates), [(item.color, item.bbox, round(item.locator_score, 3)) for item in candidates])
         if not candidates:
             return DetectionRun([], None, 0, None, None, 0, 0, (time.perf_counter() - started) * 1000, self.model_version)

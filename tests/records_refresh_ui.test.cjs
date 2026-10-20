@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 
-const html=fs.readFileSync('frontend/index.html','utf8');
+const html=require('./frontend_fixture.cjs').html();
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const start=script.indexOf('async function loadRecords(');
 const end=script.indexOf('\nlet inventoryRecordsLoading=false;',start);
@@ -45,11 +45,11 @@ test('fresh local row wins over an older list request after save',async()=>{
   pending.fresh.resolve({items:[{event_id:'saved',qr_code:'QR-SAVED',captured_at:'2026-09-22T12:00:00',core_weight:null,product_weight:7.5,unit:'kg'}]});
   await fresh;
   assert.equal(body.children.length,1);
-  assert.equal(body.children[0].cells[2],'QR-SAVED');
-  assert.equal(body.children[0].cells[4],'--');
+  assert.equal(body.children[0].cells[4],'QR-SAVED');
+  assert.equal(body.children[0].cells[6],'--');
   pending.older.resolve({items:[]});
   await old;
-  assert.equal(body.children[0].cells[2],'QR-SAVED');
+  assert.equal(body.children[0].cells[4],'QR-SAVED');
 });
 
 test('refresh keeps selected rows beyond the visible page',async()=>{
@@ -71,6 +71,6 @@ test('refresh never inserts an unsaved photo backup into the saved records table
   ]});
   await loading;
   assert.equal(body.children.length,1);
-  assert.equal(body.children[0].cells[2],'QR-SAVED');
+  assert.equal(body.children[0].cells[4],'QR-SAVED');
   assert.equal(vm.runInContext('Boolean(productionRowsByEvent.draft)',ctx),false);
 });

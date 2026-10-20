@@ -1,5 +1,14 @@
 # Hệ thống offline ghép QR với số cân
 
+[![Tải Cân AI tự động (YOLO local, thử nghiệm)](https://img.shields.io/badge/Tải_Cân_AI_tự_động-YOLO_Local_Beta-8250df?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-ai-auto-beta1/TramCanQRAuto-Setup.exe)
+
+**Cân AI tự động — bản thử riêng:** nhận diện trên CPU, kèm model, không cần key Gemini.
+Cài cạnh bản Gemini, mở tại `http://127.0.0.1:8081`, dữ liệu riêng trong
+`%LOCALAPPDATA%\TramCanQRAuto`. Đóng app đang dùng camera trước khi đổi bản.
+Các nút tải/cập nhật Gemini bên dưới giữ nguyên rc74.
+[Hướng dẫn cài thử và quay lại Gemini](packaging/HUONG-DAN-CAN-AI-TU-DONG.md) ·
+[Ghi chú và giới hạn thử nghiệm](docs/release-notes-0.2.0-ai-auto-beta1.md).
+
 [![Tải bản mới nhất (Windows Setup)](https://img.shields.io/badge/⬇_Tải_bản_mới_nhất-Windows_Setup_(.exe)-2ea44f?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
 [![Tải File Cập Nhật Cho Máy Trạm](https://img.shields.io/badge/⚡_Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge&logo=windows-terminal)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 [![GitHub Release](https://img.shields.io/github/v/release/huybitvvt/tram-can-qr-render-pilot?style=for-the-badge&label=Phiên_bản)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest)

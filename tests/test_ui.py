@@ -25,6 +25,9 @@ from roll_qr_scale.test_ui import (
     safe_login_next,
 )
 from roll_qr_scale.weight_ocr import NormalizedROI
+from frontend_fixture import FormatTolerantHTML
+
+TEST_UI_HTML = FormatTolerantHTML(TEST_UI_HTML)
 
 
 def test_automatic_sync_waits_for_running_and_queued_ai_then_sends_valid_pending(tmp_path):
@@ -4363,7 +4366,7 @@ def test_service_rejects_duplicate_logical_camera_ids(tmp_path) -> None:
     store.close()
 
 
-def test_local_yolo_filters_weak_digit_boxes_and_rejects_incomplete_values(tmp_path) -> None:
+def test_local_yolo_rejects_weak_digits_without_shifting_the_reading(tmp_path) -> None:
     from types import SimpleNamespace
 
     class Box:
@@ -4408,9 +4411,14 @@ def test_local_yolo_filters_weak_digit_boxes_and_rejects_incomplete_values(tmp_p
     frame = np.full((480, 640, 3), 80, dtype=np.uint8)
     try:
         result = service._analyze_local_frame(frame, "kg", "", "", None, None)
-        assert result["weight_found"] is True
-        assert result["weight"] == pytest.approx(6.30)
-        assert [item["value"] for item in result["digit_detections"]] == [6, 3, 0]
+        assert result["weight_found"] is False
+        assert result["weight"] is None
+        assert result["requires_human_review"] is True
+        assert [item["value"] for item in result["digit_detections"]] == [6, 3, 0, 8]
+
+        detector.digits = detector.digits[:3]
+        complete = service._analyze_local_frame(frame, "kg", "", "", None, None)
+        assert complete["weight"] == pytest.approx(6.30)
 
         detector.digits = detector.digits[:2]
         incomplete = service._analyze_local_frame(frame, "kg", "", "", None, None)

@@ -5707,7 +5707,7 @@
                             </div>
                             <div id="paramsExtra"></div>
 
-                            <div id="captureStatus" class="status">
+                            <div id="captureStatus" class="status" role="status" aria-live="polite">
                                 Đang chờ dữ liệu…
                             </div>
 
@@ -11141,6 +11141,7 @@
             }
             let initialCameraPermissionCheck = true;
             async function ensureCameraPermission() {
+                if (appStatus?.weight_engine === "local-yolo") return ensureBackendCameraPermission();
                 initialCameraPermissionCheck = false;
                 if (
                     !navigator.mediaDevices ||
@@ -11170,6 +11171,7 @@
                 } catch {}
             }
             async function refreshCameraDevices(requestPermission = true) {
+                if (appStatus?.weight_engine === "local-yolo") return refreshBackendCameraDevices();
                 try {
                     ensureStationsReady();
                     const wantPermission =
@@ -11239,6 +11241,7 @@
                 await refreshCameraDevices(true);
             }
             async function mapCamera(session, deviceId) {
+                if (appStatus?.weight_engine === "local-yolo") return mapBackendCamera(session, deviceId);
                 if (blocksCameraChange(session)) {
                     session.cameraSelect.value = session.deviceId;
                     status(
@@ -11774,6 +11777,7 @@
                 );
             }
             async function openDefaultCamera(session = current()) {
+                if (appStatus?.weight_engine === "local-yolo") return openBackendDefaultCamera(session);
                 session = session || ensureStationsReady();
                 if (!session) return;
                 if (blocksCameraChange(session)) {
@@ -11830,6 +11834,7 @@
                 }
             }
             async function openStationCamera(session) {
+                if (appStatus?.weight_engine === "local-yolo") return openBackendStationCamera(session);
                 session = session || ensureStationsReady();
                 if (!session) return;
                 if (!session.deviceId) {
@@ -11936,6 +11941,7 @@
                 }, 1200);
             }
             async function openAllMapped() {
+                if (appStatus?.weight_engine === "local-yolo") return openAllBackendMapped();
                 await refreshCameraDevices(true);
                 for (const session of stations)
                     if (session.deviceId && !session.hasUnsavedReview())
@@ -12031,7 +12037,7 @@
                     session.cameraSelect.value = source;
                     const canvas = document.createElement("canvas"), context = canvas.getContext("2d", { alpha: false });
                     let firstSnapshot = null, snapshotError = null;
-                    const snapshotDeadline = Date.now() + 10000;
+                    const snapshotDeadline = Date.now() + 30000;
                     while (!firstSnapshot && Date.now() < snapshotDeadline) {
                         try {
                             const candidate = await api("/api/live/snapshot");
@@ -12074,9 +12080,16 @@
                                     canvas.height = image.naturalHeight;
                                 }
                                 drawSnapshot();
+                                if (session.backendSnapshotFailed) {
+                                    session.backendSnapshotFailed = false;
+                                    status(captureStatus, "Camera đã kết nối lại. Kiểm tra số cân và QR trước khi chụp.", "ok");
+                                }
                             }
                         } catch (error) {
-                            console.debug("Live camera snapshot unavailable", error);
+                            session.backendSnapshotFailed = true;
+                            context.clearRect(0, 0, canvas.width, canvas.height);
+                            renderLiveRecognition(session, null, "Mất ảnh camera mới");
+                            status(captureStatus, "Mất ảnh camera mới: " + error.message + ". Kiểm tra dây USB hoặc đóng app khác đang dùng camera.", "bad");
                         }
                         if (session.backendMode && session.backendImage === image && session.streamGeneration === generation)
                             session.backendSnapshotTimer = setTimeout(pollSnapshot, 200);
@@ -12086,8 +12099,9 @@
                     session.video.srcObject = stream;
                     session.video.muted = true;
                     session.video.playsInline = true;
-                    await session.video.play();
                     session.backendSnapshotTimer = setTimeout(pollSnapshot, 200);
+                    drawSnapshot();
+                    await session.video.play();
                     showVideo(session);
                     session.setState("live", "LIVE · backend · " + session.stationId, "ready");
                     status(captureStatus, "Backend camera đã mở · " + canvas.width + "×" + canvas.height + " · đang nhận diện QR/số cân.", "ok");
@@ -12195,6 +12209,25 @@
                     liveRecognitionBusy = true;
                     const discardGeneration = Number(session.liveDiscardGeneration || 0);
                     try {
+                        if (session.backendMode) {
+                            const snapshot = await api("/api/live/recognition");
+                            const event = snapshot.recognition || {};
+                            const raw = String(event.raw_digits || "");
+                            const numericLength = raw.replace(/^-/, "").length;
+                            const readable = event.numeric_value != null && event.confidence >= Number(appStatus.digit_inference_confidence || 0.35) && numericLength >= 3 && numericLength <= 6;
+                            const result = {
+                                weight_found: readable, weight: readable ? event.numeric_value : null,
+                                unit: session.unit || "kg", qr_found: Boolean(event.qr?.data), qr_code: event.qr?.data || null,
+                                digit_detections: (event.detections || []).filter(item => item.type === "digit"),
+                                weight_raw: readable ? "YOLO local · " + raw : "Chưa đọc đủ số cân rõ nét",
+                            };
+                            session.liveRecognitionCanvas = { width: event.frame_width, height: event.frame_height };
+                            if (session === current() && session.stream && discardGeneration === Number(session.liveDiscardGeneration || 0)) {
+                                renderLiveRecognition(session, result);
+                                renderLiveDetectionBoxes(session, result);
+                            }
+                            return;
+                        }
                         await waitForVideoFrame(session.video);
                         const image = drawLiveRecognitionFrame(session);
                         const result = await api("/api/analyze", {
@@ -12714,9 +12747,21 @@
                 }, 1000);
             }
             async function waitBeforeCameraCapture(session, label) {
-                stopAiCountdown();
-                if (!session || !sourceReady(session))
-                    throw new Error("Camera chưa sẵn sàng để chụp");
+                if (typeof appStatus !== "undefined" && appStatus?.weight_engine === "local-yolo") {
+                    stopAiCountdown();
+                    if (!session || !sourceReady(session)) throw new Error("Camera chưa sẵn sàng để chụp");
+                    return;
+                }
+                const video = captureVideo(session), stream = session.stream,
+                    panelStream = session.panelStream, streamGeneration = session.streamGeneration,
+                    panelStreamGeneration = session.panelStreamGeneration;
+                startAiCountdown(session.box, label, 3);
+                if (session === current()) status(captureStatus, "Đếm ngược 3 giây rồi chụp " + label.toLowerCase() + "…", "warn");
+                try {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                    if (session !== current() || captureVideo(session) !== video || session.stream !== stream || session.panelStream !== panelStream || session.streamGeneration !== streamGeneration || session.panelStreamGeneration !== panelStreamGeneration || !sourceReady(session))
+                        throw new Error("Đã hủy chụp: camera hoặc trạm đã thay đổi trong lúc đếm ngược");
+                } finally { stopAiCountdown(); }
             }
             async function captureWeightBurst(session) {
                 if (appStatus && appStatus.weight_engine === "gemini")
@@ -13556,7 +13601,7 @@
                         await waitForVideoFrame(video);
                     }
                     if (session.backendMode) {
-                        liveSnapshot = await api("/api/live/snapshot");
+                        liveSnapshot = await api("/api/live/snapshot?capture=1");
                         if (!liveSnapshot.image || !liveSnapshot.recognition)
                             throw new Error("Backend chưa có ảnh nhận diện live mới nhất");
                         image = liveSnapshot.image;
@@ -13573,7 +13618,7 @@
                 try {
                     if (session.backendMode && liveSnapshot && liveSnapshot.recognition && liveSnapshot.recognition.qr)
                         clientQr = String(liveSnapshot.recognition.qr.data || "").trim();
-                    else if (isProduct)
+                    else if (isProduct && !session.backendMode)
                         clientQr = await decodeClientQr(session.canvas);
                 } catch (error) {
                     console.warn("QR chưa đọc được; vẫn lưu ảnh:", error);
@@ -19505,12 +19550,12 @@
                             );
                             pollPendingSessions();
                         } else if (!mapped.length) {
-                            status(
-                                captureStatus,
-                                "Đang mở camera backend; nhận diện liên tục. Nhấn Space khi QR và số cân đã đúng.",
-                                "warn",
-                            );
-                            await openDefaultCamera(current());
+                            if (engine === "local-yolo") {
+                                status(captureStatus, "Đang mở camera backend; nhận diện liên tục. Nhấn Space khi QR và số cân đã đúng.", "warn");
+                                await openDefaultCamera(current());
+                            } else {
+                                status(captureStatus, "Mở camera rồi chụp cân lõi / cân sản phẩm.", "ok");
+                            }
                         }
                     }
                 } catch (error) {
@@ -22505,7 +22550,11 @@
             loadStatus()
                 .then(() => {
                     $("gatewayIdentity").textContent +=
-                        " · bản " + (appStatus.release || "local");
+                        " · bản " + (appStatus.app_variant === "ai-auto" ? appStatus.app_version : appStatus.release || "local");
+                    if (appStatus.app_variant === "ai-auto") {
+                        document.title = "Cân AI tự động · " + appStatus.app_version;
+                        $("gatewayIdentity").textContent = "CÂN AI TỰ ĐỘNG · " + $("gatewayIdentity").textContent;
+                    }
                 })
                 .finally(() => {
                     $("saveBtn").childNodes[0].nodeValue = "Lưu ";

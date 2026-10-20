@@ -1,0 +1,13 @@
+{
+  "sample_id": "factory_scale_13_04_reference",
+  "image": "factory_scale_13_04_reference.jpg",
+  "sha256": "2dc2d4dcf1db1262ef9eec8653c720e86fe65b1689de8276e83d6cf487510cf2",
+  "byte_length": 327487,
+  "width": 1086,
+  "height": 1448,
+  "expected_qr_code": "MT- MN009-3107268353",
+  "expected_weight": 13.04,
+  "unit": "kg",
+  "gross_roi_xyxy": [503, 1240, 564, 1274],
+  "verification_note": "Operator-verified ground truth: the top gross row reads 13.04 kg and the QR code is MT- MN009-3107268353."
+}

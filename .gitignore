@@ -1,4 +1,5 @@
 .venv/
+node_modules/
 .test-tmp/
 build/
 dist/
@@ -7,6 +8,8 @@ __pycache__/
 *.egg-info/
 *.py[cod]
 *.pt
+!model/best.pt
+**/.DS_Store
 /*.mp4
 /*.pdf
 /*.jpg
@@ -17,6 +20,8 @@ backend/supabase/.temp/
 data/**
 !data/warehouse_scale_demo.png
 !data/viet_nhat_ipt_logo.jpg
+!data/factory_scale_13_04_reference.jpg
+!data/factory_scale_13_04_reference.json
 data/*.db
 data/captures/
 data/test_frame.png

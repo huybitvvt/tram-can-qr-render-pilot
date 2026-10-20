@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 
-const html=fs.readFileSync('frontend/index.html','utf8');
+const html=require('./frontend_fixture.cjs').html();
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const start=script.indexOf('function roundCoreReady(');
 const end=script.indexOf('function extraRoundTags(',start);

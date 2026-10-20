@@ -1,4 +1,9 @@
+param([ValidateSet("Legacy", "AiAuto")][string]$Variant = "Legacy")
 $ErrorActionPreference = "Stop"
+if ($Variant -eq "AiAuto") {
+    & (Join-Path $PSScriptRoot "build_windows_auto.ps1")
+    exit
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 

@@ -141,7 +141,7 @@ except ImportError as exc:  # Keep unit tests and old tooling importable without
     LocalQrDecoder = None  # type: ignore[assignment,misc]
     _LOCAL_CV_IMPORT_ERROR = str(exc)
 
-DEFAULT_DIGIT_MODEL = (
+_LEGACY_DIGIT_MODEL = (
     _REPOSITORY_ROOT
     / "new_system"
     / "Digit_QRCode_Detection"
@@ -149,6 +149,13 @@ DEFAULT_DIGIT_MODEL = (
     / "model"
     / "best.pt"
 )
+DEFAULT_DIGIT_MODEL = (
+    Path(sys._MEIPASS) / "assets" / "model" / "best.pt"
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+    else _REPOSITORY_ROOT / "model" / "best.pt"
+)
+if not DEFAULT_DIGIT_MODEL.is_file() and _LEGACY_DIGIT_MODEL.is_file():
+    DEFAULT_DIGIT_MODEL = _LEGACY_DIGIT_MODEL
 
 
 def _max_weigh_batch_size(shift: str, machine: str) -> int:
@@ -2718,6 +2725,7 @@ class StationUIService:
         self.weight_engine = weight_engine
         self.digit_detector = digit_detector
         self.digit_inference_lock = threading.Lock()
+        self.live_camera = None
         self.local_qr_decoder = local_qr_decoder
         self.digit_model_path = str(digit_model_path or "")
         self.decimal_places = max(0, min(6, int(decimal_places)))
@@ -2780,7 +2788,7 @@ class StationUIService:
 
     def _inference_is_idle(self) -> bool:
         status = self.inference.status()
-        return not status.closed and not status.active and status.queued == 0 and status.submitted == status.completed + status.failed
+        return not self.digit_inference_lock.locked() and not status.closed and not status.active and status.queued == 0 and status.submitted == status.completed + status.failed
 
     def start_ocr_preload(self) -> None:
         if self.weight_engine in {"gemini", "local-yolo"}:
@@ -2807,6 +2815,8 @@ class StationUIService:
             self._ocr_preload_error = str(exc)
 
     def close(self) -> None:
+        if self.live_camera is not None:
+            self.live_camera.stop()
         if self.auto_sync is not None:
             self.auto_sync.stop()
         if self._owns_inference:
@@ -4344,14 +4354,14 @@ class StationUIService:
 
         with self.digit_inference_lock:
             run = self.digit_detector.detect_with_details(frame)
+        # Never remove an uncertain digit and shift the remaining number's
+        # decimal position (e.g. 6308 must not become 6.30). Dots are ignored
+        # because this scale uses the configured fixed decimal count.
         observed_digits = sorted(
-            run.digits, key=lambda item: item.box.x + item.box.width / 2
+            (item for item in run.digits if str(item.value) != "."),
+            key=lambda item: item.box.x + item.box.width / 2,
         )
-        ordered = [
-            item
-            for item in observed_digits
-            if item.confidence >= self.digit_inference_confidence
-        ]
+        ordered = observed_digits
         raw_digits = "".join(str(item.value) for item in ordered) or None
         confidence = min((item.confidence for item in ordered), default=None)
         digit_count = len(raw_digits.lstrip("-") if raw_digits else "")
@@ -4359,6 +4369,7 @@ class StationUIService:
         if (
             raw_digits
             and confidence is not None
+            and confidence >= self.digit_inference_confidence
             and 3 <= digit_count <= 6
             and re.fullmatch(r"-?[0-9]+", raw_digits)
         ):
@@ -4419,7 +4430,7 @@ class StationUIService:
             "ai_latency_seconds": 0.0,
             "ai_attempts": 0,
             "ai_fallback_used": False,
-            "requires_human_review": False,
+            "requires_human_review": reading.value is None,
             "roi": self._roi_text(roi) if roi is not None else None,
             "roi_method": "local-red-display-crop" if run.display is not None else "not-found",
             "gemini_crop_applied": False,
@@ -5928,7 +5939,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--weight-engine",
         choices=tuple(sorted(WEIGHT_ENGINES)),
         default=_default_weight_engine(),
-        help="Legacy compatibility option; this app always uses the local YOLO detector",
+        help="Recognition engine; the AI Auto Windows launcher selects local-yolo",
     )
     parser.add_argument(
         "--gemini-fallback",
@@ -6172,47 +6183,148 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         raise ValueError("Mỗi --machine-id chỉ được gắn với một camera")
     if weight_rois and len(weight_rois) != args.station_count:
         raise ValueError("Số --weight-roi phải bằng --station-count")
-    # Runtime detection is deliberately local-only. Keep the old provider CLI
-    # options parseable for existing launch scripts, but never instantiate or
-    # call Gemini, Codex, Antigravity, or PaddleOCR from this service.
-    weight_engine = "local-yolo"
-    if LocalDigitDetector is None or LocalQrDecoder is None:
-        raise RuntimeError(
-            "Local CV modules could not be imported; install this project's dependencies "
-            f"and verify new_system/Digit_QRCode_Detection: {_LOCAL_CV_IMPORT_ERROR}"
+    weight_engine = args.weight_engine
+    digit_detector = local_qr_decoder = None
+    digit_model_path = None
+    gemini_reader = gemini_flash31_reader = gemini_flash37_reader = None
+    gemini_accurate_reader = gemini_night_readers = gemini_key_manager = None
+    codex_reader = antigravity_reader = None
+    if weight_engine == "local-yolo":
+        if LocalDigitDetector is None or LocalQrDecoder is None:
+            raise RuntimeError(
+                "Local CV modules could not be imported; install this project's dependencies "
+                f"and verify new_system/Digit_QRCode_Detection: {_LOCAL_CV_IMPORT_ERROR}"
+            )
+        digit_model_path = _resolve_project_path(args.digit_model)
+        if not digit_model_path.is_file():
+            raise FileNotFoundError(f"Local digit model not found: {digit_model_path}")
+        if not 0.0 < args.digit_confidence <= 1.0:
+            raise ValueError("--digit-confidence must be greater than 0 and at most 1")
+        if not 0.0 < args.digit_inference_confidence <= 1.0:
+            raise ValueError("--digit-inference-confidence must be greater than 0 and at most 1")
+        if args.digit_image_size < 32:
+            raise ValueError("--digit-image-size must be at least 32")
+        if not 0 <= args.decimal_places <= 6:
+            raise ValueError("--decimal-places must be between 0 and 6")
+        display_colors = tuple(item.strip().lower() for item in args.display_colors.split(",") if item.strip())
+        if not display_colors or any(color not in {"red", "green", "blue"} for color in display_colors):
+            raise ValueError("DISPLAY_COLORS must contain red, green, or blue")
+        if args.display_max_candidates < 1:
+            raise ValueError("DISPLAY_MAX_CANDIDATES must be at least 1")
+        digit_detector = LocalDigitDetector(
+            digit_model_path,
+            args.digit_confidence,
+            display_colors=display_colors,
+            max_candidates=args.display_max_candidates,
+            image_size=args.digit_image_size,
+            prefer_top_row=True,
         )
-    digit_model_path = _resolve_project_path(args.digit_model)
-    if not digit_model_path.is_file():
-        raise FileNotFoundError(f"Local digit model not found: {digit_model_path}")
-    if not 0.0 < args.digit_confidence <= 1.0:
-        raise ValueError("--digit-confidence must be greater than 0 and at most 1")
-    if not 0.0 < args.digit_inference_confidence <= 1.0:
-        raise ValueError("--digit-inference-confidence must be greater than 0 and at most 1")
-    if args.digit_image_size < 32:
-        raise ValueError("--digit-image-size must be at least 32")
-    if not 0 <= args.decimal_places <= 6:
-        raise ValueError("--decimal-places must be between 0 and 6")
-    display_colors = tuple(item.strip().lower() for item in args.display_colors.split(",") if item.strip())
-    if not display_colors or any(color not in {"red", "green", "blue"} for color in display_colors):
-        raise ValueError("DISPLAY_COLORS must contain red, green, or blue")
-    if args.display_max_candidates < 1:
-        raise ValueError("DISPLAY_MAX_CANDIDATES must be at least 1")
-    digit_detector = LocalDigitDetector(
-        digit_model_path,
-        args.digit_confidence,
-        display_colors=display_colors,
-        max_candidates=args.display_max_candidates,
-        image_size=args.digit_image_size,
-    )
-    local_qr_decoder = LocalQrDecoder()
-    gemini_reader = None
-    gemini_flash31_reader = None
-    gemini_flash37_reader = None
-    gemini_accurate_reader = None
-    gemini_night_readers = None
-    gemini_key_manager = None
-    codex_reader = None
-    antigravity_reader = None
+        local_qr_decoder = LocalQrDecoder()
+    else:
+        weight_engine = args.weight_engine
+        if args.gemini_fallback and weight_engine == "local":
+            weight_engine = "hybrid"
+        gemini_reader = None
+        gemini_flash31_reader = None
+        gemini_flash37_reader = None
+        gemini_accurate_reader = None
+        gemini_night_readers = None
+        gemini_key_manager = None
+        if weight_engine in {"hybrid", "gemini"}:
+            gemini_encryption_key = os.environ.get(
+                "ROLL_SCALE_GEMINI_KEY_ENCRYPTION_KEY", ""
+            ) or os.environ.get("ROLL_SCALE_CODEX_TOKEN_KEY", "")
+            gemini_key_store = EncryptedCodexTokenStore(
+                args.api_url,
+                args.api_token,
+                secret_name=f"gemini-api-key:{args.gateway_id}",
+                # Keep the legacy action name so already-deployed Supabase Functions
+                # can store any encrypted secret by its distinct name. New Functions
+                # accept this action too.
+                secret_action="codex-auth",
+                encryption_key=gemini_encryption_key,
+            )
+            gemini_backup_key_store = EncryptedCodexTokenStore(
+                args.api_url,
+                args.api_token,
+                secret_name=f"gemini-api-key-backup:{args.gateway_id}",
+                secret_action="codex-auth",
+                encryption_key=gemini_encryption_key,
+            )
+            gemini_key_manager = GeminiKeyManager(
+                gemini_key_store,
+                backup_store=gemini_backup_key_store,
+                fast_model=args.gemini_model,
+                flash31_model=args.gemini_31_model,
+                flash37_model=args.gemini_37_model,
+                accurate_model=args.gemini_accurate_model,
+                fast_timeout=args.gemini_timeout,
+                flash31_timeout=args.gemini_31_timeout,
+                flash37_timeout=args.gemini_37_timeout,
+                accurate_timeout=args.gemini_accurate_timeout,
+                initial_key=os.environ.get("ROLL_SCALE_GEMINI_API_KEY", ""),
+                initial_backup_key=os.environ.get("ROLL_SCALE_GEMINI_BACKUP_API_KEY", ""),
+                initial_spare_key=os.environ.get("ROLL_SCALE_GEMINI_SPARE_API_KEY", ""),
+                rpm_limit=_env_positive_int(
+                    "ROLL_SCALE_GEMINI_RPM_LIMIT", DEFAULT_GEMINI_RPM_LIMIT
+                ),
+                tpm_limit=_env_positive_int(
+                    "ROLL_SCALE_GEMINI_TPM_LIMIT", DEFAULT_GEMINI_TPM_LIMIT
+                ),
+                rpd_limit=_env_positive_int(
+                    "ROLL_SCALE_GEMINI_RPD_LIMIT", DEFAULT_GEMINI_RPD_LIMIT
+                ),
+            )
+            gemini_shift_keys = gemini_key_manager.load_shift_keys()
+            gemini_api_key = gemini_shift_keys["day"]
+            if not gemini_api_key:
+                raise ValueError(
+                    f"weight_engine={weight_engine} cần Gemini API key trong biến môi trường "
+                    "hoặc kho key mã hóa Supabase"
+                )
+            (
+                gemini_reader,
+                gemini_flash31_reader,
+                gemini_flash37_reader,
+                gemini_accurate_reader,
+            ) = gemini_key_manager.create_readers(
+                gemini_api_key,
+            )
+            if gemini_shift_keys["night"]:
+                gemini_night_readers = gemini_key_manager.create_readers(
+                    gemini_shift_keys["night"]
+                )
+        codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None
+        if args.codex_enabled:
+            codex_mode = args.codex_mode
+            if codex_mode == "auto":
+                codex_mode = "oauth" if os.environ.get("RENDER", "").strip() else "cli"
+            if codex_mode == "oauth":
+                token_store = EncryptedCodexTokenStore(
+                    args.api_url,
+                    args.api_token,
+                    secret_name=f"codex-oauth:{args.gateway_id}",
+                    encryption_key=os.environ.get("ROLL_SCALE_CODEX_TOKEN_KEY", ""),
+                )
+                codex_reader = CodexOAuthWeightReader(
+                    CodexOAuthClient(token_store, timeout_seconds=min(args.codex_timeout, 30.0)),
+                    model=args.codex_model,
+                    timeout_seconds=args.codex_timeout,
+                    client_version=os.environ.get("ROLL_SCALE_CODEX_CLIENT_VERSION", "0.124.0"),
+                )
+            else:
+                codex_reader = CodexWeightReader(
+                    args.codex_command,
+                    model=args.codex_model,
+                    timeout_seconds=args.codex_timeout,
+                )
+        antigravity_reader = AntigravityWeightReader(
+            args.antigravity_command,
+            model=args.antigravity_model,
+            timeout_seconds=args.antigravity_timeout,
+            api_key=os.environ.get("ROLL_SCALE_ANTIGRAVITY_API_KEY", ""),
+            rotate_image_turns=args.antigravity_rotate_image_turns,
+        )
     store = MeasurementStore(args.db, args.captures)
     worker = None
     if args.api_url:
@@ -6232,7 +6344,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         args.lookup_url,
         args.lookup_token,
         args.duplicate_window,
-        QRReader(),
+        QRReader() if weight_engine == "local-yolo" else QRReader(args.yolo_model, args.yolo_confidence, args.yolo_mode, args.yolo_imgsz),
         args.ocr_min_confidence,
         args.ocr_download,
         FactorySampleStore(args.factory_samples),
@@ -6252,7 +6364,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         auto_sync=args.auto_sync,
         auto_advance=args.auto_advance,
         weight_rois=weight_rois,
-        weight_burst_frames=1,
+        weight_burst_frames=1 if weight_engine == "local-yolo" else args.weight_burst_frames,
         gemini_reader=gemini_reader,
         gemini_flash31_reader=gemini_flash31_reader,
         gemini_flash37_reader=gemini_flash37_reader,
@@ -6268,8 +6380,22 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         decimal_places=args.decimal_places,
         digit_inference_confidence=args.digit_inference_confidence,
     )
+    if weight_engine == "local-yolo":
+        from .live_camera import LiveCamera
+
+        configured_camera_source = os.environ.get("ROLL_SCALE_CAMERA_SOURCE", os.environ.get("CAMERA_SOURCE", "0")).strip()
+        service.live_camera = LiveCamera(
+            configured_camera_source, digit_detector, LocalQrDecoder(),
+            width=args.camera_width, height=args.camera_height,
+            camera_backend=os.environ.get("ROLL_SCALE_CAMERA_BACKEND", "DSHOW" if sys.platform == "win32" else "AUTO"),
+            inference_fps=float(os.environ.get("ROLL_SCALE_LIVE_INFERENCE_FPS", "2")),
+            confidence=args.digit_inference_confidence, decimal_places=args.decimal_places,
+            inference_lock=service.digit_inference_lock,
+        )
     demo_path = Path(args.demo_image)
     logo_path = _resolve_logo_path(args.logo_image)
+    live_snapshot_cache = {"frame_id": None, "image": ""}
+    live_snapshot_cache_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def is_https(self) -> bool:
@@ -6536,6 +6662,39 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             if not self.require_authorization():
                 return
+            if parsed.path in {"/api/live/cameras", "/api/live/snapshot", "/api/live/recognition"}:
+                camera = service.live_camera
+                if camera is None:
+                    self.send_json(404, {"ok": False, "error": "live_camera_disabled"})
+                    return
+                if parsed.path == "/api/live/cameras":
+                    try:
+                        cameras = camera.cameras(maximum_index=3)
+                    except Exception:
+                        logging.exception("Camera discovery failed")
+                        self.send_json(503, {"ok": False, "message": "Không tìm được camera. Kiểm tra kết nối và quyền camera Windows."})
+                        return
+                    self.send_json(200, {"ok": True, "cameras": cameras})
+                    return
+                capture_now = parsed.path == "/api/live/snapshot" and urllib.parse.parse_qs(parsed.query).get("capture") == ["1"]
+                snapshot = camera.capture_snapshot() if capture_now else camera.snapshot()
+                if snapshot is None:
+                    self.send_json(503, {"ok": False, "message": "Chưa có ảnh camera mới. Kiểm tra camera rồi mở lại nguồn."})
+                    return
+                frame, recognition, frame_id = snapshot
+                payload = {"ok": True, "frame_id": frame_id, "recognition": recognition}
+                if parsed.path == "/api/live/snapshot":
+                    with live_snapshot_cache_lock:
+                        if live_snapshot_cache["frame_id"] != frame_id:
+                            encoded, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                            if not encoded:
+                                self.send_json(503, {"ok": False, "message": "Không mã hóa được ảnh camera"})
+                                return
+                            live_snapshot_cache["image"] = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
+                            live_snapshot_cache["frame_id"] = frame_id
+                        payload["image"] = live_snapshot_cache["image"]
+                self.send_json(200, payload)
+                return
             if parsed.path == "/api/measurement-image":
                 query = urllib.parse.parse_qs(parsed.query)
                 event_id = query.get("event_id", [""])[0]
@@ -6579,6 +6738,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     200,
                     {
                         "ok": True,
+                        "app_variant": os.environ.get("ROLL_SCALE_APP_VARIANT", "source"),
+                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0rc74"),
                         "pending_count": store.pending_count(),
                         "yolo_enabled": service.weight_engine == "local-yolo" or service.reader.model is not None,
                         "yolo_mode": "local-digit-model+opencv-qr" if service.weight_engine == "local-yolo" else service.reader.yolo_mode,
@@ -7313,6 +7474,19 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             try:
                 payload = self.read_json()
+                if parsed.path == "/api/live/camera":
+                    if service.live_camera is None:
+                        raise ValueError("Camera backend ch? d?ng cho b?n YOLO local")
+                    source = str(payload.get("source", "configured")).strip()
+                    source = configured_camera_source if source == "configured" else source
+                    if not source.isdecimal() or not 0 <= int(source) <= 32:
+                        # Network/file sources may only come from trusted local config.
+                        if source != configured_camera_source:
+                            raise ValueError("Chọn camera USB hoặc nguồn camera đã cấu hình")
+                    service.live_camera.select_source(source)
+                    service.live_camera.start()
+                    self.send_json(200, {"ok": True})
+                    return
                 if service.weight_engine == "local-yolo" and (
                     parsed.path.startswith(("/api/panel/", "/api/gemini/", "/api/codex/", "/api/antigravity/"))
                 ):

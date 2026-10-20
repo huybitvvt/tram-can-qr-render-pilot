@@ -2,10 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const html = fs.readFileSync(
-  path.join(__dirname, '..', 'frontend', 'index.html'),
-  'utf8'
-);
+const html = require('./frontend_fixture.cjs').html().replace(/>\s+</g, '><').replace(/>\s+([^<]*?)</g, (_all, text) => '>' + text.trim() + '<');
 
 assert.match(html, /id="pushSupabaseBtn"[^>]*>Đẩy Supabase</);
 assert.match(html, /id="nhapKhoBtn"[^>]*>Nhập kho</);

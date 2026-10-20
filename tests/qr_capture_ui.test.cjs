@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+const script=require('./frontend_fixture.cjs').html().match(/<script>([\s\S]*?)<\/script>/)[1];
 
 function load(ctx,names){
  for(const name of names){
@@ -42,7 +42,7 @@ test('zoomed camera capture uses the visible frame so the QR is larger',()=>{
 test('live camera hides boxes measured on previous composite evidence',()=>{
  const positions=[],session={preview:{},video:{},qrBox:{},roiBox:{},roi:{inset:true},qrRoi:{old:true},configuredRoi:null};
  let source=session.video;
- const ctx=vm.createContext({current:()=>null,mediaGeometry:()=>({}),visibleSource:()=>source,panelMode:false,renderPanelOverlays(){},positionBox:(element,roi)=>positions.push([element,roi])});
+ const ctx=vm.createContext({current:()=>null,mediaGeometry:()=>({}),visibleSource:()=>source,panelMode:false,renderPanelOverlays(){},renderLiveDetectionBoxes(){},positionBox:(element,roi)=>positions.push([element,roi])});
  load(ctx,['updateBoxes']);
  ctx.updateBoxes(session);
  assert.equal(positions[0][1],null);

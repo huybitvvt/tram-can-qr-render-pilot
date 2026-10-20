@@ -77,8 +77,11 @@ class LiveCamera:
         self._source_generation = 0
         self._frame_id = 0
         self._raw: np.ndarray | None = None
+        self._raw_at = 0.0
+        self._raw_captured_at = datetime.now(timezone.utc)
         self._recognized_raw: np.ndarray | None = None
         self._recognized_id = 0
+        self._recognized_at = 0.0
         self._annotated: np.ndarray | None = None
         self._event: dict[str, Any] = self._empty_event()
         self._connected = False
@@ -119,6 +122,9 @@ class LiveCamera:
         for thread in (self._capture_thread, self._recognition_thread):
             if thread:
                 thread.join(timeout=5)
+        with self._condition:
+            self._connected = False
+            self._recognized_raw = None
 
     def select_source(self, source: str) -> None:
         source = str(source).strip()
@@ -129,8 +135,10 @@ class LiveCamera:
             self._source = source
             self._source_generation += 1
             self._raw = self._annotated = None
+            self._raw_at = 0.0
             self._recognized_raw = None
             self._recognized_id = 0
+            self._recognized_at = 0.0
             self._connected = False
             self._event = self._empty_event()
             self.stabilizer = Stabilizer(self.stabilizer.required_frames)
@@ -217,6 +225,12 @@ class LiveCamera:
                 capture = None
                 with self._condition:
                     self._connected = False
+                    self._raw = self._recognized_raw = self._annotated = None
+                    self._source_generation += 1
+                    self._frame_id += 1
+                    self._event = self._empty_event()
+                    self.stabilizer = Stabilizer(self.stabilizer.required_frames)
+                    self._jpeg_cache = None
                     self._condition.notify_all()
                 self._stop.wait(self.reconnect_seconds)
                 continue
@@ -225,6 +239,8 @@ class LiveCamera:
                     continue
                 self._frame_id += 1
                 self._raw = image
+                self._raw_at = time.monotonic()
+                self._raw_captured_at = datetime.now(timezone.utc)
                 self._connected = True
                 self._condition.notify_all()
         if capture is not None:
@@ -266,9 +282,11 @@ class LiveCamera:
                 frame_id = self._frame_id
                 source_generation = self._source_generation
                 image = self._raw.copy()
+                captured_monotonic = self._raw_at
+                captured_at = self._raw_captured_at
+                stabilizer = self.stabilizer
             last_id = frame_id
             try:
-                captured_at = datetime.now(timezone.utc)
                 qr = self.qr_decoder.decode(image)
                 if self.detector:
                     with self.inference_lock:
@@ -283,7 +301,7 @@ class LiveCamera:
                     digits=run.digits if run else [],
                     threshold=self.confidence,
                     decimal_places=self.decimal_places,
-                    stabilizer=self.stabilizer,
+                    stabilizer=stabilizer,
                     model_version=getattr(run, "model_version", "model_1"),
                 )
                 if run and run.display:
@@ -297,6 +315,7 @@ class LiveCamera:
                     self._annotated = annotated
                     self._recognized_raw = image
                     self._recognized_id = frame_id
+                    self._recognized_at = captured_monotonic
                     self._jpeg_cache = None
                     self._condition.notify_all()
                 if qr or (run and run.digits):
@@ -311,9 +330,12 @@ class LiveCamera:
                     self._annotated = image
                     self._recognized_raw = image
                     self._recognized_id = frame_id
+                    self._recognized_at = captured_monotonic
                     self._jpeg_cache = None
                     self._condition.notify_all()
-            self._stop.wait(max(0.0, interval - (time.monotonic() - started)))
+            # Leave a real idle window for queued captures and pending sync,
+            # including when a slow CPU takes longer than the target interval.
+            self._stop.wait(max(0.25, interval - (time.monotonic() - started)))
 
     def event(self) -> dict[str, Any]:
         with self._condition:
@@ -321,9 +343,22 @@ class LiveCamera:
 
     def snapshot(self, quality: int = 95) -> tuple[np.ndarray, dict[str, Any], int] | None:
         with self._condition:
-            if not self._connected or self._recognized_raw is None:
+            if not self._connected or self._recognized_raw is None or time.monotonic() - self._recognized_at > 10:
                 return None
             return self._recognized_raw.copy(), dict(self._event), self._recognized_id
+
+    def capture_snapshot(self) -> tuple[np.ndarray, dict[str, Any], int] | None:
+        """Freeze the latest camera frame, without attaching older recognition.
+
+        The capture API will analyze these exact bytes independently. Preview
+        results can lag behind the physical camera on a slow CPU.
+        """
+        with self._condition:
+            if not self._connected or self._raw is None or time.monotonic() - self._raw_at > 2:
+                return None
+            event = {**self._empty_event(), "timestamp": int(self._raw_captured_at.timestamp() * 1000),
+                     "frame_width": self._raw.shape[1], "frame_height": self._raw.shape[0], "status": "CAPTURED"}
+            return self._raw.copy(), event, self._frame_id
 
     def wait_jpeg(self, after_id: int, timeout: float = 1.0) -> tuple[int, bytes] | None:
         with self._condition:

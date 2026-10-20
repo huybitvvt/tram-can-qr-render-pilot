@@ -1,0 +1,8 @@
+{
+  "filename": "best.pt",
+  "bytes": 20766085,
+  "sha256": "9ed72153375c0ddfd42e247dc0453c95c3c1061b4ab66f397384aa6bb7c8a8e8",
+  "mapping": "model_2: 0='-', 1='.', 2..11='0'..'9'",
+  "supplied_by": "Project owner, 2026-10-20",
+  "decimal_places": 2
+}
