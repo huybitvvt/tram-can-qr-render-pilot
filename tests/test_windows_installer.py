@@ -22,7 +22,7 @@ def test_installer_assigns_one_unique_local_station_from_four_choices() -> None:
     assert "'ROLL_SCALE_STATION_IDS=station-' + StationSuffix" in INSTALLER
     assert "'ROLL_SCALE_CAMERA_IDS=camera-' + StationSuffix" in INSTALLER
     assert "'ROLL_SCALE_LOCAL_RETENTION_DAYS=7'" in INSTALLER
-    assert "'ROLL_SCALE_GEMINI_API_KEY=replace-with-key-for-station-' + StationSuffix" in INSTALLER
+    assert "'ROLL_SCALE_WEIGHT_ENGINE=local-yolo'" in INSTALLER
     assert "Dien bo Supabase rieng duoc cap cho dung tram nay" in INSTALLER
 
 

@@ -308,7 +308,7 @@ def test_ui_can_temporarily_analyze_an_uploaded_scale_image() -> None:
     assert "button.id='testImageBtn'" in TEST_UI_HTML
     assert "button.id='inventoryTestImageBtn'" in TEST_UI_HTML
     assert "async function loadLocalTestImage(file)" in TEST_UI_HTML
-    assert "await analyzeCurrent(captureSlot(session).kind)" in TEST_UI_HTML
+    assert "await analyzeCurrent(slot.kind)" in TEST_UI_HTML
     assert "if(!sourceReady(session)){await openDefaultCamera(session)" in TEST_UI_HTML
 
 

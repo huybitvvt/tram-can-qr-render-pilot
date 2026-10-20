@@ -4287,8 +4287,6 @@
             }
 
             #panelModeBtn,
-            #testImageBtn,
-            #inventoryTestImageBtn,
             #gatewayIdentity,
             .capture-path {
                 display: none !important;
@@ -7195,19 +7193,17 @@
             if (!$("testImageBtn")) {
                 const button = document.createElement("button");
                 button.id = "testImageBtn";
-                button.hidden = true;
                 button.type = "button";
-                button.textContent = "Thêm ảnh thử";
-                button.title = "Tạm thời chọn ảnh cân từ máy thay cho camera";
-                $("productionToolbar").appendChild(button);
+                button.textContent = "Chọn ảnh từ thiết bị";
+                button.title = "Chọn ô cân lõi hoặc cân SP, rồi chọn ảnh để nhận diện (JPG, PNG, WebP, BMP; tối đa 20 MB)";
+                $("productionToolbar").insertBefore(button, $("analyzeCoreBtn"));
             }
             if (!$("inventoryTestImageBtn")) {
                 const button = document.createElement("button");
                 button.id = "inventoryTestImageBtn";
-                button.hidden = true;
                 button.type = "button";
-                button.textContent = "Thêm ảnh thử";
-                button.title = "Tạm thời chọn ảnh cân từ máy thay cho camera";
+                button.textContent = "Chọn ảnh từ thiết bị";
+                button.title = "Chọn ảnh cân để nhận diện (JPG, PNG, WebP, BMP; tối đa 20 MB)";
                 $("inventoryPanel")
                     .querySelector(".inventory-toolbar")
                     .appendChild(button);
@@ -8660,6 +8656,7 @@
                     session &&
                     (session.state === "analyzing" ||
                         session.state === "saving" ||
+                        session._analyzeLock ||
                         session._discardLock ||
                         session._saveLock ||
                         (session.hydratedPending && session.eventId)),
@@ -10805,6 +10802,11 @@
                     busy ||
                     !ready ||
                     slotAiPending(slotRound, slot.kind);
+                $("testImageBtn").disabled =
+                    workflowMode !== "production" ||
+                    panelMode || busy ||
+                    Boolean(slotRound && slotRound.saved) ||
+                    slotAiPending(slotRound, slot.kind);
                 $("factoryBtn").disabled =
                     panelMode || busy || !session.lastAnalysis;
                 $("analyzeCoreBtn").disabled =
@@ -10849,6 +10851,9 @@
                 $("clearPanelRegionsBtn").disabled =
                     !panelMode || busy || !panelRegions(session).length;
                 const inventory = inventoryState(session);
+                $("inventoryTestImageBtn").disabled =
+                    workflowMode !== "inventory" ||
+                    panelMode || busy || Boolean(inventory.eventId);
                 $("inventoryCaptureBtn").disabled =
                     workflowMode !== "inventory" || busy || !ready;
                 $("inventoryPhoneBtn").disabled =
@@ -12794,12 +12799,17 @@
             async function loadLocalTestImage(file) {
                 const session = current(),
                     input = $("testImageInput");
+                let loading = false;
                 try {
                     if (!session || !file) return;
                     if (
+                        panelMode ||
                         session.state === "analyzing" ||
                         session.state === "saving" ||
-                        session._analyzeLock
+                        session._analyzeLock ||
+                        session._saveLock ||
+                        session._saveAllLock ||
+                        session._discardLock
                     ) {
                         status(
                             captureStatus,
@@ -12808,10 +12818,23 @@
                         );
                         return;
                     }
+                    const mode = workflowMode,
+                        slot = { ...captureSlot(session) },
+                        round = ensureRounds(session)[slot.round];
+                    if (mode === "inventory") {
+                        if (inventoryState(session).eventId)
+                            throw new Error("Đã có ảnh kiểm kho. Bấm Bỏ trước khi chọn ảnh khác.");
+                    } else if (mode !== "production" || !round || round.saved || slotAiPending(round, slot.kind)) {
+                        throw new Error("Hãy chọn ô cân chưa lưu và không đang chờ AI.");
+                    }
                     if (!String(file.type || "").startsWith("image/"))
                         throw new Error("Tệp đã chọn không phải ảnh");
                     if (file.size > 20 * 1024 * 1024)
                         throw new Error("Ảnh thử phải nhỏ hơn 20 MB");
+                    session._analyzeLock = true;
+                    loading = true;
+                    renderControls();
+                    status(captureStatus, "Đang nạp ảnh " + file.name + "…", "warn");
                     const data = await new Promise((resolve, reject) => {
                         const reader = new FileReader();
                         reader.onload = () =>
@@ -12820,20 +12843,39 @@
                             reject(new Error("Không đọc được tệp ảnh"));
                         reader.readAsDataURL(file);
                     });
+                    const decoded = new Image();
+                    await new Promise((resolve, reject) => {
+                        decoded.onload = resolve;
+                        decoded.onerror = () => reject(new Error("Không giải mã được ảnh đã chọn"));
+                        decoded.src = data;
+                    });
+                    const selected = captureSlot(session);
+                    if (current() !== session || workflowMode !== mode ||
+                        (mode === "production" &&
+                            (selected.kind !== slot.kind || selected.round !== slot.round ||
+                                ensureRounds(session)[slot.round] !== round || round.saved || slotAiPending(round, slot.kind))))
+                        throw new Error("Ô cân đã thay đổi trong lúc nạp ảnh. Hãy chọn lại ảnh.");
                     session.stop();
                     session.stopPanel();
+                    renderLiveRecognition(session, null, "Ảnh từ thiết bị · xem kết quả tại ô cân đã chọn.");
+                    renderLiveDetectionBoxes(session, null);
                     await new Promise((resolve, reject) => {
                         session.preview.onload = () => {
                             session.preview.onload = null;
+                            session.preview.onerror = null;
                             showPreview(session);
                             resolve();
                         };
                         session.preview.onerror = () => {
+                            session.preview.onload = null;
                             session.preview.onerror = null;
                             reject(new Error("Không giải mã được ảnh đã chọn"));
                         };
                         session.preview.src = data;
                     });
+                    resetViewZoom(session);
+                    session._analyzeLock = false;
+                    loading = false;
                     session.setState("idle", "ẢNH THỬ · " + file.name, "ready");
                     status(
                         captureStatus,
@@ -12844,8 +12886,8 @@
                             " nhận diện…",
                         "warn",
                     );
-                    if (workflowMode === "inventory") await analyzeInventory();
-                    else await analyzeCurrent(captureSlot(session).kind);
+                    if (mode === "inventory") await analyzeInventory();
+                    else await analyzeCurrent(slot.kind);
                 } catch (error) {
                     status(
                         captureStatus,
@@ -12853,6 +12895,7 @@
                         "bad",
                     );
                 } finally {
+                    if (loading) session._analyzeLock = false;
                     if (input) input.value = "";
                     renderControls();
                 }
@@ -22550,10 +22593,12 @@
             loadStatus()
                 .then(() => {
                     $("gatewayIdentity").textContent +=
-                        " · bản " + (appStatus.app_variant === "ai-auto" ? appStatus.app_version : appStatus.release || "local");
+                        " · bản " + (appStatus.app_version || appStatus.release || "local");
                     if (appStatus.app_variant === "ai-auto") {
                         document.title = "Cân AI tự động · " + appStatus.app_version;
                         $("gatewayIdentity").textContent = "CÂN AI TỰ ĐỘNG · " + $("gatewayIdentity").textContent;
+                    } else if (appStatus.weight_engine === "local-yolo") {
+                        document.title = "Trạm Cân QR · AI local · " + appStatus.app_version;
                     }
                 })
                 .finally(() => {

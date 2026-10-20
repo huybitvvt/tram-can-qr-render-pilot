@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -179,3 +180,73 @@ def test_packaged_runtime_rejects_identity_count_mismatch(
 
     with pytest.raises(ValueError, match="đúng 3 giá trị"):
         build_runtime_argv(tmp_path / "runtime", tmp_path / "assets")
+
+
+def test_local_upgrade_uses_existing_data_identity_and_bundled_model(tmp_path, monkeypatch):
+    from roll_qr_scale.windows_app import build_local_argv
+    from roll_qr_scale.test_ui import build_parser
+
+    monkeypatch.setenv("ROLL_SCALE_WEIGHT_ENGINE", "gemini")
+    monkeypatch.setenv("ROLL_SCALE_DIGIT_MODEL", "C:/missing-colleague-source/model/best.pt")
+    monkeypatch.setenv("ROLL_SCALE_PORT", "8080")
+    monkeypatch.setenv("ROLL_SCALE_STATION_COUNT", "1")
+    monkeypatch.setenv("ROLL_SCALE_STATION_IDS", "station-04")
+    monkeypatch.setenv("ROLL_SCALE_CAMERA_IDS", "camera-04")
+    monkeypatch.setenv("ROLL_SCALE_GATEWAY_ID", "gateway-04")
+    assets = tmp_path / "assets"
+    model = assets / "model/best.pt"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"fixture")
+    root = tmp_path / "TramCanQR"
+    args = build_parser().parse_args(build_local_argv(root, assets))
+    assert args.weight_engine == "local-yolo" and args.weight_burst_frames == 1
+    assert Path(args.digit_model) == model
+    assert args.port == 8080 and args.gateway_id == "gateway-04"
+    assert args.station_ids == ["station-04"] and args.camera_ids == ["camera-04"]
+    assert Path(args.db) == root / "data/measurements.db"
+    assert Path(args.captures) == root / "data/captures"
+
+
+def test_upgrade_snapshot_includes_uncheckpointed_wal_and_preserves_config_photos(tmp_path):
+    from roll_qr_scale.windows_app import backup_before_local_upgrade
+
+    root = tmp_path / "TramCanQR"
+    captures = root / "data/captures"
+    captures.mkdir(parents=True)
+    photo = captures / "old-core.jpg"
+    photo.write_bytes(b"original-customer-photo")
+    config = root / "config.env"
+    config.write_bytes(b"ROLL_SCALE_WEIGHT_ENGINE=gemini\r\nROLL_SCALE_DEVICE_TOKEN=test-secret\r\n")
+    original_config = config.read_bytes()
+    database = root / "data/measurements.db"
+    with sqlite3.connect(database) as source:
+        source.execute("PRAGMA journal_mode=WAL")
+        source.execute("PRAGMA wal_autocheckpoint=0")
+        source.execute("CREATE TABLE measurements (event_id TEXT, sync_status TEXT, image_path TEXT)")
+        source.executemany("INSERT INTO measurements VALUES (?, ?, ?)", [
+            ("old-pending", "pending", str(photo)), ("old-failed", "failed", str(photo))])
+        source.commit()
+        backup = backup_before_local_upgrade(root, config)
+        with sqlite3.connect(backup / "measurements.db") as snapshot:
+            assert snapshot.execute("SELECT event_id, sync_status FROM measurements").fetchall() == [
+                ("old-pending", "pending"), ("old-failed", "failed")]
+        assert (backup / "config.env").read_bytes() == original_config
+        source.execute("INSERT INTO measurements VALUES ('new-local', 'pending', ?)", (str(photo),))
+        source.commit()
+        assert backup_before_local_upgrade(root, config) == backup
+        with sqlite3.connect(backup / "measurements.db") as snapshot:
+            assert snapshot.execute("SELECT COUNT(*) FROM measurements").fetchone()[0] == 2
+    assert config.read_bytes() == original_config
+    assert photo.read_bytes() == b"original-customer-photo"
+
+
+def test_upgrade_refuses_corrupt_database_without_marking_backup_complete(tmp_path):
+    from roll_qr_scale.windows_app import backup_before_local_upgrade
+
+    (tmp_path / "data").mkdir()
+    database = tmp_path / "data/measurements.db"
+    database.write_bytes(b"corrupt-database")
+    with pytest.raises(sqlite3.DatabaseError):
+        backup_before_local_upgrade(tmp_path, None)
+    assert not (tmp_path / "backups/local-rc75.json").exists()
+    assert database.read_bytes() == b"corrupt-database"

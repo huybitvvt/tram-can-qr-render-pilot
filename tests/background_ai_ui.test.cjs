@@ -109,11 +109,15 @@ test('controls allow the next capture while disabling only the pending slot and 
  session.state='awaiting-weight';session.rounds[0].coreAiPending=true;session.rounds[0].coreImage='saved-photo';
  session.selectedSlot={kind:'core',round:1};ctx.renderControls();
  assert.equal(nodes.analyzeCoreBtn.disabled,false);assert.equal(nodes.photoOnlyBtn.disabled,false);
+ assert.equal(nodes.testImageBtn.disabled,false);
  assert.equal(nodes.sourceShift.disabled,true);assert.equal(nodes.roundCount.disabled,true);
  assert.equal(nodes.weight.disabled,true);assert.equal(nodes.productWeight.disabled,false);
  session.selectedSlot={kind:'core',round:0};ctx.renderControls();
  assert.equal(nodes.analyzeCoreBtn.disabled,true);assert.equal(nodes.analyzeProductBtn.disabled,false);
  assert.equal(nodes.discardBtn.disabled,false);assert.equal(nodes.photoOnlyBtn.disabled,true);
+ assert.equal(nodes.testImageBtn.disabled,true);
+ session.rounds[0].coreAiPending=false;session.rounds[0].saved=true;ctx.renderControls();
+ assert.equal(nodes.testImageBtn.disabled,true);
 });
 
 test('a running product can be discarded without waiting for AI or removing its core',async()=>{
