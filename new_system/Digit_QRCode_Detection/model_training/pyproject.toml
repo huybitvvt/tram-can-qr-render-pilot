@@ -1,0 +1,12 @@
+[project]
+name = "model-training"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.11.2",
+    "opencv-python>=5.0.0.93",
+    "ultralytics>=8.4.164",
+]

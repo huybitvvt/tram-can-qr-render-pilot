@@ -1,0 +1,3 @@
+import type { RecognitionStatus } from '../types/recognition'
+const labels: Record<RecognitionStatus, string> = { WAITING: 'Waiting for recognition', DETECTING: 'Detecting', READY_TO_SAVE: 'Ready to save', SAVED: 'Saved successfully', LOW_CONFIDENCE: 'Low confidence', INCOMPLETE: 'Recognition incomplete', ERROR: 'Attention required' }
+export function StatusIndicator({ status, storageEnabled = true }: { status: RecognitionStatus; storageEnabled?: boolean }) { return <span className={`status status--${status.toLowerCase()}`}>{status === 'READY_TO_SAVE' && !storageEnabled ? 'Recognition ready' : labels[status]}</span> }
