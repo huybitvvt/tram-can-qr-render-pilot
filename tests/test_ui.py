@@ -4363,6 +4363,64 @@ def test_service_rejects_duplicate_logical_camera_ids(tmp_path) -> None:
     store.close()
 
 
+def test_local_yolo_filters_weak_digit_boxes_and_rejects_incomplete_values(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    class Box:
+        def __init__(self, x):
+            self.x, self.y, self.width, self.height = x, 100, 20, 40
+
+        def as_dict(self):
+            return {"x": self.x, "y": self.y, "width": self.width, "height": self.height}
+
+    class Detector:
+        digits = [
+            SimpleNamespace(value=value, confidence=confidence, box=Box(index * 25), class_id=index)
+            for index, (value, confidence) in enumerate(
+                [(6, 0.62), (3, 0.80), (0, 0.50), (8, 0.32)]
+            )
+        ]
+
+        def detect_with_details(self, frame):
+            return SimpleNamespace(
+                digits=self.digits,
+                display=None,
+                crop_scale=0.6,
+                preprocessing="original",
+                inference_count=1,
+            )
+
+    store = MeasurementStore(tmp_path / "digits.db", tmp_path / "captures")
+    detector = Detector()
+    service = StationUIService(
+        store,
+        None,
+        None,
+        None,
+        weight_engine="local-yolo",
+        digit_detector=detector,
+        digit_inference_confidence=0.35,
+        decimal_places=2,
+    )
+    service.assess_quality = lambda frame: object()
+    service.quality_result = lambda result: ({}, True)
+    service._decode_local_qr = lambda frame, decoder: {"found": False}
+    frame = np.full((480, 640, 3), 80, dtype=np.uint8)
+    try:
+        result = service._analyze_local_frame(frame, "kg", "", "", None, None)
+        assert result["weight_found"] is True
+        assert result["weight"] == pytest.approx(6.30)
+        assert [item["value"] for item in result["digit_detections"]] == [6, 3, 0]
+
+        detector.digits = detector.digits[:2]
+        incomplete = service._analyze_local_frame(frame, "kg", "", "", None, None)
+        assert incomplete["weight_found"] is False
+        assert incomplete["weight"] is None
+    finally:
+        service.close()
+        store.close()
+
+
 def test_measurement_pages_do_not_repeat_synced_local_rows(tmp_path, monkeypatch) -> None:
     import json
     import urllib.request

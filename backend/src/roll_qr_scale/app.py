@@ -18,7 +18,6 @@ from .storage import MeasurementStore
 from .sync import OutboxSyncWorker
 from .weight_ocr import CameraOCRWeightSource, parse_normalized_roi
 
-
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
@@ -26,14 +25,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Bind a QR code to a scale value and store the evidence image."
     )
-    parser.add_argument("--source", default="0", help="Camera index (0), image, or video path")
+    parser.add_argument(
+        "--source", default="0", help="Camera index (0), image, or video path"
+    )
     parser.add_argument(
         "--qr-input",
         choices=("camera", "hid", "serial"),
         default="camera",
         help="Primary QR input: evidence camera, USB keyboard-wedge scanner, or scanner COM port",
     )
-    parser.add_argument("--qr-serial-port", help="QR scanner COM port when --qr-input serial")
+    parser.add_argument(
+        "--qr-serial-port", help="QR scanner COM port when --qr-input serial"
+    )
     parser.add_argument("--qr-baudrate", type=int, default=9600)
     parser.add_argument("--scanner-min-length", type=int, default=3)
     parser.add_argument(
@@ -50,7 +53,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
         help="Weight source; auto selects serial when --serial-port is present, otherwise manual",
     )
-    parser.add_argument("--weight", default="", help="Initial manual weight when no serial port is used")
+    parser.add_argument(
+        "--weight", default="", help="Initial manual weight when no serial port is used"
+    )
     parser.add_argument("--unit", default="kg")
     parser.add_argument("--stable-samples", type=int, default=3)
     parser.add_argument("--stability-tolerance", type=float, default=0.02)
@@ -65,10 +70,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow PaddleOCR to download PP-OCRv6_medium_rec once; omit for offline operation",
     )
-    parser.add_argument("--ocr-gpu", action="store_true", help="Use a PaddlePaddle CUDA runtime")
+    parser.add_argument(
+        "--ocr-gpu", action="store_true", help="Use a PaddlePaddle CUDA runtime"
+    )
     parser.add_argument("--db", default="data/measurements.db")
     parser.add_argument("--captures", default="data/captures")
-    parser.add_argument("--yolo-model", help="Custom QR detector weights (best.pt), not stock COCO weights")
+    parser.add_argument(
+        "--yolo-model",
+        help="Custom QR detector weights (best.pt), not stock COCO weights",
+    )
     parser.add_argument("--yolo-confidence", type=float, default=0.25)
     parser.add_argument("--yolo-imgsz", type=int, default=960)
     parser.add_argument(
@@ -114,8 +124,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Retry the local outbox without opening a camera",
     )
-    parser.add_argument("--once", action="store_true", help="Process one frame without opening a window")
-    parser.add_argument("--auto-save", action="store_true", help="With --once, save when QR and weight are valid")
+    parser.add_argument(
+        "--once", action="store_true", help="Process one frame without opening a window"
+    )
+    parser.add_argument(
+        "--auto-save",
+        action="store_true",
+        help="With --once, save when QR and weight are valid",
+    )
     return parser
 
 
@@ -138,9 +154,15 @@ def _open_source(source: str) -> tuple[np.ndarray | None, cv2.VideoCapture | Non
     return None, capture
 
 
-def _put_line(frame: np.ndarray, text: str, row: int, color: tuple[int, int, int]) -> None:
-    cv2.putText(frame, text, (18, 34 + row * 31), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 0, 0), 4)
-    cv2.putText(frame, text, (18, 34 + row * 31), cv2.FONT_HERSHEY_SIMPLEX, 0.72, color, 2)
+def _put_line(
+    frame: np.ndarray, text: str, row: int, color: tuple[int, int, int]
+) -> None:
+    cv2.putText(
+        frame, text, (18, 34 + row * 31), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (0, 0, 0), 4
+    )
+    cv2.putText(
+        frame, text, (18, 34 + row * 31), cv2.FONT_HERSHEY_SIMPLEX, 0.72, color, 2
+    )
 
 
 def _draw_status(
@@ -158,7 +180,9 @@ def _draw_status(
     qr_text = qr_value or "WAITING"
     if len(qr_text) > 55:
         qr_text = qr_text[:52] + "..."
-    weight_text = "WAITING" if reading.value is None else f"{reading.value:.3f} {reading.unit}"
+    weight_text = (
+        "WAITING" if reading.value is None else f"{reading.value:.3f} {reading.unit}"
+    )
     stability = "STABLE" if reading.stable else "UNSTABLE"
     source_text = qr_source or qr_input_mode
     _put_line(
@@ -167,7 +191,12 @@ def _draw_status(
         0,
         (40, 240, 40) if qr_value else (0, 200, 255),
     )
-    _put_line(frame, f"WEIGHT: {weight_text} [{stability}]", 1, (40, 240, 40) if reading.stable else (0, 200, 255))
+    _put_line(
+        frame,
+        f"WEIGHT: {weight_text} [{stability}]",
+        1,
+        (40, 240, 40) if reading.stable else (0, 200, 255),
+    )
     _put_line(frame, f"STATUS: {status} | OUTBOX: {pending_count}", 2, (255, 255, 255))
     if camera_weight:
         hint = (
@@ -178,7 +207,11 @@ def _draw_status(
     elif qr_input_mode == "hid":
         hint = "Scan QR (scanner suffix Enter) | SPACE=save | ESC=quit"
     else:
-        hint = "Type weight; Backspace/C=edit | SPACE=save | Q=quit" if manual else "SPACE=save | Q=quit"
+        hint = (
+            "Type weight; Backspace/C=edit | SPACE=save | Q=quit"
+            if manual
+            else "SPACE=save | Q=quit"
+        )
     _put_line(frame, hint, 3, (220, 220, 220))
 
 
@@ -238,7 +271,9 @@ def _save_current(
 
 def run(args: argparse.Namespace) -> int:
     if bool(args.api_url) != bool(args.api_token):
-        raise ValueError("Both --api-url and --api-token are required for Supabase sync")
+        raise ValueError(
+            "Both --api-url and --api-token are required for Supabase sync"
+        )
     if args.sync_only:
         if not args.api_url:
             raise ValueError("--sync-only requires --api-url and --api-token")
@@ -265,7 +300,9 @@ def run(args: argparse.Namespace) -> int:
     if weight_input == "serial" and not args.serial_port:
         raise ValueError("--weight-input serial requires --serial-port")
     if weight_input == "camera" and not args.weight_roi:
-        raise ValueError("--weight-input camera requires a calibrated --weight-roi x1,y1,x2,y2")
+        raise ValueError(
+            "--weight-input camera requires a calibrated --weight-roi x1,y1,x2,y2"
+        )
     if args.qr_input == "hid" and weight_input == "manual" and not args.weight:
         raise ValueError("HID scanner with manual scale requires an initial --weight")
     if args.qr_serial_port and args.serial_port == args.qr_serial_port:
@@ -345,7 +382,9 @@ def run(args: argparse.Namespace) -> int:
                 args.camera_qr_fallback and scanner_value is None
             )
             detections: list[QRDetection] = (
-                reader.decode(raw_frame) if use_camera_decoder and not camera_weight else []
+                reader.decode(raw_frame)
+                if use_camera_decoder and not camera_weight
+                else []
             )
             if camera_weight and pending_frame is not None:
                 detections = pending_detections
@@ -408,7 +447,9 @@ def run(args: argparse.Namespace) -> int:
                     )
                     print(status)
                 else:
-                    print(f"QR={latest_qr!r} WEIGHT={reading.value!r} {reading.unit} STABLE={reading.stable}")
+                    print(
+                        f"QR={latest_qr!r} WEIGHT={reading.value!r} {reading.unit} STABLE={reading.stable}"
+                    )
                 return 0 if latest_qr else 2
 
             cv2.imshow("QR + Scale Capture", display)
@@ -446,7 +487,9 @@ def run(args: argparse.Namespace) -> int:
                 if camera_weight:
                     pending_frame = raw_frame.copy()
                     pending_event_id = str(uuid.uuid4())
-                    pending_detections = reader.decode(pending_frame) if use_camera_decoder else []
+                    pending_detections = (
+                        reader.decode(pending_frame) if use_camera_decoder else []
+                    )
                     if scanner_value is not None:
                         latest_qr = scanner_value.value
                         latest_qr_source = scanner_value.source
@@ -458,7 +501,9 @@ def run(args: argparse.Namespace) -> int:
                         latest_qr_source = None
                     reading = weight_source.capture(pending_frame)
                     confidence = (
-                        f" ({reading.confidence:.0%})" if reading.confidence is not None else ""
+                        f" ({reading.confidence:.0%})"
+                        if reading.confidence is not None
+                        else ""
                     )
                     if latest_qr and reading.value is not None:
                         status = (
@@ -466,8 +511,10 @@ def run(args: argparse.Namespace) -> int:
                             "press ENTER to confirm"
                         )
                     else:
-                        missing = "QR and weight" if not latest_qr and reading.value is None else (
-                            "QR" if not latest_qr else "weight"
+                        missing = (
+                            "QR and weight"
+                            if not latest_qr and reading.value is None
+                            else ("QR" if not latest_qr else "weight")
                         )
                         status = f"DETECTION FAILED: no {missing}; SPACE=rescan"
                     last_save_at = time.monotonic()
@@ -495,7 +542,11 @@ def run(args: argparse.Namespace) -> int:
                 continue
             if isinstance(qr_input, HIDQRInput) and qr_input.handle_key(key):
                 scanned = qr_input.reading()
-                status = "QR SCANNED" if scanned else f"SCANNING QR: {len(qr_input.buffer)} chars"
+                status = (
+                    "QR SCANNED"
+                    if scanned
+                    else f"SCANNING QR: {len(qr_input.buffer)} chars"
+                )
                 continue
             if weight_source.handle_key(key):
                 status = "WEIGHT EDITED"

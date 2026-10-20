@@ -118,6 +118,38 @@ from .weight_ocr import (
 
 MAX_REQUEST_BYTES = 24 * 1024 * 1024
 
+# The CV implementation is maintained and tested in the new system. Keep the
+# legacy gateway's HTTP/session/storage layer, but load that implementation as
+# a library so detection runs in-process without a second server or AI client.
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+_LOCAL_CV_SRC = (
+    _REPOSITORY_ROOT
+    / "new_system"
+    / "Digit_QRCode_Detection"
+    / "backend"
+    / "src"
+)
+if _LOCAL_CV_SRC.is_dir() and str(_LOCAL_CV_SRC) not in sys.path:
+    sys.path.insert(0, str(_LOCAL_CV_SRC))
+
+try:
+    from backend.cv.digit_detector import DigitDetector as LocalDigitDetector
+    from backend.cv.qr_decoder import QrDecoder as LocalQrDecoder
+    _LOCAL_CV_IMPORT_ERROR = ""
+except ImportError as exc:  # Keep unit tests and old tooling importable without optional CV dependencies.
+    LocalDigitDetector = None  # type: ignore[assignment,misc]
+    LocalQrDecoder = None  # type: ignore[assignment,misc]
+    _LOCAL_CV_IMPORT_ERROR = str(exc)
+
+DEFAULT_DIGIT_MODEL = (
+    _REPOSITORY_ROOT
+    / "new_system"
+    / "Digit_QRCode_Detection"
+    / "backend"
+    / "model"
+    / "best.pt"
+)
+
 
 def _max_weigh_batch_size(shift: str, machine: str) -> int:
     if shift == "Ca chuẩn Đà Nẵng":
@@ -240,7 +272,7 @@ def _is_legacy_storage_path(value: object) -> bool:
 MAX_BURST_FRAMES = 9
 DEFAULT_WEIGHT_BURST_FRAMES = 5
 UNITS = {"kg", "g", "lb"}
-WEIGHT_ENGINES = {"local", "hybrid", "gemini"}
+WEIGHT_ENGINES = {"local", "hybrid", "gemini", "local-yolo"}
 GEMINI_RECOGNITION_PROFILES = {"flash31", "fast", "flash37", "accurate"}
 AI_RECOGNITION_PROVIDERS = {"gemini", "codex", "antigravity"}
 PRODUCTION_ORDER_TABLES = (
@@ -703,8 +735,8 @@ def _resolve_logo_path(configured: str | Path) -> Path | None:
 
 
 def _load_local_dotenv() -> None:
-    cwd_env_path = Path.cwd() / ".env"
-    env_path = cwd_env_path if cwd_env_path.is_file() else _project_root() / ".env"
+    candidates = (Path.cwd() / ".env", _project_root() / ".env", _project_root() / "backend" / ".env")
+    env_path = next((candidate for candidate in candidates if candidate.is_file()), candidates[0])
     if not env_path.is_file():
         return
     try:
@@ -720,6 +752,18 @@ def _load_local_dotenv() -> None:
         value = value.strip().strip('"').strip("'")
         if key and (key not in os.environ or not str(os.environ.get(key, "")).strip()):
             os.environ[key] = value
+
+
+def _resolve_project_path(value: str | Path) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    candidates = (
+        Path.cwd() / path,
+        _project_root() / path,
+        _project_root() / "backend" / path,
+    )
+    return next((item.resolve() for item in candidates if item.is_file()), candidates[0].resolve())
 
 
 def _ingest_api_url() -> str:
@@ -2587,6 +2631,11 @@ class StationUIService:
         codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None,
         antigravity_reader: AntigravityWeightReader | None = None,
         weight_engine: str = "local",
+        digit_detector: object | None = None,
+        local_qr_decoder: object | None = None,
+        digit_model_path: str | Path | None = None,
+        decimal_places: int = 2,
+        digit_inference_confidence: float = 0.70,
         auto_sync: bool = True,
     ):
         if not 1 <= int(station_count) <= 3:
@@ -2618,7 +2667,7 @@ class StationUIService:
         if not 1 <= int(weight_burst_frames) <= MAX_BURST_FRAMES:
             raise ValueError(f"weight_burst_frames phải từ 1 đến {MAX_BURST_FRAMES}")
         if weight_engine not in WEIGHT_ENGINES:
-            raise ValueError("weight_engine phải là local, hybrid hoặc gemini")
+            raise ValueError("weight_engine không hợp lệ")
         if weight_engine in {"hybrid", "gemini"} and gemini_reader is None:
             raise ValueError(f"weight_engine={weight_engine} cần Gemini reader")
         parsed_weight_rois = [parse_normalized_roi(value) for value in configured_weight_rois]
@@ -2667,6 +2716,18 @@ class StationUIService:
         self.codex_reader = codex_reader
         self.antigravity_reader = antigravity_reader
         self.weight_engine = weight_engine
+        self.digit_detector = digit_detector
+        self.digit_inference_lock = threading.Lock()
+        self.local_qr_decoder = local_qr_decoder
+        self.digit_model_path = str(digit_model_path or "")
+        self.decimal_places = max(0, min(6, int(decimal_places)))
+        self.digit_inference_confidence = max(
+            0.0, min(1.0, float(digit_inference_confidence))
+        )
+        self._local_qr_decoders: dict[str, object] = {}
+        self._local_qr_decoder_lock = threading.Lock()
+        if local_qr_decoder is not None:
+            self._local_qr_decoders["default"] = local_qr_decoder
         self.weight_rois: dict[str, NormalizedROI] = {
             station_id: roi
             for station_id, roi in zip(configured_station_ids, parsed_weight_rois)
@@ -2722,7 +2783,7 @@ class StationUIService:
         return not status.closed and not status.active and status.queued == 0 and status.submitted == status.completed + status.failed
 
     def start_ocr_preload(self) -> None:
-        if self.weight_engine == "gemini":
+        if self.weight_engine in {"gemini", "local-yolo"}:
             return
         if self._ocr_preload_started:
             return
@@ -3714,6 +3775,14 @@ class StationUIService:
             "auto_advance": self.auto_advance,
             "weight_burst_frames": self.weight_burst_frames,
             "weight_engine": self.weight_engine,
+            "digit_model": self.digit_model_path,
+            "digit_model_version": getattr(self.digit_detector, "model_version", None),
+            "digit_detection_enabled": self.digit_detector is not None,
+            "digit_confidence": getattr(self.digit_detector, "confidence", None),
+            "digit_inference_confidence": self.digit_inference_confidence,
+            "decimal_places": self.decimal_places,
+            "qr_engine": "opencv-crop" if self.weight_engine == "local-yolo" else "legacy",
+            "panel_mode_enabled": self.weight_engine != "local-yolo",
             "ocr_ready": self._ocr_reader is not None,
             "ocr_preload_error": self._ocr_preload_error,
             "gemini": (
@@ -3771,8 +3840,9 @@ class StationUIService:
                 }
             ),
             "recognition_providers": {
-                "default": "gemini",
-                "gemini": {"available": self.gemini_reader is not None},
+                "default": "local-yolo" if self.weight_engine == "local-yolo" else "gemini",
+                "local-yolo": {"available": self.digit_detector is not None},
+                "gemini": {"available": self.gemini_reader is not None and self.weight_engine != "local-yolo"},
                 "codex": {
                     "available": bool(
                         self.codex_reader is not None
@@ -4193,7 +4263,183 @@ class StationUIService:
         if not cv2.imwrite(str(path), frame):
             raise RuntimeError("Không ghi được ảnh chẩn đoán OCR")
 
+    def _local_qr_decoder_for(self, key: str | None = None) -> object | None:
+        if self.local_qr_decoder is None:
+            return None
+        cache_key = str(key or "default")
+        with self._local_qr_decoder_lock:
+            decoder = self._local_qr_decoders.get(cache_key)
+            if decoder is None:
+                # QrDecoder caches the last QR location to accelerate the next
+                # frame. Give each camera its own cache so camera movement at
+                # one station cannot steer another station's crop.
+                decoder_type = type(self.local_qr_decoder)
+                decoder = decoder_type(
+                    preview_max_side=getattr(self.local_qr_decoder, "preview_max_side", 800),
+                    crop_padding=getattr(self.local_qr_decoder, "crop_padding", 0.40),
+                )
+                self._local_qr_decoders[cache_key] = decoder
+            return decoder
+
+    @staticmethod
+    def _qr_result_payload(frame: np.ndarray, result: object | None, stage: str = "none") -> dict[str, object]:
+        if result is None:
+            return {"ok": True, "found": False, "qr_code": None, "decoder": stage, "qr_roi": None}
+        box = result.box
+        height, width = frame.shape[:2]
+        qr_roi = NormalizedROI(
+            min(1.0, max(0.0, box.x / max(1, width))),
+            min(1.0, max(0.0, box.y / max(1, height))),
+            min(1.0, max(0.0, (box.x + box.width) / max(1, width))),
+            min(1.0, max(0.0, (box.y + box.height) / max(1, height))),
+        )
+        return {
+            "ok": True,
+            "found": True,
+            "qr_code": result.data,
+            "decoder": f"opencv-{stage}" if stage != "none" else "opencv-crop",
+            "qr_roi": StationUIService._roi_text(qr_roi),
+        }
+
+    def _decode_local_qr(self, frame: np.ndarray, decoder: object | None = None) -> dict[str, object]:
+        selected = decoder or self._local_qr_decoder_for()
+        if selected is None:
+            return {"ok": True, "found": False, "qr_code": None, "decoder": "unavailable", "qr_roi": None}
+        result = selected.decode(frame)
+        return self._qr_result_payload(frame, result, str(getattr(selected, "last_stage", "none")))
+
+    def _analyze_local_frame(
+        self,
+        frame: np.ndarray,
+        unit: str,
+        capture_kind: str,
+        client_qr_code: str,
+        qr_frame: np.ndarray | None,
+        qr_decoder: object | None,
+    ) -> dict[str, object]:
+        if unit not in UNITS:
+            raise ValueError("Đơn vị không hợp lệ")
+        if capture_kind not in {"", "core", "product", "inventory"}:
+            raise ValueError("capture_kind phải là core, product hoặc inventory")
+        if self.digit_detector is None:
+            raise RuntimeError("Local YOLO digit detector is not initialized")
+
+        quality = self.assess_quality(frame)
+        quality_payload, quality_pass = self.quality_result(quality)
+        qr_source_frame = qr_frame if qr_frame is not None else frame
+        decoded = self._decode_local_qr(qr_source_frame, qr_decoder)
+        client_qr = client_qr_code.strip()
+        if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
+            raise ValueError("Mã QR từ trình duyệt không hợp lệ")
+        qr_conflict = False
+        if client_qr:
+            local_qr = str(decoded.get("qr_code") or "").strip()
+            if local_qr and local_qr != client_qr:
+                qr_conflict = True
+                decoded = {**decoded, "found": False, "qr_code": None, "decoder": "dedicated-decoder-conflict"}
+            elif local_qr:
+                decoded["decoder"] = f"{decoded.get('decoder', 'opencv')}+browser-confirmed"
+            else:
+                decoded = {**decoded, "found": True, "qr_code": client_qr, "decoder": "browser-barcode-detector", "qr_roi": None}
+
+        with self.digit_inference_lock:
+            run = self.digit_detector.detect_with_details(frame)
+        observed_digits = sorted(
+            run.digits, key=lambda item: item.box.x + item.box.width / 2
+        )
+        ordered = [
+            item
+            for item in observed_digits
+            if item.confidence >= self.digit_inference_confidence
+        ]
+        raw_digits = "".join(str(item.value) for item in ordered) or None
+        confidence = min((item.confidence for item in ordered), default=None)
+        digit_count = len(raw_digits.lstrip("-") if raw_digits else "")
+        numeric_reading: float | None = None
+        if (
+            raw_digits
+            and confidence is not None
+            and 3 <= digit_count <= 6
+            and re.fullmatch(r"-?[0-9]+", raw_digits)
+        ):
+            numeric_reading = int(raw_digits) / (10 ** self.decimal_places)
+        if numeric_reading is None:
+            reading = WeightReading(
+                None, unit, False,
+                f"LOCAL YOLO: no complete numeric reading (raw={raw_digits or 'none'}; observed={''.join(str(item.value) for item in observed_digits) or 'none'}; min_confidence={self.digit_inference_confidence:.2f}; roi={run.display.bbox if run.display else None})",
+                confidence,
+            )
+        else:
+            reading = WeightReading(
+                numeric_reading, unit, True,
+                f"LOCAL YOLO: digits={raw_digits}; decimal_places={self.decimal_places}; "
+                f"display={run.display.bbox if run.display else None}; "
+                f"scale={run.crop_scale}; preprocessing={run.preprocessing}",
+                confidence,
+            )
+        roi = None
+        if run.display is not None:
+            height, width = frame.shape[:2]
+            roi = NormalizedROI(
+                run.display.x1 / max(1, width),
+                run.display.y1 / max(1, height),
+                run.display.x2 / max(1, width),
+                run.display.y2 / max(1, height),
+            )
+        return {
+            "ok": True,
+            "qr_found": bool(decoded.get("found")),
+            "qr_code": decoded.get("qr_code"),
+            "qr_decoder": decoded.get("decoder"),
+            "qr_roi": decoded.get("qr_roi"),
+            "qr_conflict": qr_conflict,
+            "weight_found": reading.value is not None,
+            "weight": reading.value,
+            "unit": unit,
+            "confidence": reading.confidence,
+            "weight_raw": reading.raw,
+            "recognition_source": "local-yolo" if reading.value is not None else "none",
+            "recognition_profile": "local",
+            "recognition_provider": "local-yolo",
+            "gemini_key_slot": None,
+            "gemini_active_key_slot": None,
+            "local_candidate": reading.value,
+            "gemini_used": False,
+            "codex_used": False,
+            "antigravity_used": False,
+            "gemini_suggestion": None,
+            "gemini_latency_seconds": None,
+            "gemini_input_tokens": None,
+            "gemini_output_tokens": None,
+            "gemini_thinking_tokens": None,
+            "gemini_total_tokens": None,
+            "gemini_attempts": 0,
+            "gemini_fallback_used": False,
+            "gemini_fallback_key_slot": None,
+            "ai_latency_seconds": 0.0,
+            "ai_attempts": 0,
+            "ai_fallback_used": False,
+            "requires_human_review": False,
+            "roi": self._roi_text(roi) if roi is not None else None,
+            "roi_method": "local-red-display-crop" if run.display is not None else "not-found",
+            "gemini_crop_applied": False,
+            "ai_crop_applied": False,
+            "display_bbox": run.display.bbox if run.display is not None else None,
+            "digit_detections": [
+                {"value": item.value, "confidence": item.confidence, "class_id": item.class_id, "bbox": item.box.as_dict()}
+                for item in ordered
+            ],
+            "crop_scale": run.crop_scale,
+            "preprocessing": run.preprocessing,
+            "inference_count": run.inference_count,
+            "burst_frames": 1,
+            "quality": quality_payload,
+            "quality_pass": quality_pass,
+        }
+
     def _decode_qr(self, frame: np.ndarray) -> dict[str, object]:
+        if self.weight_engine == "local-yolo":
+            return self._decode_local_qr(frame)
         detections = self.reader.decode(frame)
         if not detections:
             return {"ok": True, "found": False}
@@ -4520,7 +4766,17 @@ class StationUIService:
         client_qr_code: str = "",
         gemini_key_slot: str = "day",
         qr_frame: np.ndarray | None = None,
+        local_qr_decoder: object | None = None,
     ) -> dict[str, object]:
+        if self.weight_engine == "local-yolo":
+            return self._analyze_local_frame(
+                frame,
+                unit,
+                capture_kind,
+                client_qr_code,
+                qr_frame,
+                local_qr_decoder,
+            )
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
         if recognition_profile not in GEMINI_RECOGNITION_PROFILES:
@@ -5047,6 +5303,9 @@ class StationUIService:
                 raise ValueError("Cần đủ station_id và camera_id để chọn nguồn camera")
             self.validate_station_source(context_station_id, context_camera_id)
         gemini_key_slot = self._gemini_slot_for_shift(context_shift)
+        local_qr_decoder = self._local_qr_decoder_for(
+            context_station_id or station_id or "default"
+        )
         configured_roi = self.weight_rois.get(context_station_id or station_id or "")
         if configured_roi is None and not any(identities) and self.station_count == 1:
             configured_roi = self.weight_rois.get(str(self.station_configs[0]["station_id"]))
@@ -5095,6 +5354,7 @@ class StationUIService:
                 client_qr_code,
                 gemini_key_slot,
                 qr_frame,
+                local_qr_decoder,
             )
             return {**result, **evidence_metadata}
         if not all(identities):
@@ -5126,6 +5386,7 @@ class StationUIService:
                 client_qr_code,
                 gemini_key_slot,
                 qr_frame,
+                local_qr_decoder,
             )
             binding = self.sessions.mark_ready(binding.analysis_id)
         except Exception as exc:
@@ -5614,6 +5875,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local web UI for testing QR + scale + Supabase")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--camera-width", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_WIDTH", "1920")))
+    parser.add_argument("--camera-height", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_HEIGHT", "1080")))
+    parser.add_argument("--camera-recognition-max-edge", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_RECOGNITION_MAX_EDGE", "960")))
+    parser.add_argument("--display-max-candidates", type=int, default=int(os.environ.get("ROLL_SCALE_DISPLAY_MAX_CANDIDATES", os.environ.get("DISPLAY_MAX_CANDIDATES", "5"))))
+    parser.add_argument("--display-colors", default=os.environ.get("ROLL_SCALE_DISPLAY_COLORS", os.environ.get("DISPLAY_COLORS", "red")))
     parser.add_argument("--db", default="data/measurements.db")
     parser.add_argument("--captures", default="data/captures")
     parser.add_argument("--demo-image", default="data/warehouse_scale_demo.png")
@@ -5633,10 +5899,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ocr-min-confidence", type=float, default=0.60)
     parser.add_argument("--ocr-download", action="store_true")
     parser.add_argument(
+        "--digit-model",
+        default=os.environ.get("ROLL_SCALE_DIGIT_MODEL", os.environ.get("MODEL_PATH", str(DEFAULT_DIGIT_MODEL))),
+        help="Local 0-9 display detector checkpoint (defaults to new_system/backend/model/best.pt)",
+    )
+    parser.add_argument(
+        "--digit-confidence",
+        type=float,
+        default=float(os.environ.get("ROLL_SCALE_DIGIT_CONFIDENCE", os.environ.get("DETECTION_CONFIDENCE", "0.25"))),
+    )
+    parser.add_argument(
+        "--digit-inference-confidence",
+        type=float,
+        default=float(os.environ.get("ROLL_SCALE_DIGIT_INFERENCE_CONFIDENCE", os.environ.get("INFERENCE_CONFIDENCE", "0.70"))),
+        help="Minimum per-digit confidence; weaker boxes are ignored before assembling the reading",
+    )
+    parser.add_argument(
+        "--digit-image-size",
+        type=int,
+        default=int(os.environ.get("ROLL_SCALE_DIGIT_IMAGE_SIZE", os.environ.get("DISPLAY_IMAGE_SIZE", "640"))),
+    )
+    parser.add_argument(
+        "--decimal-places",
+        type=int,
+        default=int(os.environ.get("ROLL_SCALE_DECIMAL_PLACES", os.environ.get("DECIMAL_PLACES", "2"))),
+    )
+    parser.add_argument(
         "--weight-engine",
         choices=tuple(sorted(WEIGHT_ENGINES)),
         default=_default_weight_engine(),
-        help="Bộ đọc cân: local, hybrid hoặc gemini (Gemini primary)",
+        help="Legacy compatibility option; this app always uses the local YOLO detector",
     )
     parser.add_argument(
         "--gemini-fallback",
@@ -5818,7 +6110,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         choices=range(1, MAX_BURST_FRAMES + 1),
         default=DEFAULT_WEIGHT_BURST_FRAMES,
-        help="Tổng số frame cho local/hybrid; chế độ Gemini luôn chụp đúng 1 ảnh",
+        help="Legacy compatibility option; the local YOLO detector processes one frame",
     )
     parser.add_argument(
         "--auto-advance",
@@ -5852,6 +6144,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, StationUIService]:
+    if args.camera_width < 1 or args.camera_height < 1:
+        raise ValueError("ROLL_SCALE_CAMERA_WIDTH / HEIGHT phải lớn hơn 0")
+    if not 320 <= args.camera_recognition_max_edge <= 4096:
+        raise ValueError("ROLL_SCALE_CAMERA_RECOGNITION_MAX_EDGE phải từ 320 đến 4096")
     if bool(args.api_url) != bool(args.api_token):
         raise ValueError("Cần đủ URL và token của API ghi")
     if bool(args.lookup_url) != bool(args.lookup_token):
@@ -5876,110 +6172,47 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         raise ValueError("Mỗi --machine-id chỉ được gắn với một camera")
     if weight_rois and len(weight_rois) != args.station_count:
         raise ValueError("Số --weight-roi phải bằng --station-count")
-    weight_engine = args.weight_engine
-    if args.gemini_fallback and weight_engine == "local":
-        weight_engine = "hybrid"
+    # Runtime detection is deliberately local-only. Keep the old provider CLI
+    # options parseable for existing launch scripts, but never instantiate or
+    # call Gemini, Codex, Antigravity, or PaddleOCR from this service.
+    weight_engine = "local-yolo"
+    if LocalDigitDetector is None or LocalQrDecoder is None:
+        raise RuntimeError(
+            "Local CV modules could not be imported; install this project's dependencies "
+            f"and verify new_system/Digit_QRCode_Detection: {_LOCAL_CV_IMPORT_ERROR}"
+        )
+    digit_model_path = _resolve_project_path(args.digit_model)
+    if not digit_model_path.is_file():
+        raise FileNotFoundError(f"Local digit model not found: {digit_model_path}")
+    if not 0.0 < args.digit_confidence <= 1.0:
+        raise ValueError("--digit-confidence must be greater than 0 and at most 1")
+    if not 0.0 < args.digit_inference_confidence <= 1.0:
+        raise ValueError("--digit-inference-confidence must be greater than 0 and at most 1")
+    if args.digit_image_size < 32:
+        raise ValueError("--digit-image-size must be at least 32")
+    if not 0 <= args.decimal_places <= 6:
+        raise ValueError("--decimal-places must be between 0 and 6")
+    display_colors = tuple(item.strip().lower() for item in args.display_colors.split(",") if item.strip())
+    if not display_colors or any(color not in {"red", "green", "blue"} for color in display_colors):
+        raise ValueError("DISPLAY_COLORS must contain red, green, or blue")
+    if args.display_max_candidates < 1:
+        raise ValueError("DISPLAY_MAX_CANDIDATES must be at least 1")
+    digit_detector = LocalDigitDetector(
+        digit_model_path,
+        args.digit_confidence,
+        display_colors=display_colors,
+        max_candidates=args.display_max_candidates,
+        image_size=args.digit_image_size,
+    )
+    local_qr_decoder = LocalQrDecoder()
     gemini_reader = None
     gemini_flash31_reader = None
     gemini_flash37_reader = None
     gemini_accurate_reader = None
     gemini_night_readers = None
     gemini_key_manager = None
-    if weight_engine in {"hybrid", "gemini"}:
-        gemini_encryption_key = os.environ.get(
-            "ROLL_SCALE_GEMINI_KEY_ENCRYPTION_KEY", ""
-        ) or os.environ.get("ROLL_SCALE_CODEX_TOKEN_KEY", "")
-        gemini_key_store = EncryptedCodexTokenStore(
-            args.api_url,
-            args.api_token,
-            secret_name=f"gemini-api-key:{args.gateway_id}",
-            # Keep the legacy action name so already-deployed Supabase Functions
-            # can store any encrypted secret by its distinct name. New Functions
-            # accept this action too.
-            secret_action="codex-auth",
-            encryption_key=gemini_encryption_key,
-        )
-        gemini_backup_key_store = EncryptedCodexTokenStore(
-            args.api_url,
-            args.api_token,
-            secret_name=f"gemini-api-key-backup:{args.gateway_id}",
-            secret_action="codex-auth",
-            encryption_key=gemini_encryption_key,
-        )
-        gemini_key_manager = GeminiKeyManager(
-            gemini_key_store,
-            backup_store=gemini_backup_key_store,
-            fast_model=args.gemini_model,
-            flash31_model=args.gemini_31_model,
-            flash37_model=args.gemini_37_model,
-            accurate_model=args.gemini_accurate_model,
-            fast_timeout=args.gemini_timeout,
-            flash31_timeout=args.gemini_31_timeout,
-            flash37_timeout=args.gemini_37_timeout,
-            accurate_timeout=args.gemini_accurate_timeout,
-            initial_key=os.environ.get("ROLL_SCALE_GEMINI_API_KEY", ""),
-            initial_backup_key=os.environ.get("ROLL_SCALE_GEMINI_BACKUP_API_KEY", ""),
-            initial_spare_key=os.environ.get("ROLL_SCALE_GEMINI_SPARE_API_KEY", ""),
-            rpm_limit=_env_positive_int(
-                "ROLL_SCALE_GEMINI_RPM_LIMIT", DEFAULT_GEMINI_RPM_LIMIT
-            ),
-            tpm_limit=_env_positive_int(
-                "ROLL_SCALE_GEMINI_TPM_LIMIT", DEFAULT_GEMINI_TPM_LIMIT
-            ),
-            rpd_limit=_env_positive_int(
-                "ROLL_SCALE_GEMINI_RPD_LIMIT", DEFAULT_GEMINI_RPD_LIMIT
-            ),
-        )
-        gemini_shift_keys = gemini_key_manager.load_shift_keys()
-        gemini_api_key = gemini_shift_keys["day"]
-        if not gemini_api_key:
-            raise ValueError(
-                f"weight_engine={weight_engine} cần Gemini API key trong biến môi trường "
-                "hoặc kho key mã hóa Supabase"
-            )
-        (
-            gemini_reader,
-            gemini_flash31_reader,
-            gemini_flash37_reader,
-            gemini_accurate_reader,
-        ) = gemini_key_manager.create_readers(
-            gemini_api_key,
-        )
-        if gemini_shift_keys["night"]:
-            gemini_night_readers = gemini_key_manager.create_readers(
-                gemini_shift_keys["night"]
-            )
-    codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None
-    if args.codex_enabled:
-        codex_mode = args.codex_mode
-        if codex_mode == "auto":
-            codex_mode = "oauth" if os.environ.get("RENDER", "").strip() else "cli"
-        if codex_mode == "oauth":
-            token_store = EncryptedCodexTokenStore(
-                args.api_url,
-                args.api_token,
-                secret_name=f"codex-oauth:{args.gateway_id}",
-                encryption_key=os.environ.get("ROLL_SCALE_CODEX_TOKEN_KEY", ""),
-            )
-            codex_reader = CodexOAuthWeightReader(
-                CodexOAuthClient(token_store, timeout_seconds=min(args.codex_timeout, 30.0)),
-                model=args.codex_model,
-                timeout_seconds=args.codex_timeout,
-                client_version=os.environ.get("ROLL_SCALE_CODEX_CLIENT_VERSION", "0.124.0"),
-            )
-        else:
-            codex_reader = CodexWeightReader(
-                args.codex_command,
-                model=args.codex_model,
-                timeout_seconds=args.codex_timeout,
-            )
-    antigravity_reader = AntigravityWeightReader(
-        args.antigravity_command,
-        model=args.antigravity_model,
-        timeout_seconds=args.antigravity_timeout,
-        api_key=os.environ.get("ROLL_SCALE_ANTIGRAVITY_API_KEY", ""),
-        rotate_image_turns=args.antigravity_rotate_image_turns,
-    )
+    codex_reader = None
+    antigravity_reader = None
     store = MeasurementStore(args.db, args.captures)
     worker = None
     if args.api_url:
@@ -5999,7 +6232,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         args.lookup_url,
         args.lookup_token,
         args.duplicate_window,
-        QRReader(args.yolo_model, args.yolo_confidence, args.yolo_mode, args.yolo_imgsz),
+        QRReader(),
         args.ocr_min_confidence,
         args.ocr_download,
         FactorySampleStore(args.factory_samples),
@@ -6019,7 +6252,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         auto_sync=args.auto_sync,
         auto_advance=args.auto_advance,
         weight_rois=weight_rois,
-        weight_burst_frames=args.weight_burst_frames,
+        weight_burst_frames=1,
         gemini_reader=gemini_reader,
         gemini_flash31_reader=gemini_flash31_reader,
         gemini_flash37_reader=gemini_flash37_reader,
@@ -6029,6 +6262,11 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         codex_reader=codex_reader,
         antigravity_reader=antigravity_reader,
         weight_engine=weight_engine,
+        digit_detector=digit_detector,
+        local_qr_decoder=local_qr_decoder,
+        digit_model_path=digit_model_path,
+        decimal_places=args.decimal_places,
+        digit_inference_confidence=args.digit_inference_confidence,
     )
     demo_path = Path(args.demo_image)
     logo_path = _resolve_logo_path(args.logo_image)
@@ -6253,6 +6491,11 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
 
         def do_GET(self) -> None:
             parsed = urllib.parse.urlparse(self.path)
+            if service.weight_engine == "local-yolo" and (
+                parsed.path.startswith(("/api/panel/", "/api/gemini/", "/api/codex/", "/api/antigravity/"))
+            ):
+                self.send_json(410, {"ok": False, "error": "ai_clients_disabled", "message": "Nhận diện dùng mô hình YOLO cục bộ; các AI client và Panel mode đã tắt."})
+                return
             if parsed.path == "/api/health":
                 self.send_json(
                     200,
@@ -6337,14 +6580,19 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     {
                         "ok": True,
                         "pending_count": store.pending_count(),
-                        "yolo_enabled": service.reader.model is not None,
-                         "yolo_mode": service.reader.yolo_mode,
-                        "ocr_enabled": service.weight_engine != "gemini",
-                        "ocr_engine": (
-                            PADDLE_OCR_MODEL_NAME
-                            if service.weight_engine != "gemini"
-                            else None
-                        ),
+                        "yolo_enabled": service.weight_engine == "local-yolo" or service.reader.model is not None,
+                        "yolo_mode": "local-digit-model+opencv-qr" if service.weight_engine == "local-yolo" else service.reader.yolo_mode,
+                        "digit_model_enabled": service.digit_detector is not None,
+                        "digit_model_version": getattr(service.digit_detector, "model_version", None),
+                        "digit_model_path": service.digit_model_path,
+                        "camera_capture_settings": {
+                            "width": args.camera_width,
+                            "height": args.camera_height,
+                            "recognition_max_edge": args.camera_recognition_max_edge,
+                        },
+                        "panel_mode_enabled": service.weight_engine != "local-yolo",
+                        "ocr_enabled": False if service.weight_engine == "local-yolo" else service.weight_engine != "gemini",
+                        "ocr_engine": None if service.weight_engine == "local-yolo" else (PADDLE_OCR_MODEL_NAME if service.weight_engine != "gemini" else None),
                         "ocr_min_confidence": service.ocr_min_confidence,
                         "sync_enabled": service.sync_worker is not None,
                         "sync_mode": "auto_idle_pending" if service.auto_sync is not None else "manual",
@@ -7065,6 +7313,11 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             try:
                 payload = self.read_json()
+                if service.weight_engine == "local-yolo" and (
+                    parsed.path.startswith(("/api/panel/", "/api/gemini/", "/api/codex/", "/api/antigravity/"))
+                ):
+                    self.send_json(410, {"ok": False, "error": "ai_clients_disabled", "message": "Nhận diện dùng mô hình YOLO cục bộ; các AI client và Panel mode đã tắt."})
+                    return
                 if self.path in {"/api/manual-sync/preview", "/api/manual-sync/start"}:
                     if service.manual_sync is None:
                         self.send_json(503, {"ok": False, "message": "Chưa cấu hình Supabase để đồng bộ"})
@@ -7916,7 +8169,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
         def log_message(self, format: str, *args: object) -> None:
             return None
 
-    return ThreadingHTTPServer((args.host, args.port), Handler), service
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    return server, service
 
 
 def run(args: argparse.Namespace) -> int:

@@ -1,0 +1,16 @@
+{
+  "event_id": "7bdafc0a-4c0e-4235-a15c-341dbfbf6eb8",
+  "station_id": "station-01",
+  "core": {
+    "image_path": "/Users/hoanganhquan/Downloads/tram-can-qr-render-pilot/backend/data/captures/.staging/station-01/7bdafc0a-4c0e-4235-a15c-341dbfbf6eb8_core.jpg",
+    "weight": 1.14,
+    "unit": "kg",
+    "qr_code": "None"
+  },
+  "product": {
+    "image_path": "/Users/hoanganhquan/Downloads/tram-can-qr-render-pilot/backend/data/captures/.staging/station-01/7bdafc0a-4c0e-4235-a15c-341dbfbf6eb8_product.jpg",
+    "weight": 7.02,
+    "unit": "kg",
+    "qr_code": "None"
+  }
+}
