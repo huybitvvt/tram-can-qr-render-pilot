@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import base64
+import faulthandler
 import json
 import multiprocessing
 import logging
@@ -16,11 +18,9 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from roll_qr_scale.test_ui import build_parser, create_server
-
-
 APP_NAME = "TramCanQR"
-APP_VERSION = "0.2.0-rc75"
+APP_VERSION = "0.2.0-rc76"
+_FAULT_STREAM = None
 CONFIG_NAME = "config.env"
 PADDLE_MODEL_NAME = "PP-OCRv6_medium_rec"
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -202,7 +202,13 @@ def open_existing_server(port: int) -> bool:
     """Reopen the existing local UI instead of starting a second gateway."""
     url = f"http://127.0.0.1:{port}/api/status"
     try:
-        with urllib.request.urlopen(url, timeout=0.8) as response:
+        request = urllib.request.Request(url)
+        username = os.environ.get("ROLL_SCALE_WEB_USERNAME", "")
+        password = os.environ.get("ROLL_SCALE_WEB_PASSWORD", "")
+        if username and password:
+            credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+            request.add_header("Authorization", "Basic " + credentials)
+        with urllib.request.urlopen(request, timeout=0.8) as response:
             if response.status != 200:
                 return False
             payload = json.load(response)
@@ -264,6 +270,7 @@ def prepare_paddleocr_model(root: Path) -> None:
 
 
 def configure_logging(root: Path) -> Path:
+    global _FAULT_STREAM
     log_path = root / "logs" / "app.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -272,7 +279,20 @@ def configure_logging(root: Path) -> Path:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         encoding="utf-8",
     )
+    if _FAULT_STREAM is None:
+        _FAULT_STREAM = (log_path.parent / "native-crash.log").open("a", encoding="utf-8", buffering=1)
+        faulthandler.enable(_FAULT_STREAM, all_threads=True)
     return log_path
+
+
+def build_parser():
+    from roll_qr_scale.test_ui import build_parser as parser
+    return parser()
+
+
+def create_server(args):
+    from roll_qr_scale.test_ui import create_server as factory
+    return factory(args)
 
 
 def show_startup_error(message: str) -> None:
@@ -286,14 +306,15 @@ def show_startup_error(message: str) -> None:
 
 def main() -> None:
     root = writable_root()
-    config_path = load_runtime_config(root)
     configure_logging(root)
     logging.info("Starting TramCanQR %s (local YOLO)", APP_VERSION)
+    config_path = load_runtime_config(root)
     if config_path is not None:
         logging.info("Loaded runtime configuration from %s", config_path)
     os.environ["ROLL_SCALE_APP_VARIANT"] = "local-yolo"
     os.environ["ROLL_SCALE_APP_VERSION"] = APP_VERSION
     os.environ.setdefault("ROLL_SCALE_LIVE_INFERENCE_FPS", "2")
+    os.environ["ROLL_SCALE_CAMERA_LOG_DIR"] = str(root / "logs")
     assets = bundle_root()
     if getattr(sys, "frozen", False):
         assets = assets / "assets"
@@ -305,6 +326,7 @@ def main() -> None:
     backup_before_local_upgrade(root, config_path)
     server, service = create_server(args)
     url = f"http://127.0.0.1:{server.server_port}"
+    logging.info("Station server ready on port %s", server.server_port)
     if os.environ.get("ROLL_SCALE_OPEN_BROWSER", "1") != "0":
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
@@ -318,6 +340,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--camera-worker":
+        from roll_qr_scale.camera_worker import main as camera_main
+        raise SystemExit(camera_main())
     multiprocessing.freeze_support()
     try:
         main()

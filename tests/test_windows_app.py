@@ -250,3 +250,36 @@ def test_upgrade_refuses_corrupt_database_without_marking_backup_complete(tmp_pa
         backup_before_local_upgrade(tmp_path, None)
     assert not (tmp_path / "backups/local-rc75.json").exists()
     assert database.read_bytes() == b"corrupt-database"
+
+
+def test_reopen_existing_authenticated_gateway_does_not_start_another_server(monkeypatch):
+    import base64
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from roll_qr_scale.windows_app import open_existing_server
+
+    expected = "Basic " + base64.b64encode(b"operator:test-password").decode()
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.headers.get("Authorization") != expected:
+                self.send_response(401)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "weight_engine": "local-yolo"}).encode())
+        def log_message(self, *_args):
+            pass
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("ROLL_SCALE_WEB_USERNAME", "operator")
+    monkeypatch.setenv("ROLL_SCALE_WEB_PASSWORD", "test-password")
+    monkeypatch.setenv("ROLL_SCALE_OPEN_BROWSER", "0")
+    try:
+        assert open_existing_server(server.server_port)
+    finally:
+        server.shutdown()
+        thread.join(3)
+        server.server_close()

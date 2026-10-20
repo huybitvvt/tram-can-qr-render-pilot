@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc75` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc76` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc75.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc76.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -35,13 +35,13 @@ Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự
 
 ### Chuyển từ Gemini sang local, giữ dữ liệu
 
-Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc75. Dùng cùng tài
+Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc76. Dùng cùng tài
 khoản Windows, giữ nguyên thư mục cài cũ; không cần gỡ ứng dụng. Lưu xong
 lượt cân đang làm trước khi cập nhật. App vẫn là `TramCanQR.exe`, cổng `8080`,
 DB/ảnh/cấu hình vẫn ở `%LOCALAPPDATA%\TramCanQR`. Không di chuyển hay nhập
 lại dữ liệu. Các phiếu pending/failed và thông tin trạm/Supabase/kho được giữ.
 
-Trước lần mở rc75 đầu tiên, ứng dụng sao lưu SQLite (kể cả WAL) và cấu hình
+Trước lần mở bản local đầu tiên (từ rc75), ứng dụng sao lưu SQLite (kể cả WAL) và cấu hình
 vào `%LOCALAPPDATA%\TramCanQR\backups\before-local-rc75-*`. Ảnh dùng lại
 đường dẫn gốc, không bị bộ cài ghi đè. Nếu sao lưu không thành công, ứng dụng
 báo lỗi và chưa mở DB để vận hành. Các lần cập nhật sau vẫn dùng nút cũ.
@@ -50,6 +50,17 @@ Nếu cần quay lại Gemini, thoát `TramCanQR.exe`, cài lại bộ rc74 có 
 bản rồi mở ứng dụng. DB/ảnh vẫn dùng chung; cấu hình Gemini cũ không bị xóa.
 Không chép đè DB từ bản sao lưu lên DB đang dùng vì sẽ mất các phiếu mới.
 Bản thử riêng `TramCanQRAuto` không được gộp DB vào bản chính này.
+
+### Camera và log lỗi
+
+Từ rc76, driver camera Windows chạy trong tiến trình riêng. Danh sách USB
+liệt kê các cổng để chọn, không mở thử đồng thời nhiều driver. Nếu một cổng
+báo lỗi/không có hình, chọn lại đúng camera (thường USB 0 hoặc 1) và bấm Mở
+camera. Thoát bản Gemini/beta1 nếu bản đó còn giữ camera.
+
+Nếu app vẫn tự tắt, lấy phần cuối `logs/app.log`, `logs/camera-driver.log`
+và `logs/native-crash.log` trong `%LOCALAPPDATA%\TramCanQR` để kiểm tra.
+Không xóa DB/ảnh hoặc gửi file cấu hình có key/token.
 
 ### Chụp tiếp khi AI đang đọc
 

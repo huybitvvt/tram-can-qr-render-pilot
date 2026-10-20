@@ -15,6 +15,7 @@ from pathlib import Path
 import cv2
 
 from roll_qr_scale.storage import MeasurementStore
+from roll_qr_scale.windows_app import APP_VERSION
 
 
 def main():
@@ -78,7 +79,7 @@ def main():
                     break
                 except OSError:
                     time.sleep(0.5)
-            assert status and status["app_version"] == "0.2.0-rc75" and status["weight_engine"] == "local-yolo"
+            assert status and status["app_version"] == APP_VERSION and status["weight_engine"] == "local-yolo"
             assert status["gateway_id"] == "gateway-04" and status["stations"][0]["station_id"] == "station-04"
             assert status["sync_enabled"] and status["sync_mode"] == "manual"
             assert config.read_bytes() == original_config

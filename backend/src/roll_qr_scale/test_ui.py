@@ -6739,7 +6739,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     {
                         "ok": True,
                         "app_variant": os.environ.get("ROLL_SCALE_APP_VARIANT", "source"),
-                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc75"),
+                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc76"),
                         "pending_count": store.pending_count(),
                         "yolo_enabled": service.weight_engine == "local-yolo" or service.reader.model is not None,
                         "yolo_mode": "local-digit-model+opencv-qr" if service.weight_engine == "local-yolo" else service.reader.yolo_mode,

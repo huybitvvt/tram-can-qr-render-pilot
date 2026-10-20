@@ -3,17 +3,20 @@
 [![Tải Trạm Cân QR — AI local](https://img.shields.io/badge/Tải_Trạm_Cân_QR-YOLO_Local-2ea44f?style=for-the-badge)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
 [![Cập nhật máy trạm](https://img.shields.io/badge/Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 
-**Bản mới `0.2.0-rc75`: nhận diện YOLO local trên CPU, kèm model, không cần key Gemini.**
+**Bản mới `0.2.0-rc76`: nhận diện YOLO local trên CPU, kèm model, không cần key Gemini.**
 Cài đè bản Gemini hoặc bấm nút cập nhật cũ: giữ `TramCanQR.exe`, cổng `8080`,
 DB/ảnh/cấu hình tại `%LOCALAPPDATA%\TramCanQR`. Trước lần chuyển đầu có sao
 lưu DB và cấu hình. Có nút **Chọn ảnh từ thiết bị** để thử nhận diện.
 
-1. **[Tải bộ cài mới nhất (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)** — [tải đúng rc75](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc75/TramCanQR-Setup-0.2.0-rc75.exe).
+**rc76 sửa lỗi tự tắt khi mở/đổi camera:** driver camera Windows chạy riêng
+khỏi app; lỗi driver không chạy chung tiến trình với web/model/DB.
+
+1. **[Tải bộ cài mới nhất (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)** — [tải đúng rc76](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc76/TramCanQR-Setup-0.2.0-rc76.exe).
 2. **[Tải cập nhật 1 lần bấm (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)** — tải, kiểm tra SHA-256, cài đè rồi mở lại; cấu hình và dữ liệu được giữ.
-3. [Hướng dẫn chuyển từ Gemini, vận hành và quay lại](packaging/HUONG-DAN-KHACH-HANG.md) · [Ghi chú rc75](docs/release-notes-0.2.0-rc75.md).
+3. [Hướng dẫn chuyển từ Gemini, vận hành và quay lại](packaging/HUONG-DAN-KHACH-HANG.md) · [Ghi chú rc76](docs/release-notes-0.2.0-rc76.md).
 
 Nếu cần quay lại Gemini: [bộ cài rc74](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc74/TramCanQR-Setup-0.2.0-rc74.exe).
-[Bản thử riêng beta1](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/tag/v0.2.0-ai-auto-beta1) dùng cổng `8081` và DB riêng; bản rc75 mới là bản thay Gemini tại chỗ.
+[Bản thử riêng beta1](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/tag/v0.2.0-ai-auto-beta1) dùng cổng `8081` và DB riêng; bản rc76 ở trên thay Gemini tại chỗ.
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Mỗi lượt cần đủ ảnh lõi và ảnh thành phẩm. Nếu AI không đọc được ảnh lõi, cân lõi tự đặt 0; cân SP hoặc QR thiếu vẫn ghi dòng lỗi để xử lý. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 

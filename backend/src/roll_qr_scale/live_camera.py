@@ -71,6 +71,7 @@ class LiveCamera:
         self.inference_lock = inference_lock or threading.Lock()
         self._condition = threading.Condition()
         self._stop = threading.Event()
+        self._start_lock = threading.Lock()
         self._capture_thread: threading.Thread | None = None
         self._recognition_thread: threading.Thread | None = None
         self._source = source
@@ -107,13 +108,14 @@ class LiveCamera:
             return self._connected
 
     def start(self) -> None:
-        if self._capture_thread and self._capture_thread.is_alive():
-            return
-        self._stop.clear()
-        self._capture_thread = threading.Thread(target=self._capture_loop, name="live-camera", daemon=True)
-        self._recognition_thread = threading.Thread(target=self._recognition_loop, name="live-recognition", daemon=True)
-        self._capture_thread.start()
-        self._recognition_thread.start()
+        with self._start_lock:
+            if self._capture_thread and self._capture_thread.is_alive():
+                return
+            self._stop.clear()
+            self._capture_thread = threading.Thread(target=self._capture_loop, name="live-camera", daemon=True)
+            self._recognition_thread = threading.Thread(target=self._recognition_loop, name="live-recognition", daemon=True)
+            self._capture_thread.start()
+            self._recognition_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -149,6 +151,10 @@ class LiveCamera:
         logger.info("Live camera source changed to %s", redact_source(source))
 
     def _open(self, source: int | str) -> cv2.VideoCapture:
+        if sys.platform == "win32":
+            from .camera_process import IsolatedCapture
+            return IsolatedCapture(source, self.camera_backend, self.width, self.height, self.fps, self.rtsp_transport,
+                                   cancelled=lambda: self._stop.is_set() or str(source) != self.source)
         if isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://")):
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = f"rtsp_transport;{self.rtsp_transport}"
         is_rtsp = isinstance(source, str) and source.lower().startswith(("rtsp://", "rtsps://"))
@@ -162,7 +168,7 @@ class LiveCamera:
         return capture
 
     def cameras(self, maximum_index: int = 7) -> list[dict[str, Any]]:
-        """Best-effort OpenCV index discovery; names differ by OS/backend."""
+        """List selectable indexes without opening drivers from HTTP threads."""
         selected = self.source
         result: list[dict[str, Any]] = [{
             "id": "configured",
@@ -171,22 +177,18 @@ class LiveCamera:
         }]
         for index in range(maximum_index + 1):
             source = str(index)
-            if source == selected:
-                result.append({"id": source, "label": f"USB camera {index} (active)", "selected": True})
-                continue
-            capture = None
-            try:
-                capture = self._open(index)
-                if capture.isOpened():
-                    result.append({"id": source, "label": f"USB camera {index}", "selected": False})
-            except Exception:
-                logger.debug("Camera index probe failed: %s", index, exc_info=True)
-            finally:
-                if capture is not None:
-                    capture.release()
+            result.append({"id": source, "label": f"USB camera {index}", "selected": source == selected})
         if selected.isdecimal() and not any(item["id"] == selected for item in result):
             result.insert(0, {"id": selected, "label": f"Configured camera {selected}", "selected": True})
         return result
+
+    @staticmethod
+    def _release_capture(capture) -> None:
+        if capture is not None:
+            try:
+                capture.release()
+            except Exception:
+                logger.exception("Camera release failed")
 
     def _capture_loop(self) -> None:
         current_generation = -1
@@ -197,7 +199,7 @@ class LiveCamera:
                 generation = self._source_generation
             if generation != current_generation:
                 if capture is not None:
-                    capture.release()
+                    self._release_capture(capture)
                 capture = None
                 current_generation = generation
             if capture is None:
@@ -206,7 +208,7 @@ class LiveCamera:
                     capture = self._open(source)
                     if not capture.isOpened():
                         logger.warning("Live camera unavailable: %s", redact_source(source_text))
-                        capture.release()
+                        self._release_capture(capture)
                         capture = None
                         with self._condition:
                             self._connected = False
@@ -216,12 +218,17 @@ class LiveCamera:
                     logger.info("Live camera connected: %s", redact_source(source_text))
                 except Exception:
                     logger.exception("Could not open live camera source")
+                    self._release_capture(capture)
                     capture = None
                     self._stop.wait(self.reconnect_seconds)
                     continue
-            ok, image = capture.read()
+            try:
+                ok, image = capture.read()
+            except Exception:
+                logger.exception("Could not read live camera frame")
+                ok, image = False, None
             if not ok or image is None:
-                capture.release()
+                self._release_capture(capture)
                 capture = None
                 with self._condition:
                     self._connected = False
@@ -239,12 +246,14 @@ class LiveCamera:
                     continue
                 self._frame_id += 1
                 self._raw = image
-                self._raw_at = time.monotonic()
-                self._raw_captured_at = datetime.now(timezone.utc)
+                self._raw_at = getattr(capture, "captured_monotonic", time.monotonic())
+                captured_timestamp = getattr(capture, "captured_timestamp", None)
+                self._raw_captured_at = (datetime.fromtimestamp(captured_timestamp, timezone.utc)
+                                        if captured_timestamp else datetime.now(timezone.utc))
                 self._connected = True
                 self._condition.notify_all()
         if capture is not None:
-            capture.release()
+            self._release_capture(capture)
 
     @staticmethod
     def _draw(image: np.ndarray, event: dict[str, Any]) -> np.ndarray:

@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from roll_qr_scale.windows_app import APP_VERSION
+
 
 HARNESS = r'''
 param([string]$Root, [string]$Updater, [switch]$BadHash)
@@ -30,8 +32,8 @@ function Stop-Process {
 }
 function Invoke-RestMethod {
     param($Uri, $Headers, $TimeoutSec)
-    return @{tag_name='v0.2.0-rc75';assets=@(
-        @{name='TramCanQR-Setup-0.2.0-rc75.exe';browser_download_url='https://test.invalid/installer'},
+    return @{tag_name='v__TARGET_VERSION__';assets=@(
+        @{name='TramCanQR-Setup-__TARGET_VERSION__.exe';browser_download_url='https://test.invalid/installer'},
         @{name='SHA256SUMS.txt';browser_download_url='https://test.invalid/checksum'})}
 }
 function Invoke-WebRequest {
@@ -40,7 +42,7 @@ function Invoke-WebRequest {
     else {
         $hash = (Get-FileHash -LiteralPath (Join-Path $Root 'payload.exe') -Algorithm SHA256).Hash
         if ($BadHash) { $hash = '0' * 64 }
-        [IO.File]::WriteAllText($OutFile, $hash + '  TramCanQR-Setup-0.2.0-rc75.exe' + "`n")
+        [IO.File]::WriteAllText($OutFile, $hash + '  TramCanQR-Setup-__TARGET_VERSION__.exe' + "`n")
     }
 }
 function Start-Process {
@@ -65,14 +67,14 @@ try {
 
 def main():
     project = Path(__file__).resolve().parents[1]
-    with tempfile.TemporaryDirectory(prefix="updater-rc75-", dir=project / ".test-tmp") as temp:
+    with tempfile.TemporaryDirectory(prefix="updater-", dir=project / ".test-tmp") as temp:
         base = Path(temp)
         legacy = base / "rc74.cmd"
         legacy.write_bytes(subprocess.check_output([
             "git", "show", "0f7400468df72213d78923d7d62b8a6dc71de2fc:packaging/CAP-NHAT-BAN-MOI.cmd"], cwd=project))
         harness = base / "harness.ps1"
-        harness.write_text(HARNESS, encoding="utf-8-sig")
-        for label, updater in (("rc74", legacy), ("rc75", project / "packaging/CAP-NHAT-BAN-MOI.cmd")):
+        harness.write_text(HARNESS.replace("__TARGET_VERSION__", APP_VERSION), encoding="utf-8-sig")
+        for label, updater in (("rc74", legacy), ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"
                 root.mkdir()
@@ -87,7 +89,8 @@ def main():
                 assert result.returncode == int(bad_hash), (label, bad_hash, result.stdout, result.stderr)
                 assert state == {"stopped": not bad_hash, "installed": not bad_hash, "opened": not bad_hash}, state
                 assert all(hashlib.sha256((root / name).read_bytes()).hexdigest() == digest for name, digest in protected.items())
-                print(f"PASS {label}: {'reject tampered download before stopping app' if bad_hash else 'select rc75, verify hash, stop/install/reopen'}; DB/config/photo unchanged")
+                outcome = "reject tampered download before stopping app" if bad_hash else f"select {APP_VERSION}, verify hash, stop/install/reopen"
+                print(f"PASS {label}: {outcome}; DB/config/photo unchanged")
 
 
 if __name__ == "__main__":
