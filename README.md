@@ -2,6 +2,8 @@
 
 [![Tải Cân AI tự động (YOLO local, thử nghiệm)](https://img.shields.io/badge/Tải_Cân_AI_tự_động-YOLO_Local_Beta-8250df?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-ai-auto-beta1/TramCanQRAuto-Setup.exe)
 
+**[Tải bộ cài Cân AI tự động (.exe, khoảng 367 MB)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-ai-auto-beta1/TramCanQRAuto-Setup.exe)** — bản `0.2.0-ai-auto-beta1`, chạy YOLO local.
+
 **Cân AI tự động — bản thử riêng:** nhận diện trên CPU, kèm model, không cần key Gemini.
 Cài cạnh bản Gemini, mở tại `http://127.0.0.1:8081`, dữ liệu riêng trong
 `%LOCALAPPDATA%\TramCanQRAuto`. Đóng app đang dùng camera trước khi đổi bản.
@@ -13,12 +15,15 @@ Các nút tải/cập nhật Gemini bên dưới giữ nguyên rc74.
 [![Tải File Cập Nhật Cho Máy Trạm](https://img.shields.io/badge/⚡_Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge&logo=windows-terminal)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 [![GitHub Release](https://img.shields.io/github/v/release/huybitvvt/tram-can-qr-render-pilot?style=for-the-badge&label=Phiên_bản)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest)
 
-> 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
-> 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
+> 🚀 **CÁC LINK TẢI NHANH — GEMINI VÀ AI TỰ ĐỘNG:**
+>
+> 1. **[Tải bộ cài Gemini mới nhất (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**
 >    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
 >    Bản `0.2.0-rc74`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc74/TramCanQR-Setup-0.2.0-rc74.exe).
 > 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
 >    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
+> 3. **[Tải bộ cài Cân AI tự động — YOLO local beta1 (.exe, khoảng 367 MB)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-ai-auto-beta1/TramCanQRAuto-Setup.exe)**
+>    *Bản thử riêng, kèm model, không cần key Gemini. Cài cạnh bản Gemini để có thể chuyển lại khi cần.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Mỗi lượt cần đủ ảnh lõi và ảnh thành phẩm. Nếu AI không đọc được ảnh lõi, cân lõi tự đặt 0; cân SP hoặc QR thiếu vẫn ghi dòng lỗi để xử lý. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 
