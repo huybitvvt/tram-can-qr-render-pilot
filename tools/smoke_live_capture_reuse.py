@@ -87,11 +87,16 @@ def main():
                 page.locator("#openDefaultCamBtn").click()
                 page.wait_for_function("current().backendMode && current().lastLiveRecognition?.weight_found", timeout=60000)
                 for kind in ("core", "product"):
+                    if kind == "product":
+                        # Reproduce a small label missed by the live QR pass.
+                        # The capture must reacquire it without rerunning YOLO.
+                        service.live_camera.qr_decoder.decode = lambda *a, **kw: None
                     # Exercise reuse only after a fresh normal live update.
                     # Cold startup or CPU contention correctly uses fallback.
                     deadline = time.monotonic() + 30
                     while (service.live_camera.recognized_capture() is None
-                           or time.monotonic() - service.live_camera._recognized_at > 1):
+                           or time.monotonic() - service.live_camera._recognized_at > 1
+                           or (kind == "product" and service.live_camera.event().get("qr") is not None)):
                         assert time.monotonic() < deadline, "Live reading did not become fresh after warmup"
                         page.wait_for_timeout(100)
                     page.evaluate("kind => {selectCaptureSlot(kind,0); document.activeElement.blur();}", kind)
@@ -110,6 +115,7 @@ def main():
                         time.monotonic()-service.live_camera._recognized_at, getattr(service.live_camera._recognized_run,"elapsed_ms",None), inference_jobs)
                     assert result["weight"] == metadata["expected_weight"] and result["inference_count"] == 0
                     assert result["step_saved"] and not result["gemini_used"]
+                    if kind == "product": assert result["qr_code"] == metadata["expected_qr_code"]
                 assert service.inference.status().submitted == 0, inference_jobs
                 print("PASS: real CPU YOLO live -> Space core/product reuses 13.04 kg + QR with zero extra inference/FIFO jobs", flush=True)
 

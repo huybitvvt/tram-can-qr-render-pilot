@@ -26,8 +26,14 @@ fallback, timeout, thay nguồn và token; test giao diện kiểm tra chốt li
 giới hạn kết nối. Edge thật với YOLO CPU đọc 13,04 kg/QR, Space chốt lõi/SP
 không thêm lượt inference; preview tiếp tục khi giữ 6 request dữ liệu mạng,
 tự hồi sau offline/online và sau một request preview bị treo.
+Cố tình bỏ kết quả QR live trong test Edge: ảnh SP vẫn đọc lại đúng QR,
+giữ số cân đã chốt và không thêm lượt YOLO/FIFO; Enter lưu đủ hai ảnh gốc.
 Script cập nhật rc74/hiện tại chọn đúng rc79 và chặn tải sai hash trước khi
 đóng app; dữ liệu/cấu hình/ảnh được giữ.
+EXE mở dữ liệu nâng cấp thử, giữ phiếu pending/failed, hai ảnh và cấu hình;
+bản sao lưu hợp lệ. Model trong EXE đọc đúng 13,04 kg/QR; helper camera truyền
+đủ frame và dừng sạch. Backend/giao diện nhúng khớp source, model và bộ cài
+khớp SHA-256; không kèm cấu hình hoặc DB riêng trong gói phát hành.
 
 Chưa thử rút dây mạng trực tiếp trên máy xưởng. Mô phỏng xác nhận khả năng
 hoạt động của app; cần log máy xưởng nếu vẫn mất hình sau cập nhật.
