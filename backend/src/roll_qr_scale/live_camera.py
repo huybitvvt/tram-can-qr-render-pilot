@@ -15,6 +15,11 @@ from typing import Any
 import cv2
 import numpy as np
 
+from .digit_postprocess import (
+    remove_unlit_trailing_digit,
+    resolve_weak_crop_disagreement,
+)
+
 _ROOT = Path(__file__).resolve().parents[3]
 _NEW_BACKEND_SRC = _ROOT / "new_system" / "Digit_QRCode_Detection" / "backend" / "src"
 if _NEW_BACKEND_SRC.is_dir() and str(_NEW_BACKEND_SRC) not in sys.path:
@@ -350,6 +355,13 @@ class LiveCamera:
                         tracked_run, tracked_generation = run, source_generation
                 else:
                     run = None
+                if run:
+                    resolve_weak_crop_disagreement(image, run, self.detector)
+                    run.digits[:] = remove_unlit_trailing_digit(
+                        image,
+                        run.digits,
+                        display_colors=getattr(self.detector, "display_colors", ("red",)),
+                    )
                 event = build_recognition(
                     captured_at=captured_at,
                     frame_width=image.shape[1],

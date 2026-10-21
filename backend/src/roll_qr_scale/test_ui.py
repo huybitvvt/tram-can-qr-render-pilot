@@ -51,6 +51,10 @@ from .antigravity_weight import (
     AntigravityWeightReader,
 )
 from .capture_gate import frame_fingerprint
+from .digit_postprocess import (
+    remove_unlit_trailing_digit,
+    resolve_weak_crop_disagreement,
+)
 from .api_client import (
     delete_supabase_photo_drafts,
     fetch_remote_json,
@@ -4379,12 +4383,18 @@ class StationUIService:
         else:
             with self.digit_inference_lock:
                 run = self.digit_detector.detect_with_details(frame)
-        # Never remove an uncertain digit and shift the remaining number's
-        # decimal position (e.g. 6308 must not become 6.30). Dots are ignored
-        # because this scale uses the configured fixed decimal count.
+            resolve_weak_crop_disagreement(frame, run, self.digit_detector)
+        # Keep weak boxes unless the narrow LED-pixel check below identifies a
+        # non-illuminated trailing artifact. Dots are ignored because this
+        # scale uses the configured fixed decimal count.
         observed_digits = sorted(
             (item for item in run.digits if str(item.value) != "."),
             key=lambda item: item.box.x + item.box.width / 2,
+        )
+        observed_digits = remove_unlit_trailing_digit(
+            frame,
+            observed_digits,
+            display_colors=getattr(self.digit_detector, "display_colors", ("red",)),
         )
         ordered = observed_digits
         raw_digits = "".join(str(item.value) for item in ordered) or None
@@ -5907,7 +5917,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--camera-width", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_WIDTH", "1920")))
     parser.add_argument("--camera-height", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_HEIGHT", "1080")))
-    parser.add_argument("--camera-recognition-max-edge", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_RECOGNITION_MAX_EDGE", "960")))
+    parser.add_argument("--camera-recognition-max-edge", type=int, default=int(os.environ.get("ROLL_SCALE_CAMERA_RECOGNITION_MAX_EDGE", "1280")))
     parser.add_argument("--display-max-candidates", type=int, default=int(os.environ.get("ROLL_SCALE_DISPLAY_MAX_CANDIDATES", os.environ.get("DISPLAY_MAX_CANDIDATES", "5"))))
     parser.add_argument("--display-colors", default=os.environ.get("ROLL_SCALE_DISPLAY_COLORS", os.environ.get("DISPLAY_COLORS", "red")))
     parser.add_argument("--db", default="data/measurements.db")
@@ -5947,7 +5957,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--digit-image-size",
         type=int,
-        default=int(os.environ.get("ROLL_SCALE_DIGIT_IMAGE_SIZE", os.environ.get("DISPLAY_IMAGE_SIZE", "640"))),
+        default=int(os.environ.get("ROLL_SCALE_DIGIT_IMAGE_SIZE", os.environ.get("DISPLAY_IMAGE_SIZE", "736"))),
     )
     parser.add_argument(
         "--decimal-places",
