@@ -86,13 +86,14 @@ def main():
                 }""", metadata["expected_qr_code"])
                 page.locator("#openDefaultCamBtn").click()
                 page.wait_for_function("current().backendMode && current().lastLiveRecognition?.weight_found", timeout=60000)
-                # Cold model startup may outlast the freshness limit. Wait for
-                # its first normal live update before checking the reuse path.
-                deadline = time.monotonic() + 30
-                while service.live_camera.recognized_capture() is None:
-                    assert time.monotonic() < deadline, "Live reading did not become fresh after warmup"
-                    page.wait_for_timeout(100)
                 for kind in ("core", "product"):
+                    # Exercise reuse only after a fresh normal live update.
+                    # Cold startup or CPU contention correctly uses fallback.
+                    deadline = time.monotonic() + 30
+                    while (service.live_camera.recognized_capture() is None
+                           or time.monotonic() - service.live_camera._recognized_at > 1):
+                        assert time.monotonic() < deadline, "Live reading did not become fresh after warmup"
+                        page.wait_for_timeout(100)
                     page.evaluate("kind => {selectCaptureSlot(kind,0); document.activeElement.blur();}", kind)
                     page.keyboard.press("Space")
                     field = "coreAnalysis" if kind == "core" else "productAnalysis"
@@ -102,7 +103,7 @@ def main():
                         print("DEBUG", page.evaluate("({status:document.getElementById('captureStatus').textContent,state:current().state})"),
                               errors, failures, captures, "age", time.monotonic()-service.live_camera._recognized_at,
                               "run_ms", getattr(service.live_camera._recognized_run, "elapsed_ms", None), flush=True)
-                        page.screenshot(path=str(artifacts / "rc78-reuse-failure.png"), full_page=True)
+                        page.screenshot(path=str(artifacts / "rc79-reuse-failure.png"), full_page=True)
                         raise
                     result = page.evaluate(f"ensureRounds(current())[0].{field}")
                     assert result.get("live_capture_reused"), (result.get("weight"), captures, failures,
@@ -159,7 +160,7 @@ def main():
                 for key in ("image_path", "product_image_path"):
                     assert cv2.imread(row[key]).shape == frame.shape
                 assert not errors, errors
-                page.screenshot(path=str(artifacts / "rc78-live-capture-offline.png"), full_page=True)
+                page.screenshot(path=str(artifacts / "rc79-live-capture-offline.png"), full_page=True)
                 browser.contexts[0].unroute_all(behavior="wait")
                 browser.close()
                 print("PASS: Enter saves both original-resolution evidence photos locally with no cloud access or page errors", flush=True)

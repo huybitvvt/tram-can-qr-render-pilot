@@ -8957,7 +8957,8 @@
                     });
                 });
                 try {
-                    const limited = !payload.live_capture_token,
+                    const limited = !payload.live_capture_token ||
+                            (payload.capture_kind === "product" && !payload.client_qr_code),
                         maximum = appStatus && appStatus.weight_engine === "local-yolo" ? 2 : MAX_CAPTURE_AI_REQUESTS;
                     if (limited && captureAiActive >= maximum)
                         await Promise.race([
@@ -10088,7 +10089,7 @@
                         captureStatus,
                         slotAiPending(session.rounds[round], kind)
                             ? weighSlotLabel(kind, round) +
-                                  " đang chờ AI. Chọn ô khác để chụp tiếp."
+                                  " đang hoàn tất xử lý. Chọn ô khác để chụp tiếp."
                             : "Đã chọn " +
                                   weighSlotLabel(kind, round) +
                                   ". Nhấn Space để AI đọc ô này, hoặc quét QR cho ô này.",
@@ -10169,7 +10170,7 @@
                     const badge = document.createElement("span");
                     badge.className = "shot-badge";
                     badge.textContent = pending
-                        ? "Đã chụp · chờ AI"
+                        ? "Đã chụp · đang hoàn tất"
                         : saved
                           ? "Ảnh đã lưu"
                           : "Đã chụp";
@@ -10199,7 +10200,7 @@
                     value.className =
                         "evidence-value" + (overweight ? " overweight" : "");
                     value.textContent = pending
-                        ? "Đang chờ AI"
+                        ? "Đang chốt kết quả"
                         : (weightValue || "--") + " " + unitValue;
                 } else {
                     value.className = "evidence-empty";
@@ -11003,7 +11004,7 @@
                         issues.push(
                             "Lần " +
                                 (i + 1) +
-                                ": ảnh đã lưu, đang chờ AI. Có thể chụp ô khác.",
+                                ": ảnh đã lưu, đang hoàn tất xử lý. Có thể chụp ô khác.",
                         );
                     else if (roundHasPhoto(round) && !roundHasBothImages(round))
                         issues.push(

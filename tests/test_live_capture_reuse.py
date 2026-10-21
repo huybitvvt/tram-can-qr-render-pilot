@@ -135,6 +135,23 @@ def test_reused_capture_bypasses_busy_model_and_fifo(live_server):
         future.result(timeout=2)
 
 
+@pytest.mark.parametrize("kind", ["core", "product", "inventory"])
+def test_live_missing_qr_reacquires_product_label_without_rerunning_yolo(live_server, monkeypatch, kind):
+    case = live_server
+    case.camera._recognized_qr = None
+    calls = []
+    def decode(frame, decoder=None):
+        calls.append(frame)
+        return {"found": True, "qr_code": "SMALL-LABEL", "decoder": "opencv-tiled_crop", "qr_roi": None}
+    monkeypatch.setattr(case.service, "_decode_local_qr", decode)
+    capture = freeze(case)
+    status, result = case.request("/api/analyze", payload_for(capture, kind))
+    assert status == 200 and result["weight"] == 6.3 and result["live_capture_reused"]
+    assert case.detector.calls == 0 and case.service.inference.status().submitted == 0
+    assert len(calls) == (0 if kind == "core" else 1)
+    assert result["qr_code"] == (None if kind == "core" else "SMALL-LABEL")
+
+
 def test_changed_image_never_reuses_another_frames_weight(live_server):
     case = live_server
     capture = freeze(case)

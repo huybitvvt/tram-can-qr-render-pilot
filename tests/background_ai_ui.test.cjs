@@ -201,6 +201,19 @@ test('Space capture carries the image-bound token through photo save and result 
  assert.equal(session.rounds[0].weight,'0.42');
 });
 
+test('live product captures needing a QR scan leave camera HTTP connections available',async()=>{
+ const {ctx,jobs,photos,finish}=setup();
+ ctx.appStatus.weight_engine='local-yolo';
+ const tasks=Array.from({length:4},(_,index)=>{
+  const image='pinned-'+index;photos.push({image});
+  return ctx.requestCaptureAi({image,live_capture_token:'token-'+index,capture_kind:'product',client_qr_code:''},()=>true,'qr-'+index);
+ });
+ await tick();assert.equal(jobs.length,2);
+ for(let index=0;index<4;index++){finish(jobs[index],13.04);await tick()}
+ await Promise.all(tasks);
+ assert.equal(vm.runInContext('captureAiActive',ctx),0);
+});
+
 test('discard invalidates pending results before waiting for backend cleanup',async()=>{
  const {ctx,session,jobs,finish}=setup(),cleanup=deferred(),original=ctx.api;
  ctx.api=(url,options)=>url==='/api/session/discard'?cleanup.promise:original(url,options);

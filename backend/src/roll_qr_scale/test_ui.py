@@ -4355,6 +4355,11 @@ class StationUIService:
         qr_source_frame = qr_frame if qr_frame is not None else frame
         decoded = (dict(local_recognition[1]) if local_recognition is not None
                    else self._decode_local_qr(qr_source_frame, qr_decoder))
+        if local_recognition is not None and not decoded.get("found") and capture_kind in {"product", "inventory"}:
+            # Live avoids exhaustive tile scans to keep the scale responsive.
+            # Finish a missed product label on this pinned frame, never rerun
+            # YOLO or borrow a QR from another frame.
+            decoded = self._decode_local_qr(qr_source_frame, LocalQrDecoder())
         client_qr = client_qr_code.strip()
         if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
             raise ValueError("Mã QR từ trình duyệt không hợp lệ")
@@ -6777,7 +6782,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     {
                         "ok": True,
                         "app_variant": os.environ.get("ROLL_SCALE_APP_VARIANT", "source"),
-                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc78"),
+                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc79"),
                         "pending_count": store.pending_count(),
                         "yolo_enabled": service.weight_engine == "local-yolo" or service.reader.model is not None,
                         "yolo_mode": "local-digit-model+opencv-qr" if service.weight_engine == "local-yolo" else service.reader.yolo_mode,

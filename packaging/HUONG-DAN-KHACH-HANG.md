@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc78` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc79` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc78.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc79.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -35,7 +35,7 @@ Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự
 
 ### Chuyển từ Gemini sang local, giữ dữ liệu
 
-Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc78. Dùng cùng tài
+Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc79. Dùng cùng tài
 khoản Windows, giữ nguyên thư mục cài cũ; không cần gỡ ứng dụng. Lưu xong
 lượt cân đang làm trước khi cập nhật. App vẫn là `TramCanQR.exe`, cổng `8080`,
 DB/ảnh/cấu hình vẫn ở `%LOCALAPPDATA%\TramCanQR`. Không di chuyển hay nhập
@@ -63,10 +63,12 @@ Từ rc77, hình xem trước lấy trực tiếp từ camera, không chờ AI �
 khung hình gốc. Driver thử lại khi hụt frame ngắn; mất kết nối thật sẽ tự mở
 lại camera. Không chụp nếu không còn ảnh mới.
 
-Từ rc78, khi bấm Space, app ưu tiên chốt số cân live cùng đúng ảnh gốc đã
+Từ rc79, khi bấm Space, app ưu tiên chốt số cân live cùng đúng ảnh gốc đã
 nhận diện nếu ảnh không quá 2 giây và kết quả đủ tin cậy. Không chạy AI lại
 ở bước này. Nếu kết quả cũ, yếu hoặc chưa có, app lấy ảnh mới và nhận diện
 như trước. Không lấy số của ảnh cũ gắn vào ảnh mới.
+Nếu live chưa đọc được QR của sản phẩm/kiểm kho, app dò QR đầy đủ trên ảnh
+đã chốt; không chạy lại YOLO đọc cân. Bước dò QR có thể mất thêm thời gian.
 
 Camera USB tại `127.0.0.1:8080` không cần Internet. Dữ liệu cloud có thể tải
 chậm/mất khi rút mạng; app chừa kết nối cho camera và tự thử lại yêu cầu hình

@@ -19,7 +19,7 @@ import webbrowser
 from pathlib import Path
 
 APP_NAME = "TramCanQR"
-APP_VERSION = "0.2.0-rc78"
+APP_VERSION = "0.2.0-rc79"
 _FAULT_STREAM = None
 CONFIG_NAME = "config.env"
 PADDLE_MODEL_NAME = "PP-OCRv6_medium_rec"
