@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const html = require('./frontend_fixture.cjs').html();
+const html = fs.readFileSync('frontend/index.html', 'utf8');
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function setup(api) {
   const fields = { productionRecordsStatus: {}, selectAllNhapKho: { classList: { toggle() {} }, setAttribute() {} },
@@ -19,7 +19,7 @@ function setup(api) {
   });
   function $(id) { return fields[id]; }
   vm.runInContext("let recordsSelectionBusy=false,productionSelectionFilter='',productionAllSelectedFilter='',productionRowsByEvent={},selectedNhapKhoIds=new Set(),nhapKhoSelectedEventIds=[];", ctx);
-  for (const prefix of ['function canSelectProductionRecord(', 'function recordsSelectionKey(', 'function paintNhapKhoSelectBtn(', 'function updateNhapKhoSelectedCount(', 'function syncSelectAllNhapKho(']) {
+  for (const prefix of ['function canSelectProductionRecord(', 'function recordsSelectionKey(', 'function paintNhapKhoSelectBtn(', 'function updateNhapKhoSelectedCount(']) {
     vm.runInContext(script.split('\n').find(line => line.startsWith(prefix)), ctx);
   }
   // The button stubs record their selection without needing a browser layout.

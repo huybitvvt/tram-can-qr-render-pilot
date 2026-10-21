@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import os
 import base64
-import faulthandler
 import json
-import multiprocessing
 import logging
 import re
 import shutil
@@ -18,9 +16,11 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from roll_qr_scale.test_ui import build_parser, create_server
+
+
 APP_NAME = "TramCanQR"
-APP_VERSION = "0.2.0-rc79"
-_FAULT_STREAM = None
+APP_VERSION = "0.2.0-rc80"
 CONFIG_NAME = "config.env"
 PADDLE_MODEL_NAME = "PP-OCRv6_medium_rec"
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -216,49 +216,42 @@ def open_existing_server(port: int) -> bool:
                 return False
     except (OSError, urllib.error.URLError, ValueError):
         return False
-    if payload.get("weight_engine") != "local-yolo":
-        raise RuntimeError("Bản Gemini vẫn đang chạy. Hãy lưu xong lượt cân, thoát TramCanQR.exe rồi mở lại bản mới.")
+    if payload.get("weight_engine") != "gemini":
+        raise RuntimeError("Bản nhận diện local vẫn đang chạy. Hãy lưu lượt cân, thoát TramCanQR.exe rồi mở lại bản Gemini.")
     if os.environ.get("ROLL_SCALE_OPEN_BROWSER", "1") != "0":
         webbrowser.open(f"http://127.0.0.1:{port}")
     return True
 
 
-def build_local_argv(root: Path, assets: Path) -> list[str]:
-    """Upgrade the existing station in place, regardless of its old Gemini setting."""
-    model = assets / "model" / "best.pt"
-    if not model.is_file():
-        raise FileNotFoundError(f"Thiếu model số cân trong bộ cài: {model}")
-    argv = build_runtime_argv(root, assets)
-    argv.extend([
-        "--weight-engine", "local-yolo", "--digit-model", str(model), "--weight-burst-frames", "1",
-        "--digit-confidence", os.environ.get("ROLL_SCALE_DIGIT_CONFIDENCE", "0.2"),
-        "--digit-inference-confidence", os.environ.get("ROLL_SCALE_DIGIT_INFERENCE_CONFIDENCE", "0.35"),
-    ])
-    return argv
+def build_gemini_argv(root: Path, assets: Path) -> list[str]:
+    """Restore rc74 recognition without rewriting the customer's configuration."""
+    return [*build_runtime_argv(root, assets), "--weight-engine", "gemini"]
 
 
-def backup_before_local_upgrade(root: Path, config_path: Path | None) -> Path:
-    """Snapshot SQLite (including WAL) before the upgraded service opens it."""
-    marker = root / "backups" / "local-rc75.json"
+def backup_before_gemini_recovery(root: Path, config_path: Path | None) -> Path:
+    """Snapshot the current DB, including its WAL, before opening rc74 runtime."""
+    marker = root / "backups" / "gemini-rc80.json"
     if marker.is_file():
         return Path(json.loads(marker.read_text(encoding="utf-8"))["directory"])
     marker.parent.mkdir(parents=True, exist_ok=True)
-    backup = Path(tempfile.mkdtemp(prefix="before-local-rc75-", dir=marker.parent))
+    backup = Path(tempfile.mkdtemp(prefix="before-gemini-rc80-", dir=marker.parent))
     database = root / "data" / "measurements.db"
     if database.is_file():
         with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as source:
             with sqlite3.connect(backup / "measurements.db") as destination:
                 source.backup(destination)
                 if destination.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                    raise RuntimeError("Không kiểm chứng được DB sao lưu; chưa chuyển sang nhận diện local.")
+                    raise RuntimeError("Không kiểm chứng được DB sao lưu; chưa khởi động bản Gemini.")
     if config_path is not None:
         shutil.copy2(config_path, backup / CONFIG_NAME)
-    # Photos stay at their original paths; the installer only replaces program files.
-    manifest = {"version": APP_VERSION, "directory": str(backup), "captures": str(root / "data" / "captures")}
+    # Photos and pending-session files keep their original locations. Never
+    # restore the older rc75 backup over measurements created by newer builds.
+    manifest = {"version": APP_VERSION, "directory": str(backup),
+                "captures": str(root / "data" / "captures")}
     temporary_marker = backup / "manifest.json"
     temporary_marker.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     shutil.copy2(temporary_marker, marker)
-    logging.info("Pre-local upgrade backup: %s", backup)
+    logging.info("Pre-Gemini recovery backup: %s", backup)
     return backup
 
 
@@ -270,7 +263,6 @@ def prepare_paddleocr_model(root: Path) -> None:
 
 
 def configure_logging(root: Path) -> Path:
-    global _FAULT_STREAM
     log_path = root / "logs" / "app.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
@@ -279,20 +271,7 @@ def configure_logging(root: Path) -> Path:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         encoding="utf-8",
     )
-    if _FAULT_STREAM is None:
-        _FAULT_STREAM = (log_path.parent / "native-crash.log").open("a", encoding="utf-8", buffering=1)
-        faulthandler.enable(_FAULT_STREAM, all_threads=True)
     return log_path
-
-
-def build_parser():
-    from roll_qr_scale.test_ui import build_parser as parser
-    return parser()
-
-
-def create_server(args):
-    from roll_qr_scale.test_ui import create_server as factory
-    return factory(args)
 
 
 def show_startup_error(message: str) -> None:
@@ -306,27 +285,26 @@ def show_startup_error(message: str) -> None:
 
 def main() -> None:
     root = writable_root()
-    configure_logging(root)
-    logging.info("Starting TramCanQR %s (local YOLO)", APP_VERSION)
     config_path = load_runtime_config(root)
+    configure_logging(root)
+    logging.info("Starting TramCanQR %s (Gemini rc74 recovery)", APP_VERSION)
     if config_path is not None:
         logging.info("Loaded runtime configuration from %s", config_path)
-    os.environ["ROLL_SCALE_APP_VARIANT"] = "local-yolo"
+    os.environ["ROLL_SCALE_APP_VARIANT"] = "gemini"
     os.environ["ROLL_SCALE_APP_VERSION"] = APP_VERSION
-    os.environ.setdefault("ROLL_SCALE_LIVE_INFERENCE_FPS", "2")
-    os.environ["ROLL_SCALE_CAMERA_LOG_DIR"] = str(root / "logs")
+    prepare_paddleocr_model(root)
     assets = bundle_root()
     if getattr(sys, "frozen", False):
         assets = assets / "assets"
-    argv = build_local_argv(root, assets)
+    argv = build_gemini_argv(root, assets)
     args = build_parser().parse_args(argv)
     if open_existing_server(args.port):
         logging.info("Existing gateway found on port %s; opened its UI", args.port)
         return
-    backup_before_local_upgrade(root, config_path)
+    backup_before_gemini_recovery(root, config_path)
     server, service = create_server(args)
+    service.start_ocr_preload()
     url = f"http://127.0.0.1:{server.server_port}"
-    logging.info("Station server ready on port %s", server.server_port)
     if os.environ.get("ROLL_SCALE_OPEN_BROWSER", "1") != "0":
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
@@ -340,10 +318,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--camera-worker":
-        from roll_qr_scale.camera_worker import main as camera_main
-        raise SystemExit(camera_main())
-    multiprocessing.freeze_support()
     try:
         main()
     except Exception as exc:

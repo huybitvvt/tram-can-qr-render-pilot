@@ -9,7 +9,7 @@ from roll_qr_scale.windows_app import APP_VERSION
 
 
 HARNESS = r'''
-param([string]$Root, [string]$Updater, [switch]$BadHash)
+param([string]$Root, [string]$Updater, [string]$InstalledVersion = '0.2.0-rc74', [switch]$BadHash)
 $ErrorActionPreference = 'Stop'
 $env:LOCALAPPDATA = $Root
 $env:TEMP = $Root
@@ -21,7 +21,7 @@ $script:didStop = $false
 $script:didInstall = $false
 $script:didOpen = $false
 function Get-ItemProperty { param($Path, $ErrorAction) return @{DisplayName='Tram Can QR';InstallLocation=$Root} }
-function Get-Item { param($LiteralPath) return @{VersionInfo=@{ProductVersion='0.2.0-rc74'}} }
+function Get-Item { param($LiteralPath) return @{VersionInfo=@{ProductVersion=$InstalledVersion}} }
 function Get-Process {
     param($Name, $ErrorAction)
     if (-not $script:didStop) { return @{Name='TramCanQR'} }
@@ -72,9 +72,14 @@ def main():
         legacy = base / "rc74.cmd"
         legacy.write_bytes(subprocess.check_output([
             "git", "show", "0f7400468df72213d78923d7d62b8a6dc71de2fc:packaging/CAP-NHAT-BAN-MOI.cmd"], cwd=project))
+        local_updater = base / "rc79.cmd"
+        local_updater.write_bytes(subprocess.check_output([
+            "git", "show", "v0.2.0-rc79:packaging/CAP-NHAT-BAN-MOI.cmd"], cwd=project))
         harness = base / "harness.ps1"
         harness.write_text(HARNESS.replace("__TARGET_VERSION__", APP_VERSION), encoding="utf-8-sig")
-        for label, updater in (("rc74", legacy), ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd")):
+        for label, updater, installed in (("rc74", legacy, "0.2.0-rc74"),
+                ("rc79", local_updater, "0.2.0-rc79"),
+                ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd", "0.2.0-rc79")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"
                 root.mkdir()
@@ -82,7 +87,7 @@ def main():
                                    ("config.env", b"old private config"), ("measurements.db", b"old customer DB"), ("old.jpg", b"old photo")):
                     (root / name).write_bytes(data)
                 protected = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in ("config.env", "measurements.db", "old.jpg")}
-                command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness), "-Root", str(root), "-Updater", str(updater)]
+                command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness), "-Root", str(root), "-Updater", str(updater), "-InstalledVersion", installed]
                 if bad_hash: command.append("-BadHash")
                 result = subprocess.run(command, capture_output=True, timeout=30)
                 state = json.loads((root / "result.json").read_text(encoding="utf-8-sig"))

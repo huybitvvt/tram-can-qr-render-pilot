@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const script=require('./frontend_fixture.cjs').html().match(/<script>([\s\S]*?)<\/script>/)[1];
+const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script);
 
 function load(ctx,name){
@@ -109,15 +109,11 @@ test('controls allow the next capture while disabling only the pending slot and 
  session.state='awaiting-weight';session.rounds[0].coreAiPending=true;session.rounds[0].coreImage='saved-photo';
  session.selectedSlot={kind:'core',round:1};ctx.renderControls();
  assert.equal(nodes.analyzeCoreBtn.disabled,false);assert.equal(nodes.photoOnlyBtn.disabled,false);
- assert.equal(nodes.testImageBtn.disabled,false);
  assert.equal(nodes.sourceShift.disabled,true);assert.equal(nodes.roundCount.disabled,true);
  assert.equal(nodes.weight.disabled,true);assert.equal(nodes.productWeight.disabled,false);
  session.selectedSlot={kind:'core',round:0};ctx.renderControls();
  assert.equal(nodes.analyzeCoreBtn.disabled,true);assert.equal(nodes.analyzeProductBtn.disabled,false);
  assert.equal(nodes.discardBtn.disabled,false);assert.equal(nodes.photoOnlyBtn.disabled,true);
- assert.equal(nodes.testImageBtn.disabled,true);
- session.rounds[0].coreAiPending=false;session.rounds[0].saved=true;ctx.renderControls();
- assert.equal(nodes.testImageBtn.disabled,true);
 });
 
 test('a running product can be discarded without waiting for AI or removing its core',async()=>{
@@ -168,50 +164,6 @@ test('discarding a queued request removes it without sending its photo to AI',as
  await Promise.all(tasks);
  assert.equal(jobs.length,7);assert.equal(jobs.some(job=>job.body.image===cancelledImage),false);
  assert.equal(session.rounds[2].productImage,'');assert.equal(vm.runInContext('captureAiActive',ctx),0);
-});
-
-test('trusted live captures bypass a busy local AI request queue',async()=>{
- const {ctx,jobs,photos,finish}=setup({count:4}), tasks=[];
- ctx.appStatus.weight_engine='local-yolo';
- for(let i=0;i<4;i++){tasks.push(ctx.analyzeCurrent('core'));await tick()}
- assert.equal(jobs.length,2);
- const fast=ctx.requestCaptureAi({...jobs[0].body,image:photos[0].image,live_capture_token:'server-token'},()=>true,'live-request');
- await tick();assert.equal(jobs.length,3);
- finish(jobs[2],0.42);await fast;
- assert.equal(vm.runInContext('captureAiActive',ctx),2);
- for(const index of [0,1,3,4]){finish(jobs[index],0.42);await tick()}
- await Promise.all(tasks);
- assert.equal(vm.runInContext('captureAiActive',ctx),0);
-});
-
-test('Space capture carries the image-bound token through photo save and result finalization',async()=>{
- const {ctx,session,jobs,photos,messages,finish}=setup();
- ctx.appStatus.weight_engine='local-yolo';session.backendMode=true;session.streamGeneration=3;
- const originalApi=ctx.api;
- ctx.api=async(path,options)=>path.startsWith('/api/live/snapshot?capture=1&reuse=1')
-  ? {image:'live-image',recognition:{numeric_value:0.42},live_capture_token:'server-token'}
-  : originalApi(path,options);
- ctx.captureWeightBurst=async()=>{throw Error('Live capture should not collect another burst')};
- const pending=ctx.analyzeCurrent('core');await tick();
- assert.equal(photos[0].image,'live-image');
- assert.equal(photos[0].live_capture_token,'server-token');
- assert.equal(jobs[0].body.live_capture_token,'server-token');
- assert.ok(!messages.some(message=>message.includes('đang chờ AI')),messages.join('\n'));
- finish(jobs[0],0.42);await pending;
- assert.equal(session.rounds[0].weight,'0.42');
-});
-
-test('live product captures needing a QR scan leave camera HTTP connections available',async()=>{
- const {ctx,jobs,photos,finish}=setup();
- ctx.appStatus.weight_engine='local-yolo';
- const tasks=Array.from({length:4},(_,index)=>{
-  const image='pinned-'+index;photos.push({image});
-  return ctx.requestCaptureAi({image,live_capture_token:'token-'+index,capture_kind:'product',client_qr_code:''},()=>true,'qr-'+index);
- });
- await tick();assert.equal(jobs.length,2);
- for(let index=0;index<4;index++){finish(jobs[index],13.04);await tick()}
- await Promise.all(tasks);
- assert.equal(vm.runInContext('captureAiActive',ctx),0);
 });
 
 test('discard invalidates pending results before waiting for backend cleanup',async()=>{

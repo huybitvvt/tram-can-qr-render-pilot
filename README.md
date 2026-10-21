@@ -1,25 +1,19 @@
-# Hệ thống offline ghép QR với số cân
+# Hệ thống ghép QR với số cân
 
-[![Tải Trạm Cân QR — AI local](https://img.shields.io/badge/Tải_Trạm_Cân_QR-YOLO_Local-2ea44f?style=for-the-badge)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
-[![Cập nhật máy trạm](https://img.shields.io/badge/Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
+> Bản Windows hiện tại: **0.2.0-rc80 — phục hồi luồng Gemini của rc74**.
+> Máy khách bấm **Cập nhật Trạm Cân QR** để trở về Gemini, giữ dữ liệu/config/key.
+> Chi tiết: [Ghi chú rc80](docs/release-notes-0.2.0-rc80.md).
 
-**Bản mới `0.2.0-rc79`: nhận diện YOLO local trên CPU, kèm model, không cần key Gemini.**
-Cài đè bản Gemini hoặc bấm nút cập nhật cũ: giữ `TramCanQR.exe`, cổng `8080`,
-DB/ảnh/cấu hình tại `%LOCALAPPDATA%\TramCanQR`. Trước lần chuyển đầu có sao
-lưu DB và cấu hình. Có nút **Chọn ảnh từ thiết bị** để thử nhận diện.
+[![Tải bản mới nhất (Windows Setup)](https://img.shields.io/badge/⬇_Tải_bản_mới_nhất-Windows_Setup_(.exe)-2ea44f?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
+[![Tải File Cập Nhật Cho Máy Trạm](https://img.shields.io/badge/⚡_Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge&logo=windows-terminal)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
+[![GitHub Release](https://img.shields.io/github/v/release/huybitvvt/tram-can-qr-render-pilot?style=for-the-badge&label=Phiên_bản)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest)
 
-**rc79 chốt số cân live khi bấm Space:** lấy kết quả YOLO kèm đúng ảnh gốc
-đã đọc nếu còn mới và đủ tin cậy; không chạy model thêm. Nếu chưa có kết quả
-hợp lệ, app chụp ảnh mới và nhận diện như trước. Live đọc vùng màn hình cân
-đã tìm được, tự dò lại khi mất dấu. Camera có timeout/tự thử lại và được
-chừa kết nối HTTP khi dữ liệu mạng chậm; USB tại `127.0.0.1` chạy local.
-
-1. **[Tải bộ cài mới nhất (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)** — [tải đúng rc79](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc79/TramCanQR-Setup-0.2.0-rc79.exe).
-2. **[Tải cập nhật 1 lần bấm (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)** — tải, kiểm tra SHA-256, cài đè rồi mở lại; cấu hình và dữ liệu được giữ.
-3. [Hướng dẫn chuyển từ Gemini, vận hành và quay lại](packaging/HUONG-DAN-KHACH-HANG.md) · [Ghi chú rc79](docs/release-notes-0.2.0-rc79.md).
-
-Nếu cần quay lại Gemini: [bộ cài rc74](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc74/TramCanQR-Setup-0.2.0-rc74.exe).
-[Bản thử riêng beta1](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/tag/v0.2.0-ai-auto-beta1) dùng cổng `8081` và DB riêng; bản rc79 ở trên thay Gemini tại chỗ.
+> 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
+> 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
+>    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
+>    Bản `0.2.0-rc74`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc74/TramCanQR-Setup-0.2.0-rc74.exe).
+> 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
+>    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
 
 Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Mỗi lượt cần đủ ảnh lõi và ảnh thành phẩm. Nếu AI không đọc được ảnh lõi, cân lõi tự đặt 0; cân SP hoặc QR thiếu vẫn ghi dòng lỗi để xử lý. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
 

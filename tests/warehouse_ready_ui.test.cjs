@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
-const script=require('./frontend_fixture.cjs').html().match(/<script>([\s\S]*?)<\/script>/)[1];
+const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script);
 function deferred(){let resolve;const promise=new Promise(done=>resolve=done);return{promise,resolve}}
 function setup(storage=new Map()){

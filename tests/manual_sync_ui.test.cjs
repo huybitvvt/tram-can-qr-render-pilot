@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 
-const html=require('./frontend_fixture.cjs').html();
+const html=fs.readFileSync('frontend/index.html','utf8');
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 const line=name=>script.split('\n').find(value=>value.startsWith(name));
 
@@ -95,7 +95,7 @@ test('production sync and list filtering preserve the open capture and use lower
     loadRecords:async()=>{},
     api:async(path,options)=>{requests.push([path,JSON.parse(options.body)]);return {total:1,counts:{measurements:1}}},
   });
-  for(const name of ['function recordsListQuery(', 'async function applyRecordsFilters(','function sourceQuery(','function productionSyncFilters(','function manualSyncCounts(','function setManualSyncRunning(','function manualSyncStatusEl(','async function previewManualSync(','async function startManualSync(']){
+  for(const name of ['async function applyRecordsFilters(','function sourceQuery(','function productionSyncFilters(','function manualSyncCounts(','function setManualSyncRunning(','function manualSyncStatusEl(','async function previewManualSync(','async function startManualSync(']){
     vm.runInContext(line(name),ctx);
   }
   vm.runInContext('let manualSyncTimer=0,manualSyncStatusHost="productionRecordsStatus"',ctx);

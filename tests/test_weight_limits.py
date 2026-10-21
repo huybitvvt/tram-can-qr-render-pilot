@@ -1,4 +1,3 @@
-from frontend_fixture import canonical_html
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -47,7 +46,7 @@ def test_capture_saves_weights_above_old_limits(tmp_path, core, product, machine
 
 
 def test_frontend_allows_weights_above_old_limits():
-    html = canonical_html()
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = ["roundAiPending", "productWeightLimitKg", "coreWeightOverLimit", "productWeightOverLimit", "roundOverWeightLimit", "sessionOverWeightLimit", "roundCanSave"]
     script = "const assert=require('node:assert/strict');let sourceContext={machine:'Máy cách nhiệt'};"
     script += "function sessionRoundCount(s){return s.rounds.length}function roundHasDuplicateQr(){return false}function roundQualityReady(){return true}function roundReadyToSave(){return true}"
@@ -71,7 +70,7 @@ round.saved=true;assert.equal(sessionOverWeightLimit(session),false);
 
 
 def test_frontend_can_save_unreadable_weights_with_one_image_and_no_qr():
-    html = canonical_html()
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = [
         "roundAiPending",
         "validWeightValue",
@@ -119,7 +118,7 @@ assert.equal(roundCanSave(session,0),true);
 
 
 def test_two_cores_are_captured_before_products() -> None:
-    html = canonical_html()
+    html = Path("frontend/index.html").read_text(encoding="utf-8")
     names = [
         "validWeightValue", "selectedRoundCount", "sessionRoundCount", "ensureRounds",
         "roundCoreReady", "roundProductReady", "nextCoreRound", "nextProductRound",

@@ -1,21 +1,21 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc79` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc80` — phục hồi luồng Gemini của rc74.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc79.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc80.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
    **Trạm 04**. Trang chọn trạm được bỏ qua khi máy đã có `config.env`.
-3. Installer tự mở file cấu hình. Điền kết nối Supabase/kho nếu cần đồng bộ, bấm **Ctrl+S** rồi
+3. Installer tự mở file cấu hình. Điền Supabase/Gemini, bấm **Ctrl+S** rồi
    đóng Notepad. Ứng dụng sẽ tự mở sau đó.
 4. Nếu Windows SmartScreen cảnh báo, đối chiếu SHA-256 với file
    `SHA256SUMS.txt` do đơn vị triển khai gửi trước khi tiếp tục.
 5. Nếu ứng dụng chưa tự mở, mở **Trạm cân QR** từ Desktop. Trình duyệt sẽ mở địa chỉ
    `http://127.0.0.1:8080`.
-6. Chọn camera USB trong ứng dụng. Nhận diện chạy trên CPU, model đã kèm bộ cài; không cần key Gemini hoặc cài Python/CUDA.
+6. Cho phép Chrome/Edge sử dụng camera khi trình duyệt hỏi.
 
 Không cần cài Python. Không đổi tên, di chuyển hoặc xóa thư mục `_internal`
 trong bản portable.
@@ -33,56 +33,22 @@ Nếu máy đang dùng nút từ bộ cài cũ và nút không hoạt động, t
 cập nhật mới do đơn vị triển khai cung cấp, rồi bấm lại nút trên Desktop.
 Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự mang nút mới.
 
-### Chuyển từ Gemini sang local, giữ dữ liệu
+### Trở về Gemini sau các bản local rc75–rc79
 
-Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc79. Dùng cùng tài
-khoản Windows, giữ nguyên thư mục cài cũ; không cần gỡ ứng dụng. Lưu xong
-lượt cân đang làm trước khi cập nhật. App vẫn là `TramCanQR.exe`, cổng `8080`,
-DB/ảnh/cấu hình vẫn ở `%LOCALAPPDATA%\TramCanQR`. Không di chuyển hay nhập
-lại dữ liệu. Các phiếu pending/failed và thông tin trạm/Supabase/kho được giữ.
+Bản rc80 chạy giao diện và luồng Gemini của rc74. Chỉ cần bấm nút cập nhật
+cũ; không chép backend/.env hoặc cài thêm Python. Giữ nguyên config.env,
+key Gemini đã lưu, SQLite, ảnh, thông tin trạm và cấu hình cloud/kho.
+Ứng dụng chọn Gemini khi chạy, kể cả cấu hình còn ghi local-yolo; không
+sửa đè file config. Gemini cần Internet và key còn hiệu lực/quota.
 
-Trước lần mở bản local đầu tiên (từ rc75), ứng dụng sao lưu SQLite (kể cả WAL) và cấu hình
-vào `%LOCALAPPDATA%\TramCanQR\backups\before-local-rc75-*`. Ảnh dùng lại
-đường dẫn gốc, không bị bộ cài ghi đè. Nếu sao lưu không thành công, ứng dụng
-báo lỗi và chưa mở DB để vận hành. Các lần cập nhật sau vẫn dùng nút cũ.
-
-Nếu cần quay lại Gemini, thoát `TramCanQR.exe`, cài lại bộ rc74 có số phiên
-bản rồi mở ứng dụng. DB/ảnh vẫn dùng chung; cấu hình Gemini cũ không bị xóa.
-Không chép đè DB từ bản sao lưu lên DB đang dùng vì sẽ mất các phiếu mới.
-Bản thử riêng `TramCanQRAuto` không được gộp DB vào bản chính này.
-
-### Camera và log lỗi
-
-Từ rc76, driver camera Windows chạy trong tiến trình riêng. Danh sách USB
-liệt kê các cổng để chọn, không mở thử đồng thời nhiều driver. Nếu một cổng
-báo lỗi/không có hình, chọn lại đúng camera (thường USB 0 hoặc 1) và bấm Mở
-camera. Thoát bản Gemini/beta1 nếu bản đó còn giữ camera.
-
-Từ rc77, hình xem trước lấy trực tiếp từ camera, không chờ AI đọc số cân.
-Ảnh xem trước được thu nhỏ để giảm tải; ảnh chụp phiếu cân/kiểm kho vẫn lấy
-khung hình gốc. Driver thử lại khi hụt frame ngắn; mất kết nối thật sẽ tự mở
-lại camera. Không chụp nếu không còn ảnh mới.
-
-Từ rc79, khi bấm Space, app ưu tiên chốt số cân live cùng đúng ảnh gốc đã
-nhận diện nếu ảnh không quá 2 giây và kết quả đủ tin cậy. Không chạy AI lại
-ở bước này. Nếu kết quả cũ, yếu hoặc chưa có, app lấy ảnh mới và nhận diện
-như trước. Không lấy số của ảnh cũ gắn vào ảnh mới.
-Nếu live chưa đọc được QR của sản phẩm/kiểm kho, app dò QR đầy đủ trên ảnh
-đã chốt; không chạy lại YOLO đọc cân. Bước dò QR có thể mất thêm thời gian.
-
-Camera USB tại `127.0.0.1:8080` không cần Internet. Dữ liệu cloud có thể tải
-chậm/mất khi rút mạng; app chừa kết nối cho camera và tự thử lại yêu cầu hình
-bị treo. Phiếu cân vẫn lưu local; đồng bộ sau khi có mạng. Nếu còn mất hình,
-lấy log tại máy bị lỗi để kiểm tra USB/driver và kết nối local.
-
-Nếu app vẫn tự tắt, lấy phần cuối `logs/app.log`, `logs/camera-driver.log`
-và `logs/native-crash.log` trong `%LOCALAPPDATA%\TramCanQR` để kiểm tra.
-Không xóa DB/ảnh hoặc gửi file cấu hình có key/token.
+Trước lần mở đầu, app sao lưu DB hiện tại (gồm WAL) và config vào
+`%LOCALAPPDATA%\TramCanQR\backups\before-gemini-rc80-*`. Dữ liệu đang dùng
+vẫn là dữ liệu mới nhất, không lấy DB sao lưu từ thời rc74/rc75 ghi đè lại.
+Nếu tab cũ chưa đổi giao diện, nhấn **Ctrl+F5**.
 
 ### Chụp tiếp khi AI đang đọc
 
-Nhấn Space để chụp ô đang chọn. Khi có số cân live hợp lệ, app chốt cùng ảnh
-và tự điền vào ô. Khi cần nhận diện lại, sau khi ảnh được ghi xuống máy, ô đó hiện
+Nhấn Space để chụp ô đang chọn. Sau khi ảnh được ghi xuống máy, ô đó hiện
 **Ảnh đã lưu · chờ AI** và tự chọn ô còn thiếu tiếp theo. Có thể chụp tiếp ngay;
 số cân tự điền vào đúng ô khi AI trả kết quả. Ô đang chờ AI chưa cho lưu phiếu
 hoặc chụp đè. Ngày, ca, máy, LSX và Mã SP tạm khoá cho đến khi AI đọc xong.
@@ -170,9 +136,23 @@ Installer tự tạo file:
 ```
 
 Giữ `ROLL_SCALE_STATION_COUNT=1`. Mỗi máy điền **bộ URL/token Supabase riêng**
-được cấp cho đúng trạm đó. Nhận diện local không cần key Gemini. Đóng ứng dụng rồi mở lại sau
+và **Gemini key riêng** được cấp cho đúng trạm đó. Đóng ứng dụng rồi mở lại sau
 khi sửa. Không sao chép nguyên `config.env` từ máy 01 sang máy khác vì sẽ làm
 trùng danh tính và gửi dữ liệu sang sai Supabase.
+
+Để đổi key khi chương trình đang chạy, vào **Cài đặt → Key ca ngày (12C1)**
+hoặc **Key ca đêm (12C2)**, dán đầy đủ key từ Google AI Studio rồi bấm Lưu.
+Key dạng `AQ.` và `AIza` đều được nhận; có thể dán key kèm dấu nháy hoặc
+dòng `GEMINI_API_KEY=...`. Ứng dụng thử key với model cân đang cấu hình trước
+khi lưu mã hóa trên Supabase và áp dụng ngay cho đúng ca. Nếu Google từ chối,
+key cũ được giữ nguyên. Không dán chuỗi dấu chấm/dấu sao đã che key.
+
+Thêm key thứ ba tại **Cài đặt → Key phụ Gemini**. Khi key của ca đang chọn
+chậm, bấm **Đổi sang key phụ** trên thanh thao tác: key phụ trở thành key của
+ca đó, key cũ trở thành key phụ, ca còn lại giữ nguyên. Lần đọc tiếp theo dùng
+key mới; yêu cầu AI đang chạy vẫn hoàn tất với key cũ. Cả ba vị trí được lưu
+mã hóa và giữ qua khởi động lại. Nếu mất phản hồi, bấm **Thử lại đổi key phụ**
+để hoàn tất cùng yêu cầu; ứng dụng không hoán đổi ngược do thử lại.
 
 Mỗi camera chỉ được gán cho một trạm. Trên giao diện, chọn đúng camera ở từng
 thẻ trạm rồi bấm **Mở camera đã gán**. Trình duyệt lưu ánh xạ này trên chính
@@ -208,17 +188,82 @@ Supabase cân AI cần Edge Function `ingest-measurement` bản rc48 trở lên 
 cập nhật trạng thái bằng token thiết bị; đơn vị triển khai cập nhật API một
 lần trước khi dùng bộ cài mới. Không cần thêm service-role key cân AI vào máy khách.
 
-### Nhận diện YOLO local
+Với `local`/`hybrid`, mặc định mỗi lần chụp dùng 5 frame và PaddleOCR chọn 3
+frame đầu–giữa–cuối. Với `gemini`, mỗi lần chụp gửi một ảnh bằng chứng đã nén;
+backend crop vùng LED trước khi gọi Gemini. Có thể giữ cấu hình:
 
-Bản rc75 thay bộ nhận diện Gemini bằng model YOLO CPU đã kiểm thử trên ảnh
-13,04 kg. Bản Windows dùng model đóng gói kể cả khi cấu hình cũ còn
-`ROLL_SCALE_WEIGHT_ENGINE=gemini`; không cần sửa hoặc xóa key cũ.
-Cân/QR chạy không cần mạng; đồng bộ Supabase và đẩy kho vẫn cần mạng.
+```text
+ROLL_SCALE_WEIGHT_BURST_FRAMES=5
+```
 
-Chọn ô lõi hoặc SP, bấm **Chọn ảnh từ thiết bị** để thử JPG/PNG/WebP/BMP
-(tối đa 20 MB). Ảnh đi qua cùng luồng nhận diện và lưu phiếu như camera.
-Chọn lại **Mở camera** để cân bằng USB. Ảnh thử không tự tạo phiếu; kiểm tra
-kết quả rồi bấm Lưu khi muốn ghi phiếu chính thức.
+Gemini mặc định tắt. Chỉ đơn vị triển khai được bật sau khi khách hàng chấp
+thuận việc gửi ảnh camera tới Google và cấp key bằng kênh riêng:
+
+```text
+ROLL_SCALE_GEMINI_ENABLED=true
+ROLL_SCALE_WEIGHT_ENGINE=hybrid
+ROLL_SCALE_GEMINI_API_KEY=replace-with-key-for-this-station
+# Tùy chọn: key thứ hai; tự chuyển khi key trên trả lỗi API và quarantine key
+# lỗi cho tới khi khởi động lại hoặc lưu key mới.
+# ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-key-for-this-station
+ROLL_SCALE_GEMINI_MODEL=gemini-3.5-flash-lite
+ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview
+ROLL_SCALE_GEMINI_TIMEOUT=30.0
+ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT=30.0
+```
+
+Ở chế độ `hybrid`, Gemini chỉ xác nhận ứng viên đa số từ PaddleOCR; kết quả
+cloud đơn lẻ hoặc khác local luôn bị giữ lại để người vận hành kiểm tra.
+
+Trên giao diện, chọn **Nhanh** để dùng `gemini-3.5-flash-lite` với thinking
+tối thiểu; chọn **Chính xác** để dùng `gemini-3.1-pro-preview` với thinking
+trung bình. Model Pro không có Free Tier trên Gemini API và cần bật billing.
+Mỗi lần chụp ở cả hai chế độ vẫn chỉ gửi đúng một ảnh. Timeout mặc định lần
+lượt là 10 giây và 30 giây.
+
+Bản pilot dùng đúng một camera nhưng để Gemini đọc trực tiếp thì đổi
+`ROLL_SCALE_WEIGHT_ENGINE=gemini`. Paddle không khởi tạo. Gemini chỉ đọc số
+cân từ vùng LED đã crop, không suy đoán mã SP. Nếu crop không đọc được, backend
+thử lại ảnh toàn khung đúng một lần; lỗi 502/503/504 hoặc timeout được thử lại cùng ảnh một lần với thời hạn 30 giây. Ở lần chụp cân sản phẩm, mã QR
+được trình duyệt và ZXing backend đọc độc lập. Hai bộ giải mã khớp thì tự điền;
+nếu xung đột thì hệ thống để trống và yêu cầu người vận hành kiểm tra.
+
+Sau khi camera đã được bắt cố định, đơn vị triển khai nên hiệu chỉnh ROI hàng
+số gross cho từng trạm và điền vào `config.env`; ROI cũng được dùng để tăng tốc
+Gemini. Nếu chưa cấu hình, backend tự dò LED. Mỗi ROI có dạng
+`x1,y1,x2,y2` từ 0 đến 1; các trạm ngăn cách bằng dấu chấm phẩy:
+
+### Codex · ChatGPT
+
+Codex là lựa chọn AI độc lập với Gemini. Trên máy local, cài Codex CLI và đăng
+nhập đúng tài khoản ChatGPT trước khi dùng:
+
+```powershell
+codex login --device-auth
+codex login status
+```
+
+Mở menu **AI** trên giao diện, chọn **Codex · ChatGPT**, rồi bấm **Đăng nhập
+Codex**. Nút này mở lại cửa sổ đăng nhập CLI nếu tài khoản chưa được xác nhận;
+không cần dán API key Codex vào `config.env`. Nếu Codex chưa cài, giao diện sẽ
+hiện hướng dẫn cài CLI; có thể chọn lại **Gemini API** để cân tiếp.
+
+Antigravity là lựa chọn AI thứ ba (sau Gemini API và Codex). Khi cài Trạm Cân QR,
+chọn thêm tác vụ **Cài Antigravity CLI** nếu máy chưa có `agy`. Trong menu **AI**,
+chọn **Antigravity · Google**,
+bấm **Đăng nhập Antigravity**, hoàn tất Google login ở cửa sổ mới rồi bấm lại
+để kiểm tra. Ứng dụng ưu tiên **Gemini 3.5 Flash Low**; nếu tài khoản không có
+model đó, tự chọn bản Flash Low mới hơn và hiện tên model đang dùng. Nếu bỏ qua
+tác vụ cài CLI, chạy lệnh chính thức trong PowerShell:
+`irm https://antigravity.google/cli/install.ps1 | iex`.
+
+```text
+ROLL_SCALE_WEIGHT_ROIS=0.4500,0.8000,0.5400,0.8500;0.4450,0.7950,0.5350,0.8450;0.4550,0.8050,0.5450,0.8550
+```
+
+Các số trên chỉ minh họa, không sao chép sang xưởng. ROI phải ôm sát duy nhất
+hàng gross, không chứa bàn phím hoặc hai hàng `0.00` phía dưới. Số ROI phải
+bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`.
 
 ## 3. Vận hành
 
@@ -237,7 +282,7 @@ kết quả rồi bấm Lưu khi muốn ghi phiếu chính thức.
 - Chọn **2 lần · 4 cân**. Bấm ô cần chụp hoặc dùng `Space` để lần lượt cân lõi
   cặp 1, lõi cặp 2, thành phẩm cặp 1, thành phẩm cặp 2. Có thể bấm trực tiếp
   ô thành phẩm của cặp đã có lõi khi thành phẩm ra sớm. Với camera, ứng dụng
-  lấy khung hình mới khi bấm chụp và đọc số/QR trên đúng ảnh đó.
+  đếm ngược 3 giây rồi mới lấy ảnh; số đếm không còn chạy sau lúc chụp.
 - Khi cặp 1 đã có ảnh thành phẩm, số cân
   thành phẩm và mã QR, có thể lưu ngay; lõi cặp 2 vẫn chờ thành phẩm và không
   bị xóa. Nếu chưa cân lõi, vẫn lưu được thành phẩm; danh sách hiện ô lõi trống.

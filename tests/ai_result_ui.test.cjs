@@ -3,16 +3,16 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 
-const script=require('./frontend_fixture.cjs').html().match(/<script>([\s\S]*?)<\/script>/)[1];
+const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 
-async function analyzeWith(result,kind='core',clientQr='',weightEngine='gemini'){
+async function analyzeWith(result,kind='core',clientQr=''){
  const messages=[],round={saved:false,weight:'',coreImage:''};
  const session={state:'review',rounds:[round],selectedSlot:{kind:'core',round:0},unit:'kg',stationId:'station-01',cameraId:'camera-01',preview:{},setState(state){this.state=state}};
  const ctx=vm.createContext({
   current:()=>session,persistSourceFromFields(){},ensureRounds:()=>session.rounds,sessionRoundCount:()=>session.rounds.length,nextCoreRound:()=>0,nextProductRound:()=>0,captureSlot:()=>session.selectedSlot,
   roundCoreReady:()=>false,renderControls(){},status:(_node,message)=>messages.push(message),captureStatus:{},
   captureVideo:()=>null,drawSession:()=> 'image',drawQrSession:()=> 'image',decodeClientQr:async()=>clientQr,newEventId:()=> 'event-01',captureWeightBurst:async()=>[],showPreview(){},
-  weightKindLabel:()=> 'cân lõi',appStatus:{weight_engine:weightEngine},recognitionProfile:{value:'fast'},recognitionProvider:{value:'gemini'},sourceContext:{shift:'HC1'},
+  weightKindLabel:()=> 'cân lõi',appStatus:{weight_engine:'gemini'},recognitionProfile:{value:'fast'},recognitionProvider:{value:'gemini'},sourceContext:{shift:'HC1'},
   api:async()=>({...result,event_id:'event-01'}),parseBox:()=>null,qrDuplicateMessage:()=>'',captureQr:{value:''},weight:{value:''},productWeight:{value:''},unit:{value:'kg'},
   $:()=>null,renderRoundParams(){},updateBoxes(){},syncCaptureProductCodes(){},persistAiMissPhoto:async()=>({saved:true,synced:false}),
   advanceToNextCapture:()=>null,nextCaptureStep:()=>null,renderEvidence(){},refreshCompletionState(){},weightsReady:()=>false,weighSlotLabel:()=> 'Cân lõi',
@@ -50,12 +50,6 @@ test('an unreadable core response defaults to zero and records the fallback',asy
  assert.match(round.analyzedRaw,/CORE_AUTO_ZERO=1/);
  assert.match(messages.at(-1),/CÂN LÕI TỰ ĐẶT 0/);
  assert.match(messages.at(-1),/màn hình cân mờ/);
-});
-
-test('local YOLO leaves an unreadable core weight blank for manual confirmation',async()=>{
- const {round}=await analyzeWith({weight_found:false,weight:null,quality_pass:true,step_saved:false,unit:'kg'},'core','', 'local-yolo');
- assert.equal(round.weight,'');
- assert.equal(round.analyzedRaw,'');
 });
 
 test('an unreadable product response stays empty',async()=>{

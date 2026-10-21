@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const vm=require('node:vm');
 
-const script=require('./frontend_fixture.cjs').html().match(/<script>([\s\S]*?)<\/script>/)[1];
+const script=fs.readFileSync('frontend/index.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 const countdown=script.split('\n').find(line=>line.startsWith('async function waitBeforeCameraCapture('));
 
 test('camera frame waits three seconds after Space countdown begins',async()=>{
@@ -27,8 +27,7 @@ test('camera frame waits three seconds after Space countdown begins',async()=>{
   assert.equal(finished,true);
   assert.deepEqual(calls.at(-1),['stop']);
   const production=script.slice(script.indexOf("async function analyzeCurrent(kind='core')"),script.indexOf('async function discardSlot('));
-  assert.match(production,/await waitBeforeCameraCapture\(session,weightKindLabel\(kind\)\);await waitForVideoFrame\(video\)/);
-  assert.ok(production.indexOf('await waitBeforeCameraCapture(') < production.indexOf('image=drawQrSession(session)'));
+  assert.match(production,/await waitBeforeCameraCapture\(session,weightKindLabel\(kind\)\);await waitForVideoFrame\(video\)\}image=drawQrSession\(session\)/);
 });
 
 test('camera change during countdown aborts capture',async()=>{
