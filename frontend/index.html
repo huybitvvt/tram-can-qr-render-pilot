@@ -8544,6 +8544,26 @@
                 persistSessionToken(data.session);
             });
             readSessionToken();
+            let dataReadActive = 0;
+            const dataReadWaiters = [];
+            async function acquireDataRead(signal) {
+                if (signal && signal.aborted) throw Object.assign(new Error("Đã hủy tải dữ liệu"), {name: "AbortError"});
+                if (dataReadActive < 2) { dataReadActive++; return; }
+                await new Promise((resolve, reject) => {
+                    const ready = () => { if (signal) signal.removeEventListener("abort", cancel); resolve(); };
+                    const cancel = () => {
+                        const index = dataReadWaiters.indexOf(ready);
+                        if (index >= 0) dataReadWaiters.splice(index, 1);
+                        reject(Object.assign(new Error("Đã hủy tải dữ liệu"), {name: "AbortError"}));
+                    };
+                    dataReadWaiters.push(ready);
+                    if (signal) signal.addEventListener("abort", cancel, {once: true});
+                });
+            }
+            function releaseDataRead() {
+                if (dataReadWaiters.length) dataReadWaiters.shift()();
+                else dataReadActive--;
+            }
             async function api(path, options) {
                 options = options || {};
                 const headers = Object.assign({}, options.headers || {});
@@ -8557,35 +8577,48 @@
                     )
                         headers["X-Tram-Can-Session"] = token;
                 }
-                const response = await fetch(
-                    path,
-                    Object.assign({ credentials: "include" }, options, {
-                        headers,
-                    }),
-                );
-                let data;
+                const isCamera = String(path).startsWith("/api/live/"),
+                    isDataRead = String(options.method || "GET").toUpperCase() === "GET" &&
+                        /^\/api\/(?:production-orders|measurements|warehouse|weighing-batches|inventory-checks|lookup)(?:[/?]|$)/.test(String(path)),
+                    controller = isCamera ? new AbortController() : null,
+                    parentSignal = options.signal,
+                    cancel = () => controller.abort();
+                let timer = 0, acquired = false, timedOut = false;
+                if (controller) {
+                    if (parentSignal && parentSignal.aborted) controller.abort();
+                    else if (parentSignal) parentSignal.addEventListener("abort", cancel, {once: true});
+                    timer = setTimeout(() => { timedOut = true; controller.abort(); }, 5000);
+                }
                 try {
-                    data = await response.json();
-                } catch {
-                    throw new Error("Server trả dữ liệu không hợp lệ");
-                }
-                if (
-                    response.status === 401 ||
-                    (data && data.error === "authentication_required")
-                ) {
-                    const error = new Error(
-                        (data && data.message) || "Cần đăng nhập lại",
-                    );
-                    error.code = "authentication_required";
-                    if (!/\/login(?:$|[?#])/.test(location.pathname))
-                        redirectToLogin();
+                    // Slow cloud reads must leave HTTP connections for local
+                    // camera, photo capture and saving when the LAN goes down.
+                    if (isDataRead) { await acquireDataRead(parentSignal); acquired = true; }
+                    const request = Object.assign({credentials: "include"}, options, {headers});
+                    if (controller) Object.assign(request, {signal: controller.signal, cache: "no-store", priority: "high"});
+                    const response = await fetch(path, request);
+                    let data;
+                    try {
+                        data = await response.json();
+                    } catch (error) {
+                        if (controller && controller.signal.aborted) throw error;
+                        throw new Error("Server trả dữ liệu không hợp lệ");
+                    }
+                    if (response.status === 401 || (data && data.error === "authentication_required")) {
+                        const error = new Error((data && data.message) || "Cần đăng nhập lại");
+                        error.code = "authentication_required";
+                        if (!/\/login(?:$|[?#])/.test(location.pathname)) redirectToLogin();
+                        throw error;
+                    }
+                    if (!response.ok) throw new Error(data.message || data.error || "HTTP " + response.status);
+                    return data;
+                } catch (error) {
+                    if (timedOut) throw new Error("Camera local chưa phản hồi; đang thử kết nối lại");
                     throw error;
+                } finally {
+                    if (timer) clearTimeout(timer);
+                    if (parentSignal && controller) parentSignal.removeEventListener("abort", cancel);
+                    if (acquired) releaseDataRead();
                 }
-                if (!response.ok)
-                    throw new Error(
-                        data.message || data.error || "HTTP " + response.status,
-                    );
-                return data;
             }
             function isAuthenticationRequired(error) {
                 return Boolean(
@@ -8924,7 +8957,9 @@
                     });
                 });
                 try {
-                    if (captureAiActive >= MAX_CAPTURE_AI_REQUESTS)
+                    const limited = !payload.live_capture_token,
+                        maximum = appStatus && appStatus.weight_engine === "local-yolo" ? 2 : MAX_CAPTURE_AI_REQUESTS;
+                    if (limited && captureAiActive >= maximum)
                         await Promise.race([
                             new Promise((resolve) => {
                                 waiter = () => {
@@ -8936,7 +8971,7 @@
                             }),
                             cancelled,
                         ]);
-                    else {
+                    else if (limited) {
                         captureAiActive++;
                         acquired = true;
                     }
@@ -13508,6 +13543,7 @@
                         headers: { "content-type": "application/json" },
                         body: JSON.stringify({
                             image,
+                            live_capture_token: context.liveCaptureToken || "",
                             client_qr_code: clientQr,
                             event_id: captureId,
                             parent_event_id: eventId,
@@ -13650,6 +13686,7 @@
                 session._analyzeLock = true;
                 renderControls();
                 const requestStarted = performance.now();
+                const captureGeneration = session.streamGeneration;
                 let image, liveSnapshot = null;
                 try {
                     const video = captureVideo(session);
@@ -13661,10 +13698,12 @@
                         await waitForVideoFrame(video);
                     }
                     if (session.backendMode) {
-                        liveSnapshot = await api("/api/live/snapshot?capture=1");
+                        liveSnapshot = await api("/api/live/snapshot?capture=1&reuse=1&station_id=" + encodeURIComponent(session.stationId) + "&camera_id=" + encodeURIComponent(session.cameraId));
+                        if (session.streamGeneration !== captureGeneration) throw new Error("Đã đổi camera trong lúc chụp");
                         if (!liveSnapshot.image || !liveSnapshot.recognition)
                             throw new Error("Backend chưa có ảnh nhận diện live mới nhất");
                         image = liveSnapshot.image;
+                        captureContext.liveCaptureToken = liveSnapshot.live_capture_token || "";
                     } else {
                         image = drawQrSession(session);
                     }
@@ -13730,7 +13769,7 @@
                 if (session === current())
                     status(
                         captureStatus,
-                        "Đang lấy burst LED của " +
+                        (captureContext.liveCaptureToken ? "Đang chốt ảnh và số cân đã đọc của " : "Đang lấy burst LED của ") +
                             session.stationId +
                             " (" +
                             weightKindLabel(kind) +
@@ -13739,7 +13778,7 @@
                     );
                 let weightFrames = [];
                 try {
-                    weightFrames = await captureWeightBurst(session);
+                    if (!captureContext.liveCaptureToken) weightFrames = await captureWeightBurst(session);
                 } catch (error) {
                     weightFrames = [];
                 }
@@ -13753,7 +13792,9 @@
                 if (session === current())
                     status(
                         captureStatus,
-                        appStatus && appStatus.weight_engine === "gemini"
+                        captureContext.liveCaptureToken
+                            ? "Đang chốt số cân YOLO đã đọc cùng ảnh…"
+                            : appStatus && appStatus.weight_engine === "gemini"
                             ? "Đang tối ưu vùng LED và gửi " +
                                   (recognitionProvider.value === "codex"
                                       ? "Codex"
@@ -13810,13 +13851,14 @@
                         captureStatus,
                         "ẢNH ĐÃ LƯU · " +
                             weighSlotLabel(kind, targetRound) +
-                            " đang chờ AI. Có thể chụp ô tiếp theo.",
+                            (captureContext.liveCaptureToken ? " đang chốt số cân đã đọc." : " đang chờ AI. Có thể chụp ô tiếp theo."),
                         "warn",
                     );
                 try {
                     let rejectedQr = "";
                     const payload = {
                         image,
+                        live_capture_token: captureContext.liveCaptureToken || "",
                         weight_frames: weightFrames,
                         camera_capture: Boolean(session.stream),
                         roi: "auto",
@@ -14054,7 +14096,9 @@
                     const issues = (data.quality && data.quality.issues) || [],
                         burst = data.burst_frames || 1,
                         source =
-                            data.recognition_source === "gemini-primary"
+                            data.live_capture_reused
+                                ? "YOLO LIVE · ĐÃ CHỐT CÙNG ẢNH"
+                                : data.recognition_source === "gemini-primary"
                                 ? "GEMINI"
                                 : data.recognition_source === "codex-primary"
                                   ? "CODEX"
@@ -15710,14 +15754,20 @@
                 session._analyzeLock = true;
                 session.state = "analyzing";
                 renderControls();
-                let image;
+                let image, liveSnapshot = null;
+                const captureGeneration = session.streamGeneration;
                 try {
                     const video = captureVideo(session);
                     if (video) {
                         await waitBeforeCameraCapture(session, "cân kiểm kho");
                         await waitForVideoFrame(video);
                     }
-                    image = session.backendMode ? await captureBackendImage(session) : drawQrSession(session);
+                    if (session.backendMode) {
+                        liveSnapshot = await api("/api/live/snapshot?capture=1&reuse=1&station_id=" + encodeURIComponent(session.stationId) + "&camera_id=" + encodeURIComponent(session.cameraId));
+                        if (session.streamGeneration !== captureGeneration) throw new Error("Đã đổi camera trong lúc chụp");
+                        if (!liveSnapshot.image) throw new Error("Backend chưa có ảnh camera mới");
+                        image = liveSnapshot.image;
+                    } else image = drawQrSession(session);
                 } catch (error) {
                     session._analyzeLock = false;
                     session.state = session.stream ? "live" : "idle";
@@ -15738,7 +15788,7 @@
                 );
                 status(
                     captureStatus,
-                    "Đang gửi một ảnh để AI đọc khối lượng; QR được nhận diện độc lập…",
+                    liveSnapshot && liveSnapshot.live_capture_token ? "Đang chốt số cân YOLO đã đọc cùng ảnh kiểm kho…" : "Đang gửi một ảnh để AI đọc khối lượng; QR được nhận diện độc lập…",
                     "warn",
                 );
                 try {
@@ -15750,6 +15800,7 @@
                             image,
                             roi: "auto",
                             unit: state.unit || "kg",
+                            live_capture_token: liveSnapshot && liveSnapshot.live_capture_token || "",
                             recognition_profile: recognitionProfile.value,
                             recognition_provider: recognitionProvider.value,
                             capture_kind: "inventory",

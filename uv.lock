@@ -4325,7 +4325,7 @@ wheels = [
 
 [[package]]
 name = "roll-qr-scale"
-version = "0.2.0rc77"
+version = "0.2.0rc78"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

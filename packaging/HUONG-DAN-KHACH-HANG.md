@@ -1,10 +1,10 @@
 # Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
 
-Phiên bản: `0.2.0-rc77` — bản chạy thử nghiệm thu tại xưởng.
+Phiên bản: `0.2.0-rc78` — bản chạy thử nghiệm thu tại xưởng.
 
 ## 1. Cài đặt
 
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc77.exe`
+1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc78.exe`
    trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
    trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
 2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
@@ -35,7 +35,7 @@ Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự
 
 ### Chuyển từ Gemini sang local, giữ dữ liệu
 
-Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc77. Dùng cùng tài
+Bấm **Cập nhật Trạm Cân QR** như trước hoặc cài đè bộ cài rc78. Dùng cùng tài
 khoản Windows, giữ nguyên thư mục cài cũ; không cần gỡ ứng dụng. Lưu xong
 lượt cân đang làm trước khi cập nhật. App vẫn là `TramCanQR.exe`, cổng `8080`,
 DB/ảnh/cấu hình vẫn ở `%LOCALAPPDATA%\TramCanQR`. Không di chuyển hay nhập
@@ -63,13 +63,24 @@ Từ rc77, hình xem trước lấy trực tiếp từ camera, không chờ AI �
 khung hình gốc. Driver thử lại khi hụt frame ngắn; mất kết nối thật sẽ tự mở
 lại camera. Không chụp nếu không còn ảnh mới.
 
+Từ rc78, khi bấm Space, app ưu tiên chốt số cân live cùng đúng ảnh gốc đã
+nhận diện nếu ảnh không quá 2 giây và kết quả đủ tin cậy. Không chạy AI lại
+ở bước này. Nếu kết quả cũ, yếu hoặc chưa có, app lấy ảnh mới và nhận diện
+như trước. Không lấy số của ảnh cũ gắn vào ảnh mới.
+
+Camera USB tại `127.0.0.1:8080` không cần Internet. Dữ liệu cloud có thể tải
+chậm/mất khi rút mạng; app chừa kết nối cho camera và tự thử lại yêu cầu hình
+bị treo. Phiếu cân vẫn lưu local; đồng bộ sau khi có mạng. Nếu còn mất hình,
+lấy log tại máy bị lỗi để kiểm tra USB/driver và kết nối local.
+
 Nếu app vẫn tự tắt, lấy phần cuối `logs/app.log`, `logs/camera-driver.log`
 và `logs/native-crash.log` trong `%LOCALAPPDATA%\TramCanQR` để kiểm tra.
 Không xóa DB/ảnh hoặc gửi file cấu hình có key/token.
 
 ### Chụp tiếp khi AI đang đọc
 
-Nhấn Space để chụp ô đang chọn. Sau khi ảnh được ghi xuống máy, ô đó hiện
+Nhấn Space để chụp ô đang chọn. Khi có số cân live hợp lệ, app chốt cùng ảnh
+và tự điền vào ô. Khi cần nhận diện lại, sau khi ảnh được ghi xuống máy, ô đó hiện
 **Ảnh đã lưu · chờ AI** và tự chọn ô còn thiếu tiếp theo. Có thể chụp tiếp ngay;
 số cân tự điền vào đúng ô khi AI trả kết quả. Ô đang chờ AI chưa cho lưu phiếu
 hoặc chụp đè. Ngày, ca, máy, LSX và Mã SP tạm khoá cho đến khi AI đọc xong.

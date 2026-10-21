@@ -131,7 +131,7 @@ class QrDecoder:
                     return result
         return None
 
-    def decode(self, image: np.ndarray) -> QrResult | None:
+    def decode(self, image: np.ndarray, *, exhaustive: bool = True) -> QrResult | None:
         """Return a decoded QR and full-frame box, never data from an older frame."""
         if not isinstance(image, np.ndarray) or image.ndim not in (2, 3) or image.size == 0:
             raise ValueError("image must be a grayscale or BGR OpenCV image")
@@ -157,7 +157,7 @@ class QrDecoder:
                 self.last_stage = "localized_crop"
                 return result
 
-        result = self._scan_tiles(image)
+        result = self._scan_tiles(image) if exhaustive else None
         if result is not None:
             self._last_box = result.box
             self.last_stage = "tiled_crop"

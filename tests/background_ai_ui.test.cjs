@@ -170,6 +170,37 @@ test('discarding a queued request removes it without sending its photo to AI',as
  assert.equal(session.rounds[2].productImage,'');assert.equal(vm.runInContext('captureAiActive',ctx),0);
 });
 
+test('trusted live captures bypass a busy local AI request queue',async()=>{
+ const {ctx,jobs,photos,finish}=setup({count:4}), tasks=[];
+ ctx.appStatus.weight_engine='local-yolo';
+ for(let i=0;i<4;i++){tasks.push(ctx.analyzeCurrent('core'));await tick()}
+ assert.equal(jobs.length,2);
+ const fast=ctx.requestCaptureAi({...jobs[0].body,image:photos[0].image,live_capture_token:'server-token'},()=>true,'live-request');
+ await tick();assert.equal(jobs.length,3);
+ finish(jobs[2],0.42);await fast;
+ assert.equal(vm.runInContext('captureAiActive',ctx),2);
+ for(const index of [0,1,3,4]){finish(jobs[index],0.42);await tick()}
+ await Promise.all(tasks);
+ assert.equal(vm.runInContext('captureAiActive',ctx),0);
+});
+
+test('Space capture carries the image-bound token through photo save and result finalization',async()=>{
+ const {ctx,session,jobs,photos,messages,finish}=setup();
+ ctx.appStatus.weight_engine='local-yolo';session.backendMode=true;session.streamGeneration=3;
+ const originalApi=ctx.api;
+ ctx.api=async(path,options)=>path.startsWith('/api/live/snapshot?capture=1&reuse=1')
+  ? {image:'live-image',recognition:{numeric_value:0.42},live_capture_token:'server-token'}
+  : originalApi(path,options);
+ ctx.captureWeightBurst=async()=>{throw Error('Live capture should not collect another burst')};
+ const pending=ctx.analyzeCurrent('core');await tick();
+ assert.equal(photos[0].image,'live-image');
+ assert.equal(photos[0].live_capture_token,'server-token');
+ assert.equal(jobs[0].body.live_capture_token,'server-token');
+ assert.ok(!messages.some(message=>message.includes('đang chờ AI')),messages.join('\n'));
+ finish(jobs[0],0.42);await pending;
+ assert.equal(session.rounds[0].weight,'0.42');
+});
+
 test('discard invalidates pending results before waiting for backend cleanup',async()=>{
  const {ctx,session,jobs,finish}=setup(),cleanup=deferred(),original=ctx.api;
  ctx.api=(url,options)=>url==='/api/session/discard'?cleanup.promise:original(url,options);

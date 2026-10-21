@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,15 @@ except ImportError:  # Keep legacy tests importable if the optional local CV tre
     backend_id = parse_source = redact_source = Box = build_recognition = Stabilizer = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RecognizedCapture:
+    frame: np.ndarray
+    event: dict[str, Any]
+    frame_id: int
+    run: Any
+    qr: Any
 
 
 class LiveCamera:
@@ -83,6 +93,7 @@ class LiveCamera:
         self._recognized_raw: np.ndarray | None = None
         self._recognized_id = 0
         self._recognized_at = 0.0
+        self._recognized_run = self._recognized_qr = None
         self._annotated: np.ndarray | None = None
         self._event: dict[str, Any] = self._empty_event()
         self._connected = False
@@ -127,6 +138,7 @@ class LiveCamera:
         with self._condition:
             self._connected = False
             self._recognized_raw = None
+            self._recognized_run = self._recognized_qr = None
 
     def select_source(self, source: str) -> None:
         source = str(source).strip()
@@ -141,6 +153,7 @@ class LiveCamera:
             self._recognized_raw = None
             self._recognized_id = 0
             self._recognized_at = 0.0
+            self._recognized_run = self._recognized_qr = None
             self._connected = False
             self._event = self._empty_event()
             self.stabilizer = Stabilizer(self.stabilizer.required_frames)
@@ -253,6 +266,7 @@ class LiveCamera:
                         continue
                     self._connected = False
                     self._raw = self._recognized_raw = self._annotated = None
+                    self._recognized_run = self._recognized_qr = None
                     self._source_generation += 1
                     generation = self._source_generation
                     self._frame_id += 1
@@ -300,6 +314,8 @@ class LiveCamera:
 
     def _recognition_loop(self) -> None:
         last_id = -1
+        tracked_run = None
+        tracked_generation = -1
         interval = 1.0 / self.inference_fps
         while not self._stop.is_set():
             started = time.monotonic()
@@ -317,10 +333,21 @@ class LiveCamera:
                 stabilizer = self.stabilizer
             last_id = frame_id
             try:
-                qr = self.qr_decoder.decode(image)
+                # Exhaustive QR tile scans belong to capture fallback. They
+                # must not block a new scale reading while the roll has no QR.
+                if hasattr(self.qr_decoder, "_scan_tiles"):
+                    qr = self.qr_decoder.decode(image, exhaustive=False)
+                else:
+                    qr = self.qr_decoder.decode(image)
                 if self.detector:
                     with self.inference_lock:
-                        run = self.detector.detect_with_details(image)
+                        if tracked_generation != source_generation:
+                            tracked_run = None
+                        if hasattr(self.detector, "detect_live"):
+                            run = self.detector.detect_live(image, tracked_run)
+                        else:
+                            run = self.detector.detect_with_details(image)
+                        tracked_run, tracked_generation = run, source_generation
                 else:
                     run = None
                 event = build_recognition(
@@ -346,6 +373,7 @@ class LiveCamera:
                     self._recognized_raw = image
                     self._recognized_id = frame_id
                     self._recognized_at = captured_monotonic
+                    self._recognized_run, self._recognized_qr = run, qr
                     self._jpeg_cache = None
                     self._condition.notify_all()
                 if qr or (run and run.digits):
@@ -361,6 +389,7 @@ class LiveCamera:
                     self._recognized_raw = image
                     self._recognized_id = frame_id
                     self._recognized_at = captured_monotonic
+                    self._recognized_run = self._recognized_qr = None
                     self._jpeg_cache = None
                     self._condition.notify_all()
             # Leave a real idle window for queued captures and pending sync,
@@ -389,6 +418,21 @@ class LiveCamera:
             event = {**self._empty_event(), "timestamp": int(self._raw_captured_at.timestamp() * 1000),
                      "frame_width": self._raw.shape[1], "frame_height": self._raw.shape[0], "status": "CAPTURED"}
             return self._raw.copy(), event, self._frame_id
+
+    def recognized_capture(self, max_age: float = 2.0) -> RecognizedCapture | None:
+        """Pin a recent reading together with the exact full-resolution frame."""
+        with self._condition:
+            now = time.monotonic()
+            raw = str(self._event.get("raw_digits") or "").lstrip("-")
+            confidence = self._event.get("confidence")
+            if (not self._connected or self._recognized_raw is None or self._recognized_run is None
+                    or now - self._raw_at > 2 or now - self._recognized_at > max_age
+                    or self._event.get("numeric_value") is None
+                    or confidence is None or confidence < self.confidence
+                    or not raw.isdecimal() or not 3 <= len(raw) <= 6):
+                return None
+            return RecognizedCapture(self._recognized_raw.copy(), dict(self._event), self._recognized_id,
+                                     self._recognized_run, self._recognized_qr)
 
     def wait_jpeg(self, after_id: int, timeout: float = 1.0) -> tuple[int, bytes] | None:
         with self._condition:

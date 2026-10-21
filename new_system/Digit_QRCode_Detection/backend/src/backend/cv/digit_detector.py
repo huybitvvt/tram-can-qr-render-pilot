@@ -10,6 +10,7 @@ import time
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 from backend.cv.display_locator import DisplayRegion, locate_display_candidates, scaled_region
@@ -158,12 +159,16 @@ def top_display_rows(regions: list[DisplayRegion]) -> list[DisplayRegion]:
 
 
 class DigitDetector:
-    def __init__(self, model_path: Path, confidence: float, *, display_colors: Sequence[str] = ("red",), max_candidates: int = 5, image_size: int = 640, prefer_top_row: bool = False) -> None:
+    def __init__(self, model_path: Path, confidence: float, *, display_colors: Sequence[str] = ("red",), max_candidates: int = 5, image_size: int = 640, prefer_top_row: bool = False, cpu_threads: int | None = None) -> None:
         self.confidence = confidence
         self.display_colors = tuple(display_colors)
         self.max_candidates = max_candidates
         self.image_size = image_size
         self.prefer_top_row = prefer_top_row
+        self.cpu_threads = max(1, int(cpu_threads)) if cpu_threads is not None else None
+        if self.cpu_threads is not None:
+            torch.set_num_threads(self.cpu_threads)
+            cv2.setNumThreads(1)
         self.model = YOLO(str(model_path))
         self.model_version = _model_version(self.model.names)
         logger.info("Digit model mapping: %s", self.model_version)
@@ -172,7 +177,13 @@ class DigitDetector:
         crop = image[region.y1:region.y2, region.x1:region.x2]
         if preprocessing == "sharpened":
             crop = cv2.detailEnhance(crop, sigma_s=10, sigma_r=0.15)
-        result = self.model.predict(source=crop, conf=min(self.confidence, 0.05), imgsz=self.image_size, verbose=False)[0]
+        options = {}
+        if self.cpu_threads is not None:
+            # A torch.device avoids Ultralytics resetting CPU threads during
+            # lazy predictor setup. Leave cores available for capture/UI.
+            torch.set_num_threads(self.cpu_threads)
+            options["device"] = torch.device("cpu")
+        result = self.model.predict(source=crop, conf=min(self.confidence, 0.05), imgsz=self.image_size, verbose=False, **options)[0]
         detections: list[Digit] = []
         ignored_none = 0
         if result.boxes is None:
@@ -231,3 +242,31 @@ class DigitDetector:
 
     def detect(self, image: np.ndarray) -> list[Digit]:
         return self.detect_with_details(image).digits
+
+    def detect_live(self, image: np.ndarray, previous: DetectionRun | None = None) -> DetectionRun:
+        """Read the known gross-display crop once; reacquire on a missed reading."""
+        region = previous.display if previous is not None else None
+        if (region is not None and 0 <= region.x1 < region.x2 <= image.shape[1]
+                and 0 <= region.y1 < region.y2 <= image.shape[0]):
+            started = time.perf_counter()
+            candidates = locate_display_candidates(image, colors=self.display_colors, max_candidates=self.max_candidates)
+            if self.prefer_top_row:
+                candidates = top_display_rows(candidates)
+            matched = next((candidate for candidate in candidates
+                if candidate.color == region.color
+                and max(0, min(region.x2, candidate.x2) - max(region.x1, candidate.x1))
+                * max(0, min(region.y2, candidate.y2) - max(region.y1, candidate.y1))
+                >= region.width * region.height * .8), None)
+            if matched is None:
+                return self.detect_with_details(image)
+            # Recompute the crop from today's illuminated digits: the display
+            # can widen when 0.42 becomes 10.42, without the camera moving.
+            region = scaled_region(matched, previous.crop_scale or 1.0, image.shape)
+            digits, ignored_none = self._predict_crop(image, region, previous.preprocessing or "original")
+            raw = "".join(str(item.value) for item in digits)
+            if (raw.lstrip("-").isascii() and raw.lstrip("-").isdigit()
+                    and 3 <= len(raw.lstrip("-")) <= 6
+                    and min((item.confidence for item in digits), default=0) >= max(.35, self.confidence)):
+                return DetectionRun(digits, region, 1, previous.crop_scale, previous.preprocessing,
+                                    ignored_none, 1, (time.perf_counter() - started) * 1000, self.model_version)
+        return self.detect_with_details(image)

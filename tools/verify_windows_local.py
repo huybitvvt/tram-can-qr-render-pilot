@@ -17,7 +17,7 @@ def main():
     archive = executable.open_embedded_archive("PYZ.pyz")
     modules = {
         **{f"roll_qr_scale.{name}": root / f"backend/src/roll_qr_scale/{name}.py"
-           for name in ("test_ui", "live_camera", "camera_process", "camera_worker", "station_session", "sync", "storage")},
+           for name in ("test_ui", "live_camera", "live_capture_cache", "camera_process", "camera_worker", "station_session", "sync", "storage")},
         **{f"backend.cv.{name}": root / f"new_system/Digit_QRCode_Detection/backend/src/backend/cv/{name}.py"
            for name in ("digit_detector", "qr_decoder")},
     }

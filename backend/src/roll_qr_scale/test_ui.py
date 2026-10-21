@@ -65,6 +65,7 @@ from .api_client import (
     sign_storage_image,
 )
 from .inference_queue import InferenceCoordinator, InferenceQueueFull
+from .live_capture_cache import LiveCaptureCache
 from .lookup_client import lookup_roll
 from .quality import FrameQuality, assess_frame_quality
 from .qr_reader import QRReader
@@ -2726,6 +2727,7 @@ class StationUIService:
         self.digit_detector = digit_detector
         self.digit_inference_lock = threading.Lock()
         self.live_camera = None
+        self._live_captures = LiveCaptureCache()
         self.local_qr_decoder = local_qr_decoder
         self.digit_model_path = str(digit_model_path or "")
         self.decimal_places = max(0, min(6, int(decimal_places)))
@@ -4318,6 +4320,19 @@ class StationUIService:
         result = selected.decode(frame)
         return self._qr_result_payload(frame, result, str(getattr(selected, "last_stage", "none")))
 
+    def cache_live_capture(self, image: str, capture, station_id: str, camera_id: str) -> str:
+        self.validate_station_source(station_id, camera_id)
+        decoded = self._qr_result_payload(capture.frame, capture.qr, "live")
+        return self._live_captures.put(image, station_id, camera_id, capture.run, decoded)
+
+    def resolve_live_capture(self, payload: dict) -> tuple | None:
+        if self.weight_engine != "local-yolo":
+            return None
+        return self._live_captures.get(str(payload.get("live_capture_token") or ""),
+                                       str(payload.get("image") or ""),
+                                       str(payload.get("station_id") or ""),
+                                       str(payload.get("camera_id") or ""))
+
     def _analyze_local_frame(
         self,
         frame: np.ndarray,
@@ -4326,6 +4341,7 @@ class StationUIService:
         client_qr_code: str,
         qr_frame: np.ndarray | None,
         qr_decoder: object | None,
+        *, local_recognition: tuple | None = None,
     ) -> dict[str, object]:
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
@@ -4337,7 +4353,8 @@ class StationUIService:
         quality = self.assess_quality(frame)
         quality_payload, quality_pass = self.quality_result(quality)
         qr_source_frame = qr_frame if qr_frame is not None else frame
-        decoded = self._decode_local_qr(qr_source_frame, qr_decoder)
+        decoded = (dict(local_recognition[1]) if local_recognition is not None
+                   else self._decode_local_qr(qr_source_frame, qr_decoder))
         client_qr = client_qr_code.strip()
         if len(client_qr) > 512 or any(ord(character) < 32 for character in client_qr):
             raise ValueError("Mã QR từ trình duyệt không hợp lệ")
@@ -4352,8 +4369,11 @@ class StationUIService:
             else:
                 decoded = {**decoded, "found": True, "qr_code": client_qr, "decoder": "browser-barcode-detector", "qr_roi": None}
 
-        with self.digit_inference_lock:
-            run = self.digit_detector.detect_with_details(frame)
+        if local_recognition is not None:
+            run = local_recognition[0]
+        else:
+            with self.digit_inference_lock:
+                run = self.digit_detector.detect_with_details(frame)
         # Never remove an uncertain digit and shift the remaining number's
         # decimal position (e.g. 6308 must not become 6.30). Dots are ignored
         # because this scale uses the configured fixed decimal count.
@@ -4442,7 +4462,8 @@ class StationUIService:
             ],
             "crop_scale": run.crop_scale,
             "preprocessing": run.preprocessing,
-            "inference_count": run.inference_count,
+            "inference_count": 0 if local_recognition is not None else run.inference_count,
+            "live_capture_reused": local_recognition is not None,
             "burst_frames": 1,
             "quality": quality_payload,
             "quality_pass": quality_pass,
@@ -4489,6 +4510,7 @@ class StationUIService:
         shift: str = "",
         machine: str = "",
         production_order: str = "",
+        local_recognition: tuple | None = None,
     ) -> dict[str, object]:
         """Save one image for later AI processing while decoding QR locally."""
 
@@ -4522,7 +4544,7 @@ class StationUIService:
         # QR is deliberately outside the shared AI/FIFO inference queue so a
         # busy or failed Gemini request cannot delay photo-only capture.
         try:
-            decoded = self._decode_qr(frame)
+            decoded = dict(local_recognition[1]) if local_recognition is not None else self._decode_qr(frame)
         except Exception as exc:
             logging.warning("QR decode failed; saving photo draft without local QR: %s", exc)
             decoded = {"qr_code": "", "decoder": "unavailable"}
@@ -5290,6 +5312,7 @@ class StationUIService:
         context_camera_id: str | None = None,
         context_shift: str = "",
         photo_capture_id: str = "",
+        local_recognition: tuple | None = None,
     ) -> dict[str, object]:
         additional_frames = list(weight_frames or [])
         if len(additional_frames) >= MAX_BURST_FRAMES:
@@ -5351,8 +5374,11 @@ class StationUIService:
             "evidence_zoom_applied": evidence_zoom_applied,
             "evidence_zoom_method": evidence_zoom_method,
         }
-        if not any(identities):
-            result = self.inference.run(
+        def analyze_frame():
+            if local_recognition is not None and self.weight_engine == "local-yolo":
+                return self._analyze_local_frame(frame, unit, capture_kind, client_qr_code, qr_frame,
+                                                 local_qr_decoder, local_recognition=local_recognition)
+            return self.inference.run(
                 self._analyze_frame,
                 frame,
                 roi_text,
@@ -5367,6 +5393,8 @@ class StationUIService:
                 qr_frame,
                 local_qr_decoder,
             )
+        if not any(identities):
+            result = analyze_frame()
             return {**result, **evidence_metadata}
         if not all(identities):
             raise ValueError("Cần đủ event_id, station_id và camera_id")
@@ -5384,21 +5412,7 @@ class StationUIService:
             )
         try:
             self._write_diagnostic(station_id, frame)
-            result = self.inference.run(
-                self._analyze_frame,
-                frame,
-                roi_text,
-                unit,
-                additional_frames,
-                roi_method_override,
-                recognition_profile,
-                recognition_provider,
-                capture_kind,
-                client_qr_code,
-                gemini_key_slot,
-                qr_frame,
-                local_qr_decoder,
-            )
+            result = analyze_frame()
             binding = self.sessions.mark_ready(binding.analysis_id)
         except Exception as exc:
             try:
@@ -6218,6 +6232,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
             max_candidates=args.display_max_candidates,
             image_size=args.digit_image_size,
             prefer_top_row=True,
+            cpu_threads=max(1, min(2, (os.cpu_count() or 2) // 2)),
         )
         local_qr_decoder = LocalQrDecoder()
     else:
@@ -6679,7 +6694,18 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 query = urllib.parse.parse_qs(parsed.query)
                 capture_now = parsed.path == "/api/live/snapshot" and query.get("capture") == ["1"]
                 preview_now = parsed.path == "/api/live/snapshot" and not capture_now and query.get("preview") == ["1"]
-                snapshot = camera.capture_snapshot() if capture_now or preview_now else camera.snapshot()
+                recognized = camera.recognized_capture() if capture_now and query.get("reuse") == ["1"] else None
+                if recognized is not None:
+                    station_id = str(query.get("station_id", [""])[0])
+                    camera_id = str(query.get("camera_id", [""])[0])
+                    try:
+                        service.validate_station_source(station_id, camera_id)
+                    except ValueError as exc:
+                        self.send_json(422, {"ok": False, "message": str(exc)})
+                        return
+                    snapshot = recognized.frame, recognized.event, recognized.frame_id
+                else:
+                    snapshot = camera.capture_snapshot() if capture_now or preview_now else camera.snapshot()
                 if snapshot is None:
                     self.send_json(503, {"ok": False, "message": "Chưa có ảnh camera mới. Kiểm tra camera rồi mở lại nguồn."})
                     return
@@ -6703,6 +6729,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             live_snapshot_cache["image"] = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode("ascii")
                             live_snapshot_cache["frame_id"] = cache_key
                         payload["image"] = live_snapshot_cache["image"]
+                    if recognized is not None:
+                        payload["live_capture_token"] = service.cache_live_capture(payload["image"], recognized, station_id, camera_id)
                 self.send_json(200, payload)
                 return
             if parsed.path == "/api/measurement-image":
@@ -6749,7 +6777,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     {
                         "ok": True,
                         "app_variant": os.environ.get("ROLL_SCALE_APP_VARIANT", "source"),
-                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc77"),
+                        "app_version": os.environ.get("ROLL_SCALE_APP_VERSION", "0.2.0-rc78"),
                         "pending_count": store.pending_count(),
                         "yolo_enabled": service.weight_engine == "local-yolo" or service.reader.model is not None,
                         "yolo_mode": "local-digit-model+opencv-qr" if service.weight_engine == "local-yolo" else service.reader.yolo_mode,
@@ -8145,6 +8173,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         shift=str(payload.get("shift", "")),
                         machine=str(payload.get("machine", "")),
                         production_order=str(payload.get("production_order", "")),
+                        local_recognition=service.resolve_live_capture(payload),
                     )
                     self.send_json(201, result)
                     return
@@ -8195,6 +8224,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             context_camera_id=str(payload.get("camera_id", "")) or None,
                             context_shift=str(payload.get("shift", "")),
                             photo_capture_id=str(payload.get("photo_capture_id") or ""),
+                            local_recognition=service.resolve_live_capture(payload),
                         )
                     except Exception as exc:
                         logging.warning(
