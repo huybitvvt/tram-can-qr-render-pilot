@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
@@ -16,16 +16,16 @@ if (-not $python) {
 }
 & $python -c "import PyInstaller; assert PyInstaller.__version__ == '6.21.0'"
 if ($LASTEXITCODE -ne 0) { throw "Can PyInstaller 6.21.0 trong moi truong build" }
-$buildTemp = Join-Path $projectRoot ".test-tmp\gemini-build-temp"
+$buildTemp = Join-Path $projectRoot ".test-tmp\rapidocr-build-temp"
 New-Item -ItemType Directory -Path $buildTemp -Force | Out-Null
 $previousTemp, $previousTmp, $previousCache = $env:TEMP, $env:TMP, $env:PYINSTALLER_CONFIG_DIR
 $previousErrorActionPreference = $ErrorActionPreference
 try {
     $env:TEMP = $buildTemp
     $env:TMP = $buildTemp
-    $env:PYINSTALLER_CONFIG_DIR = Join-Path $projectRoot ".test-tmp\pyinstaller-gemini-cache"
+    $env:PYINSTALLER_CONFIG_DIR = Join-Path $projectRoot ".test-tmp\pyinstaller-rapidocr-cache"
     $ErrorActionPreference = "Continue"
-    & $python -m PyInstaller --noconfirm --clean --workpath build\gemini packaging\TramCanQR.spec
+    & $python -m PyInstaller --noconfirm --clean --workpath build\rapidocr packaging\TramCanQR.spec 2>&1 | ForEach-Object { Write-Output $_.ToString() }
     $pyInstallerExitCode = $LASTEXITCODE
 } finally {
     $env:TEMP, $env:TMP, $env:PYINSTALLER_CONFIG_DIR = $previousTemp, $previousTmp, $previousCache
@@ -41,9 +41,7 @@ if (-not (Test-Path -LiteralPath $portableExe)) {
 # These two files are intentionally beside the EXE for portable handoff. The
 # Inno installer also adds them explicitly to the installed program directory.
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\customer-config.env.example") -Destination $portableDir -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\gemini-pilot-config.env.example") -Destination $portableDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\HUONG-DAN-KHACH-HANG.md") -Destination $portableDir -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAI-ANTIGRAVITY.ps1") -Destination $portableDir -Force
 
 $innoCandidates = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
@@ -65,11 +63,8 @@ if ($iscc) {
 $handoffDir = Join-Path $projectRoot "dist\handoff-$version"
 New-Item -ItemType Directory -Path $handoffDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\customer-config.env.example") -Destination $handoffDir -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\gemini-pilot-config.env.example") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\HUONG-DAN-KHACH-HANG.md") -Destination $handoffDir -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAI-ANTIGRAVITY.ps1") -Destination $handoffDir -Force
 Copy-Item -LiteralPath (Join-Path $projectRoot "packaging\CAP-NHAT-BAN-MOI.cmd") -Destination $handoffDir -Force
-Copy-Item -LiteralPath (Join-Path $projectRoot "docs\GEMINI-COST.md") -Destination $handoffDir -Force
 if (Test-Path -LiteralPath $installerPath) {
     Copy-Item -LiteralPath $installerPath -Destination $handoffDir -Force
     $genericInstaller = Join-Path $installerDir "TramCanQR-Setup.exe"

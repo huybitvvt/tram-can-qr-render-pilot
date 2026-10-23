@@ -1,32 +1,54 @@
-# Hệ thống ghép QR với số cân
+# Trạm Cân QR — OCR local rc82
 
-> Bản Windows hiện tại: **0.2.0-rc80 — phục hồi luồng Gemini của rc74**.
-> Máy khách bấm **Cập nhật Trạm Cân QR** để trở về Gemini, giữ dữ liệu/config/key.
-> Chi tiết: [Ghi chú rc80](docs/release-notes-0.2.0-rc80.md).
+Bản Windows **0.2.0-rc82** giữ chức năng và dữ liệu rc80, chuyển nhận diện cân
+sang **RapidOCR + PP-OCRv6 Small**, chạy offline trên CPU. Không gọi Gemini,
+Codex hay Antigravity để đọc cân trong bộ cài Windows này.
 
-[![Tải bản mới nhất (Windows Setup)](https://img.shields.io/badge/⬇_Tải_bản_mới_nhất-Windows_Setup_(.exe)-2ea44f?style=for-the-badge&logo=windows)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
-[![Tải File Cập Nhật Cho Máy Trạm](https://img.shields.io/badge/⚡_Cập_nhật_máy_trạm-CAP--NHAT--BAN--MOI.cmd-0969da?style=for-the-badge&logo=windows-terminal)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
-[![GitHub Release](https://img.shields.io/github/v/release/huybitvvt/tram-can-qr-render-pilot?style=for-the-badge&label=Phiên_bản)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest)
+- [Tải bộ cài TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
+- [Tải file cập nhật CAP-NHAT-BAN-MOI.cmd](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
+- [Hướng dẫn máy khách](packaging/HUONG-DAN-KHACH-HANG.md)
+- [Ghi chú rc82](docs/release-notes-0.2.0-rc82.md)
 
-> 🚀 **CÁC NÚT TẢI NHANH TRỰC TIẾP (Link cố định, luôn trỏ về bản mới nhất):**  
-> 1. **[Tải Trực Tiếp Bộ Cài Đặt (.exe)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)**  
->    *Dùng cho cài đặt máy mới hoặc tải về cài đè thủ công.*
->    Bản `0.2.0-rc74`: [tải file có số phiên bản](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/download/v0.2.0-rc74/TramCanQR-Setup-0.2.0-rc74.exe).
-> 2. **[Tải File Cập Nhật Tự Động 1-Click (CAP-NHAT-BAN-MOI.cmd)](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)**  
->    *Tải về để ở Desktop máy trạm. Khi có installer mới trên GitHub Releases, ấn đúp chuột để tải, kiểm tra SHA-256 và cài đè; cấu hình và dữ liệu được giữ nguyên. Chỉ `git pull` source không cập nhật EXE đã cài.*
+Camera đọc liên tục và hiện số; **Space lấy ngay số ổn định vào ô cân được chọn**,
+giữ ảnh đúng khung hình đã đọc. Không chờ chụp rồi gọi OCR lại.
+Số cũ, camera đã dừng, vùng LED/camera thay đổi hoặc số chưa ổn định đều bị từ chối.
 
-Mỗi máy cài đặt chọn một trong bốn trạm độc lập và mở giao diện tại `http://127.0.0.1:8080`. Một đợt gồm hai cặp lõi–thành phẩm: cân hai lõi trước, sau đó cân thành phẩm cho từng cặp. Có thể lưu riêng cặp đã đủ và tiếp tục cân lõi/cân thành phẩm cho cặp còn lại. Mỗi lượt cần đủ ảnh lõi và ảnh thành phẩm. Nếu AI không đọc được ảnh lõi, cân lõi tự đặt 0; cân SP hoặc QR thiếu vẫn ghi dòng lỗi để xử lý. Danh sách bên dưới lấy bản ghi vừa lưu từ dữ liệu local ngay, kể cả khi cloud phản hồi chậm. Ô **Ca** có lựa chọn **Ca chuẩn Đà Nẵng**; ô **Máy** cho gõ tay hoặc chọn trong danh sách gợi ý và không bị cấu hình trạm khóa.
+Giữ chọn camera, DirectShow/Media Foundation/trình duyệt, Mở/Dừng, chọn vùng LED
+bằng chuột, tự tìm LED đỏ, cấu hình hai số thập phân, xem chuỗi OCR và mở ảnh thử.
+Ảnh thử chỉ đọc, không tự ghi phiếu. Live preview không tự lưu ảnh hay số cân.
+Nhấn Space/nút lấy số mới bắt đầu lưu ảnh bằng chứng theo luồng phiếu cũ.
 
-Bản `0.2.0-rc28` cho phép AI đọc đủ lần cân thứ 4. Xác nhận đợt cân lấy các cuộn chưa từng được ghi vào đợt trước; không bỏ qua cuộn khi xác nhận sớm và không tạo đợt trống. Nút chụp từng ô không tăng **SỐ LƯỢNG TRONG CA**; số tăng sau khi lưu phiếu cân. Chỉ cần ít nhất một ảnh, dù chưa có QR hoặc AI không đọc được một hay cả hai số cân, nút Lưu vẫn tạo phiếu cân chính thức và tự ghi trạng thái/lý do lỗi. Enter hoặc nút **Lưu tất các lần** lưu mọi lần có ảnh và dọn đúng ảnh đã lưu để cân tiếp. Dữ liệu ghi local trước. Từ bản `0.2.0-rc33`, vào **Danh sách** để chọn bộ lọc và bấm **Đồng bộ theo bộ lọc** khi cần gửi Supabase/Cloudinary. Phần đồng bộ phiếu không QR hoặc thiếu số cân cần migration và Edge Function `ingest-measurement` bản mới trên Supabase; chỉ cài EXE chưa cập nhật được phần cloud.
+Giữ QR, phiếu nhiều cuộn/lõi–sản phẩm, kiểm kho, danh sách/sửa/đọc lại, bộ lọc,
+đồng bộ Supabase, đẩy kho, bản nháp, mã trạm và cập nhật có kiểm tra SHA-256.
+Giao diện vẫn ở `http://127.0.0.1:8080` trên máy khách; OCR không cần Internet.
+Đồng bộ cloud và tải cập nhật vẫn cần kết nối mạng khi sử dụng.
 
-Mã nguồn được tách theo ranh giới triển khai:
+Cài đè/cập nhật rc80 giữ `%LOCALAPPDATA%\TramCanQR` làm thư mục dữ liệu.
+Lần đầu rc82 sao lưu DB hiện tại bằng SQLite backup (gồm dữ liệu WAL), cấu hình
+và metadata phiên đang chờ vào `backups/before-rapidocr-rc82-*`. Không khôi phục
+DB cũ lên dữ liệu mới. Bộ cài giữ AppId, tên EXE, đường dẫn cài và kênh cập nhật cũ.
 
-- `frontend/`: giao diện chạy trong trình duyệt.
-- `backend/src/`: API Python, nhận diện, SQLite và hàng đợi đồng bộ.
-- `backend/supabase/`: migration và Edge Functions.
-- `tests/`: kiểm thử tích hợp cho cả hai phần.
+Model và ngưỡng đọc giữ như bản trial1 đã thử tại xưởng; vẫn phải đối chiếu số cân
+trước khi lưu. Ba lần đọc cùng số liên tiếp chỉ xác nhận tính ổn định theo thời gian,
+không bảo đảm model không nhầm chữ số. Chọn vùng LED đúng giúp giảm sai vùng.
 
-Cloudinary + Supabase là lớp đồng bộ tùy chọn. Khi không cấu hình API, ứng dụng không gửi ảnh/dữ liệu lên Supabase. Nếu có cấu hình, nút Lưu trả kết quả sau khi commit SQLite và ảnh local; outbox gửi cloud ở nền và tự gửi tiếp sau lỗi mạng hoặc khi khởi động lại. Retry chỉ được coi là lặp an toàn khi danh tính, mã SP, số cân và hash của ảnh đã chụp thuộc cùng `event_id` khớp chính xác. Ở chế độ Gemini primary, mỗi lần nhấn `Space` gửi đúng ảnh cân lõi lên Google để đọc số; ảnh thứ hai được QR decoder đọc và giữ làm bằng chứng mã SP.
+Build Windows: Python 3.12 x64 và Inno Setup 6. Tải model đúng SHA-256 bằng tool chuẩn bị trước khi build:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -e .[test,build]
+.venv\Scripts\python.exe tools\prepare_rapidocr.py
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build_windows.ps1
+```
+
+Code storage, phiên cân, sync, warehouse giữ nguyên rc80. Các module AI cũ còn
+trong lịch sử/source để đối chiếu; bộ cài Windows ép runtime `rapidocr`, không kèm
+Gemini SDK. Cấu hình/triển khai Render hiện hữu không bị tự triển khai lại.
+
+## Tài liệu kiến trúc và lịch sử
+
+Các phần bên dưới mô tả kiến trúc và các luồng đã có từ những bản trước.
+Hướng dẫn cài đặt/vận hành Windows hiện tại ở các liên kết phía trên.
 
 ## Kiến trúc đã triển khai
 

@@ -1,0 +1,22 @@
+{
+  "upstream_commit": "bd941dae09da793e76c6ba15c7aaf40f8424232a",
+  "upstream_tag": "v3.10.0",
+  "license": "Apache-2.0",
+  "models": {
+    "det-small": {
+      "file": "PP-OCRv6_det_small.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/det/PP-OCRv6_det_small.onnx",
+      "sha256": "090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f"
+    },
+    "rec-small": {
+      "file": "PP-OCRv6_rec_small.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_small.onnx",
+      "sha256": "6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884"
+    },
+    "rec-medium": {
+      "file": "PP-OCRv6_rec_medium.onnx",
+      "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.10.0/onnx/PP-OCRv6/rec/PP-OCRv6_rec_medium.onnx",
+      "sha256": "eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b"
+    }
+  }
+}

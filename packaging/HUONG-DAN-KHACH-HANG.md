@@ -1,345 +1,83 @@
-# Trạm cân QR Việt Nhật IPT — hướng dẫn cài đặt
-
-Phiên bản: `0.2.0-rc80` — phục hồi luồng Gemini của rc74.
-
-## 1. Cài đặt
-
-1. Đóng bản đang chạy, sau đó chạy file `TramCanQR-Setup-0.2.0-rc80.exe`
-   trên Windows 10/11 64-bit. Có thể cài đè bản cũ; `config.env` và dữ liệu
-   trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
-2. Ở lần cài đầu, chọn đúng **Trạm 01**, **Trạm 02**, **Trạm 03** hoặc
-   **Trạm 04**. Trang chọn trạm được bỏ qua khi máy đã có `config.env`.
-3. Installer tự mở file cấu hình. Điền Supabase/Gemini, bấm **Ctrl+S** rồi
-   đóng Notepad. Ứng dụng sẽ tự mở sau đó.
-4. Nếu Windows SmartScreen cảnh báo, đối chiếu SHA-256 với file
-   `SHA256SUMS.txt` do đơn vị triển khai gửi trước khi tiếp tục.
-5. Nếu ứng dụng chưa tự mở, mở **Trạm cân QR** từ Desktop. Trình duyệt sẽ mở địa chỉ
-   `http://127.0.0.1:8080`.
-6. Cho phép Chrome/Edge sử dụng camera khi trình duyệt hỏi.
-
-Không cần cài Python. Không đổi tên, di chuyển hoặc xóa thư mục `_internal`
-trong bản portable.
-
-### Cập nhật bằng nút trên Desktop
-
-Sau khi lưu xong lượt cân đang làm, bấm **Cập nhật Trạm Cân QR**. Nút kiểm tra
-GitHub Release, chỉ tải khi có phiên bản mới hơn, kiểm tra SHA-256 của bộ cài,
-đóng ứng dụng, cài đè và mở lại. Máy cần có Internet. Nếu tải hoặc kiểm tra
-thất bại, ứng dụng đang chạy sẽ không bị đóng; cửa sổ cập nhật sẽ báo lỗi.
-`config.env`, SQLite và ảnh trong `%LOCALAPPDATA%\TramCanQR` được giữ nguyên.
-
-Nếu máy đang dùng nút từ bộ cài cũ và nút không hoạt động, thay file
-`CAP-NHAT-BAN-MOI.cmd` trong `%LOCALAPPDATA%\Programs\TramCanQR` bằng file
-cập nhật mới do đơn vị triển khai cung cấp, rồi bấm lại nút trên Desktop.
-Chỉ cần thay file này một lần; những bản cài tiếp theo sẽ tự mang nút mới.
-
-### Trở về Gemini sau các bản local rc75–rc79
-
-Bản rc80 chạy giao diện và luồng Gemini của rc74. Chỉ cần bấm nút cập nhật
-cũ; không chép backend/.env hoặc cài thêm Python. Giữ nguyên config.env,
-key Gemini đã lưu, SQLite, ảnh, thông tin trạm và cấu hình cloud/kho.
-Ứng dụng chọn Gemini khi chạy, kể cả cấu hình còn ghi local-yolo; không
-sửa đè file config. Gemini cần Internet và key còn hiệu lực/quota.
-
-Trước lần mở đầu, app sao lưu DB hiện tại (gồm WAL) và config vào
-`%LOCALAPPDATA%\TramCanQR\backups\before-gemini-rc80-*`. Dữ liệu đang dùng
-vẫn là dữ liệu mới nhất, không lấy DB sao lưu từ thời rc74/rc75 ghi đè lại.
-Nếu tab cũ chưa đổi giao diện, nhấn **Ctrl+F5**.
-
-### Chụp tiếp khi AI đang đọc
-
-Nhấn Space để chụp ô đang chọn. Sau khi ảnh được ghi xuống máy, ô đó hiện
-**Ảnh đã lưu · chờ AI** và tự chọn ô còn thiếu tiếp theo. Có thể chụp tiếp ngay;
-số cân tự điền vào đúng ô khi AI trả kết quả. Ô đang chờ AI chưa cho lưu phiếu
-hoặc chụp đè. Ngày, ca, máy, LSX và Mã SP tạm khoá cho đến khi AI đọc xong.
-Nếu AI lỗi, ảnh vẫn được giữ trên máy để đọc lại trong Danh sách.
-
-Nếu AI chạy lâu hoặc treo, bấm **Hủy AI, bỏ ảnh** ngay trên ô đang chờ,
-hoặc chọn ô đó rồi bấm **Bỏ** / **Backspace**. Chỉ bỏ ô đang chọn; ảnh và
-số cân ở ô còn lại được giữ nguyên. Sau khi bỏ có thể chụp lại, kết quả AI
-cũ trả về muộn không điền vào ảnh mới. Yêu cầu chưa gửi AI sẽ được gỡ khỏi
-hàng đợi. Ảnh gốc đã lưu trên máy vẫn được giữ làm bản sao dự phòng.
-Không cho bỏ lượt đã lưu phiếu hoặc trong lúc đang ghi ảnh/phiếu.
-
-### Lưu từng lần cân
-
-Trong mỗi thẻ **Lần 1**, **Lần 2**, bấm nút lưu ngay dưới thẻ để chỉ lưu
-lần đó. Nhấn **Enter** hoặc nút **Lưu tất các lần** để lưu mọi lần đang có
-dữ liệu. Mỗi lượt cần đủ hai ảnh lõi và SP. Nút **Lưu phiếu cân** ghi phiếu
-chính thức cả khi chưa đọc được QR hoặc cân SP; hệ thống ghi trạng thái/lý do
-lỗi. Nếu AI không đọc được ảnh lõi, cân lõi tự đặt 0; cân SP không đọc được
-vẫn để trống. Ảnh lỗi AI vẫn được giữ riêng để đọc lại,
-nhưng nút Lưu tạo phiếu cân chính thức.
-Sau khi lưu thành công, ảnh của đúng lần đó biến mất để cân tiếp; lần khác
-chưa lưu vẫn còn. Dòng **Đang chờ** trong danh sách nghĩa là bản ghi đã nằm
-trong DB local và cần được đồng bộ thủ công lên Supabase/Cloudinary. Nếu màn hình
-báo chưa lưu được ảnh, giữ nguyên ảnh và bấm lại nút để thử lại.
-Xác nhận số cuộn là thao tác riêng, không ngăn lưu từng lần cân hay ảnh chờ.
-
-### Sửa QR hoặc số cân trong bảng dưới
-
-Tại **Danh sách lần cân**, bấm **Sửa tay** trên đúng dòng cần xử lý. Quét/nhập
-Mã QR, kiểm tra cân lõi và cân SP rồi bấm **Lưu sửa**. Mã SP tự lấy từ Mã QR.
-Cân lõi thiếu mặc định 0; bắt buộc có QR và cân SP, cân lõi không được lớn hơn
-cân SP. Hai ảnh, thời gian chụp và danh tính lượt cân được giữ nguyên.
-Lỗi thiếu QR/số cân được xoá sau khi sửa đủ; lỗi chất lượng ghi tay vẫn giữ
-trừ khi người vận hành đổi Trạng thái lỗi.
-
-Muốn đọc lại QR từ ảnh đã lưu: **Ảnh SP → Quét QR**. Bộ đọc giống lúc quét
-camera; thao tác chỉ cập nhật QR của dòng đó, không chạy lại AI cân. Nếu QR
-vẫn không đọc được, dùng **Sửa tay**. Thiếu QR hoặc cân SP vẫn là dòng lỗi.
-
-### Popup nhắc đẩy kho
-
-Ô nhỏ **Tối đa cuộn/đợt** là ngưỡng nhắc (ví dụ 30), không lấy số lớn ở
-**Số lượng trong ca**. Khi có đủ phiếu hợp lệ đã đồng bộ Supabase và còn
-chờ đẩy kho theo Ngày/Ca/Máy/LSX/Mã SP đang chọn, ứng dụng hiện
-**Đã đủ 30 cuộn, vui lòng đẩy kho**. Popup ghi rõ số cuộn và nguồn cân.
-Bấm **Đã hiểu**, kiểm tra bảng dưới và thao tác đẩy kho như bình thường.
-
-Phiếu chưa đồng bộ, phiếu lỗi, ảnh chưa lưu thành phiếu và phiếu đã đẩy kho
-không tính vào ngưỡng này. Cùng một đợt chờ không bị nhắc liên tục, kể cả
-khi tải lại trang; sau khi đẩy kho, đợt tiếp theo đủ cuộn sẽ được nhắc lại.
-Lịch tự đồng bộ vẫn là 10 phút/lần khi AI rảnh. Nút **Xác nhận đợt cân**
-trong bảng lịch sử vẫn dùng được khi cần xác nhận thủ công.
-
-### Đồng bộ thủ công
-
-Từ bản `0.2.0-rc33`, ứng dụng không tự gửi dữ liệu local lên Supabase hoặc
-Cloudinary. Sau khi lưu phiếu, mở tab **Danh sách**. Chọn **Từ ngày**, **Đến
-ngày**, và nếu cần thì chọn **Ca**, nhập **Mã sản phẩm**, **Máy**, **Lệnh sản
-xuất**. Tại mục **Đồng bộ local → Supabase / Cloudinary**, chọn phạm vi **Phiếu
-cân và ảnh lỗi**, **Cân kiểm kho** hoặc **Tất cả dữ liệu local**. Bấm **Xem số
-dòng chờ** để kiểm tra, rồi bấm **Đồng bộ theo bộ lọc** và xác nhận. Giữ ứng dụng
-mở đến khi tiến độ kết thúc. Dòng báo lỗi hoặc còn chờ có thể đồng bộ lại bằng
-cùng bộ lọc sau khi xử lý nguyên nhân. Bộ lọc máy, ca, LSX yêu cầu bản ghi có
-đúng thông tin tương ứng; để trống nếu muốn lấy mọi bản ghi trong khoảng ngày.
-Để trống **Mã sản phẩm** nếu cần đồng bộ cả xác nhận đợt cân.
-
-## 2. Danh tính từng trạm
-
-Mỗi máy chạy đúng một gateway, một trạm và một camera độc lập. Bốn máy đều mở
-cùng URL local `http://127.0.0.1:8080`; hậu tố danh tính trong `config.env`
-phải khác nhau:
-
-| Máy | Gateway | Station | Camera |
-| --- | --- | --- | --- |
-| 01 | `gateway-01` | `station-01` | `camera-01` |
-| 02 | `gateway-02` | `station-02` | `camera-02` |
-| 03 | `gateway-03` | `station-03` | `camera-03` |
-| 04 | `gateway-04` | `station-04` | `camera-04` |
-
-Installer tự tạo file:
-
-```text
-%LOCALAPPDATA%\TramCanQR\config.env
-```
-
-Giữ `ROLL_SCALE_STATION_COUNT=1`. Mỗi máy điền **bộ URL/token Supabase riêng**
-và **Gemini key riêng** được cấp cho đúng trạm đó. Đóng ứng dụng rồi mở lại sau
-khi sửa. Không sao chép nguyên `config.env` từ máy 01 sang máy khác vì sẽ làm
-trùng danh tính và gửi dữ liệu sang sai Supabase.
-
-Để đổi key khi chương trình đang chạy, vào **Cài đặt → Key ca ngày (12C1)**
-hoặc **Key ca đêm (12C2)**, dán đầy đủ key từ Google AI Studio rồi bấm Lưu.
-Key dạng `AQ.` và `AIza` đều được nhận; có thể dán key kèm dấu nháy hoặc
-dòng `GEMINI_API_KEY=...`. Ứng dụng thử key với model cân đang cấu hình trước
-khi lưu mã hóa trên Supabase và áp dụng ngay cho đúng ca. Nếu Google từ chối,
-key cũ được giữ nguyên. Không dán chuỗi dấu chấm/dấu sao đã che key.
-
-Thêm key thứ ba tại **Cài đặt → Key phụ Gemini**. Khi key của ca đang chọn
-chậm, bấm **Đổi sang key phụ** trên thanh thao tác: key phụ trở thành key của
-ca đó, key cũ trở thành key phụ, ca còn lại giữ nguyên. Lần đọc tiếp theo dùng
-key mới; yêu cầu AI đang chạy vẫn hoàn tất với key cũ. Cả ba vị trí được lưu
-mã hóa và giữ qua khởi động lại. Nếu mất phản hồi, bấm **Thử lại đổi key phụ**
-để hoàn tất cùng yêu cầu; ứng dụng không hoán đổi ngược do thử lại.
-
-Mỗi camera chỉ được gán cho một trạm. Trên giao diện, chọn đúng camera ở từng
-thẻ trạm rồi bấm **Mở camera đã gán**. Trình duyệt lưu ánh xạ này trên chính
-máy khách.
-
-Ô **Lệnh sản xuất** và **Mã SP** đều cho gõ tay hoặc bấm **▾** để xổ danh sách
-gợi ý. Gõ để lọc, dùng **↑/↓** và **Enter** để chọn; vẫn nhập được mã ngoài
-danh sách. Bấm **Áp dụng** để dùng thông tin đã chọn cho lần cân.
-
-### Đẩy cân AI và kho chờ
-
-Giữ nguyên `ROLL_SCALE_API_URL` và `ROLL_SCALE_DEVICE_TOKEN` của Supabase cân
-AI. Thêm ba dòng sau vào `config.env`, thay URL và key kho bằng giá trị được cấp:
-
-```dotenv
-SUPABASE_KHO_DB_LABEL="kho"
-SUPABASE_KHO_URL=https://YOUR_KHO_PROJECT_REF.supabase.co
-SUPABASE_KHO_KEY=replace-with-kho-anon-or-publishable-key
-```
-
-Đóng ứng dụng rồi mở lại. Tại **Đẩy kho**, chọn kho thành phẩm, ngày, ca, máy,
-mã SP và số cuộn; kiểm tra QR rồi bấm **Nhập kho**. Phần mềm xác nhận các QR
-đã có trên Supabase cân AI trước khi tạo phiếu kho. `phieu_nhap` có trạng thái
-`chua_chot`, các dòng `nhap_kho` là **Đang chờ**. Trạng thái **Đã nhập kho**
-bên cân AI nghĩa là đã chuyển sang kho chờ; thao tác này chưa chốt phiếu kho.
-
-Nếu kho đã nhận nhưng cập nhật cân AI lỗi, giữ bộ lọc và bấm **Nhập kho** lại.
-Phần mềm dùng lại phiếu gắn với đúng lần cân đó, không thêm QR trùng.
-Nếu key kho bị chặn quyền ghi, đơn vị triển khai cần kiểm tra RLS/quyền của
-key trên `phieu_nhap` và `nhap_kho`.
-
-Supabase cân AI cần Edge Function `ingest-measurement` bản rc48 trở lên để
-cập nhật trạng thái bằng token thiết bị; đơn vị triển khai cập nhật API một
-lần trước khi dùng bộ cài mới. Không cần thêm service-role key cân AI vào máy khách.
-
-Với `local`/`hybrid`, mặc định mỗi lần chụp dùng 5 frame và PaddleOCR chọn 3
-frame đầu–giữa–cuối. Với `gemini`, mỗi lần chụp gửi một ảnh bằng chứng đã nén;
-backend crop vùng LED trước khi gọi Gemini. Có thể giữ cấu hình:
-
-```text
-ROLL_SCALE_WEIGHT_BURST_FRAMES=5
-```
-
-Gemini mặc định tắt. Chỉ đơn vị triển khai được bật sau khi khách hàng chấp
-thuận việc gửi ảnh camera tới Google và cấp key bằng kênh riêng:
-
-```text
-ROLL_SCALE_GEMINI_ENABLED=true
-ROLL_SCALE_WEIGHT_ENGINE=hybrid
-ROLL_SCALE_GEMINI_API_KEY=replace-with-key-for-this-station
-# Tùy chọn: key thứ hai; tự chuyển khi key trên trả lỗi API và quarantine key
-# lỗi cho tới khi khởi động lại hoặc lưu key mới.
-# ROLL_SCALE_GEMINI_BACKUP_API_KEY=replace-with-second-key-for-this-station
-ROLL_SCALE_GEMINI_MODEL=gemini-3.5-flash-lite
-ROLL_SCALE_GEMINI_ACCURATE_MODEL=gemini-3.1-pro-preview
-ROLL_SCALE_GEMINI_TIMEOUT=30.0
-ROLL_SCALE_GEMINI_ACCURATE_TIMEOUT=30.0
-```
-
-Ở chế độ `hybrid`, Gemini chỉ xác nhận ứng viên đa số từ PaddleOCR; kết quả
-cloud đơn lẻ hoặc khác local luôn bị giữ lại để người vận hành kiểm tra.
-
-Trên giao diện, chọn **Nhanh** để dùng `gemini-3.5-flash-lite` với thinking
-tối thiểu; chọn **Chính xác** để dùng `gemini-3.1-pro-preview` với thinking
-trung bình. Model Pro không có Free Tier trên Gemini API và cần bật billing.
-Mỗi lần chụp ở cả hai chế độ vẫn chỉ gửi đúng một ảnh. Timeout mặc định lần
-lượt là 10 giây và 30 giây.
-
-Bản pilot dùng đúng một camera nhưng để Gemini đọc trực tiếp thì đổi
-`ROLL_SCALE_WEIGHT_ENGINE=gemini`. Paddle không khởi tạo. Gemini chỉ đọc số
-cân từ vùng LED đã crop, không suy đoán mã SP. Nếu crop không đọc được, backend
-thử lại ảnh toàn khung đúng một lần; lỗi 502/503/504 hoặc timeout được thử lại cùng ảnh một lần với thời hạn 30 giây. Ở lần chụp cân sản phẩm, mã QR
-được trình duyệt và ZXing backend đọc độc lập. Hai bộ giải mã khớp thì tự điền;
-nếu xung đột thì hệ thống để trống và yêu cầu người vận hành kiểm tra.
-
-Sau khi camera đã được bắt cố định, đơn vị triển khai nên hiệu chỉnh ROI hàng
-số gross cho từng trạm và điền vào `config.env`; ROI cũng được dùng để tăng tốc
-Gemini. Nếu chưa cấu hình, backend tự dò LED. Mỗi ROI có dạng
-`x1,y1,x2,y2` từ 0 đến 1; các trạm ngăn cách bằng dấu chấm phẩy:
-
-### Codex · ChatGPT
-
-Codex là lựa chọn AI độc lập với Gemini. Trên máy local, cài Codex CLI và đăng
-nhập đúng tài khoản ChatGPT trước khi dùng:
-
-```powershell
-codex login --device-auth
-codex login status
-```
-
-Mở menu **AI** trên giao diện, chọn **Codex · ChatGPT**, rồi bấm **Đăng nhập
-Codex**. Nút này mở lại cửa sổ đăng nhập CLI nếu tài khoản chưa được xác nhận;
-không cần dán API key Codex vào `config.env`. Nếu Codex chưa cài, giao diện sẽ
-hiện hướng dẫn cài CLI; có thể chọn lại **Gemini API** để cân tiếp.
-
-Antigravity là lựa chọn AI thứ ba (sau Gemini API và Codex). Khi cài Trạm Cân QR,
-chọn thêm tác vụ **Cài Antigravity CLI** nếu máy chưa có `agy`. Trong menu **AI**,
-chọn **Antigravity · Google**,
-bấm **Đăng nhập Antigravity**, hoàn tất Google login ở cửa sổ mới rồi bấm lại
-để kiểm tra. Ứng dụng ưu tiên **Gemini 3.5 Flash Low**; nếu tài khoản không có
-model đó, tự chọn bản Flash Low mới hơn và hiện tên model đang dùng. Nếu bỏ qua
-tác vụ cài CLI, chạy lệnh chính thức trong PowerShell:
-`irm https://antigravity.google/cli/install.ps1 | iex`.
-
-```text
-ROLL_SCALE_WEIGHT_ROIS=0.4500,0.8000,0.5400,0.8500;0.4450,0.7950,0.5350,0.8450;0.4550,0.8050,0.5450,0.8550
-```
-
-Các số trên chỉ minh họa, không sao chép sang xưởng. ROI phải ôm sát duy nhất
-hàng gross, không chứa bàn phím hoặc hai hàng `0.00` phía dưới. Số ROI phải
-bằng `ROLL_SCALE_STATION_COUNT` và đúng thứ tự `ROLL_SCALE_STATION_IDS`.
-
-## 3. Vận hành
-
-- Máy local chỉ có một trạm nên không cần chuyển trạm bằng phím số.
-- Ô **Ca** luôn có lựa chọn **Ca chuẩn Đà Nẵng**. Ô **Máy** cho chọn trong
-  danh sách hoặc gõ tên máy mới, kể cả khi trạm đã có tên máy mặc định trong
-  cấu hình. Nhập **LSX** rồi bấm **Áp dụng** trước khi cân.
-- Ô **Tối đa cuộn/đợt** là ngưỡng nhắc đẩy kho, lưu riêng cho từng máy;
-  không phải số cuộn cố định mỗi xe. Máy cách nhiệt, máy bao bì và máy khác
-  đều cho nhập 1–30, mặc định 30 nếu chưa đặt mức. Không còn tự ép về 16.
-  Mức đã nhập tay được giữ nguyên, kể cả 16; muốn nhắc ở 24 thì nhập 24.
-  Ca chuẩn Đà Nẵng vẫn giữ giới hạn 10. Nếu Đà Nẵng dùng ca khác,
-  đặt ô này về 10 cho từng máy.
-- Bấm **Xác nhận đợt cân** để chốt số cuộn thực tế đã đồng bộ, kể cả trước
-  mức tối đa. Đợt sau tiếp tục từ mốc đã chốt; các đợt cũ vẫn giữ nguyên.
-- Chọn **2 lần · 4 cân**. Bấm ô cần chụp hoặc dùng `Space` để lần lượt cân lõi
-  cặp 1, lõi cặp 2, thành phẩm cặp 1, thành phẩm cặp 2. Có thể bấm trực tiếp
-  ô thành phẩm của cặp đã có lõi khi thành phẩm ra sớm. Với camera, ứng dụng
-  đếm ngược 3 giây rồi mới lấy ảnh; số đếm không còn chạy sau lúc chụp.
-- Khi cặp 1 đã có ảnh thành phẩm, số cân
-  thành phẩm và mã QR, có thể lưu ngay; lõi cặp 2 vẫn chờ thành phẩm và không
-  bị xóa. Nếu chưa cân lõi, vẫn lưu được thành phẩm; danh sách hiện ô lõi trống.
-- `Backspace`: bỏ ngay lần đang xem, không hỏi xác nhận. Khi đang đặt con trỏ
-  trong ô QR hoặc số cân, Backspace vẫn chỉ xóa ký tự như bình thường. Khi bỏ
-  một ảnh/lượt lỗi, cặp đó tự chuyển về **Không lỗi** và xóa lý do lỗi cũ.
-- Kiểm tra các số cân và ảnh đã chụp cùng mã SP trước khi lưu.
-- `Enter`: lưu các cặp đã đủ dữ liệu, mỗi cặp là một event riêng. Số cân vượt
-  ngưỡng cũ không tạo cảnh báo chặn lưu; vẫn kiểm tra ảnh và số cân trước khi lưu.
-- Sau khi lưu, kiểm tra ngay dòng mới trong danh sách bên dưới. Trạng thái
-  **Đang chờ** nghĩa là phiếu và ảnh đã lưu trên máy, đang gửi cloud ở nền.
-  Bấm **Làm mới danh sách** để xem khi trạng thái chuyển thành **Đã đồng bộ**.
-  Nếu mạng lỗi, chọn lại bộ lọc rồi bấm đồng bộ thủ công; khi mở lại ứng dụng, bản ghi còn chờ vẫn
-  được gửi tiếp. Giữ máy chạy và có mạng đến khi các dòng cần gửi đã đồng bộ.
-
-Dữ liệu local, ảnh, SQLite và log nằm tại:
-
-```text
-%LOCALAPPDATA%\TramCanQR
-```
-
-Sao lưu toàn bộ thư mục này trước khi đổi máy, gỡ ứng dụng hoặc nâng cấp.
-
-Đóng tab trình duyệt chưa dừng gateway nền. Trước khi khởi động lại hoặc nâng
-cấp, mở **Task Manager**, chọn `TramCanQR.exe` và bấm **End task**; sau đó mở
-lại shortcut. Không chạy hai bản gateway cùng lúc trên cổng 8080.
-
-## 4. Đồng bộ cloud
-
-Khi có URL Supabase và token thiết bị, chương trình tự đẩy các dòng **Chờ đồng bộ**
-mỗi 10 phút khi AI rảnh. AI chạy lại thì tạm dừng gửi các dòng tiếp theo. Phiếu
-có lỗi cân/QR và ảnh nháp chưa thành phiếu giữ trên máy. Chỉ gửi dữ liệu Supabase,
-không tự nhập kho hoặc đẩy ảnh Cloudinary. Dòng lỗi mạng cần dùng nút đồng bộ thủ
-công để thử lại. Có thể tắt lịch tự đẩy bằng `ROLL_SCALE_AUTO_SYNC=0` trong
-`config.env`, sau đó thoát hẳn ứng dụng và mở lại.
-
-Cloud là tùy chọn. Khi chưa cấu hình API, ứng dụng vẫn lưu local. Token ingest
-và lookup riêng của từng trạm phải được đơn vị triển khai chuyển bằng kênh
-riêng rồi điền vào `config.env` trên đúng máy.
-
-Không đặt Cloudinary API secret, Supabase service-role key hoặc bất kỳ secret
-quản trị nào trên máy khách. Máy khách chỉ dùng token thiết bị có quyền tối
-thiểu.
-
-## 5. Kiểm tra bàn giao tại xưởng
-
-Trước khi ký nghiệm thu, thực hiện tối thiểu:
-
-1. Chụp 100 lượt bằng ảnh thật độc lập ở đúng vị trí lắp đặt.
-2. Kiểm tra đủ QR, cân, ảnh và đúng trạm/camera của từng lượt.
-3. Thử mất mạng, retry, rút/cắm lại từng camera và khởi động lại máy.
-4. Chạy liên tục ít nhất 60 phút trên đúng máy và hub USB sẽ sử dụng.
-5. Xác nhận outbox về 0 sau khi mạng phục hồi.
-
-Nếu số cân hoặc QR sai, không lưu tiếp hàng loạt. Giữ nguyên ảnh lỗi và file
-log `%LOCALAPPDATA%\TramCanQR\logs\app.log` để hiệu chỉnh.
-
-Hệ thống cố ý không tự nhận khi lõi nét LED nguồn thấp hơn 16 px hoặc các frame
-không đồng thuận. Đây là trạng thái cần chỉnh lại góc/độ phân giải camera, không
-được hạ ngưỡng để ép lưu.
+# Trạm Cân QR — rc82 OCR local
+
+## Nâng cấp máy đang dùng rc80
+
+1. Hoàn tất/lưu lượt cân đang làm và đóng bản OCR thử nếu đang mở cùng camera.
+2. Bấm shortcut **Cập nhật Trạm Cân QR**. File cập nhật tự tải bản mới, kiểm tra
+   SHA-256, đóng ứng dụng, cài đè rồi mở lại.
+3. Hoặc tải **TramCanQR-Setup.exe** về cài đè đúng thư mục hiện tại.
+4. Nếu trình duyệt còn hiện giao diện cũ, nhấn **Ctrl+F5**.
+
+Không cần cài Python, GPU, API key, sao chép `.env` hoặc xóa dữ liệu.
+Cài cho tài khoản Windows hiện tại. Bộ cài chưa ký số; chỉ dùng file từ repo
+phát hành và checksum đi kèm, không tắt Defender.
+
+## Dữ liệu cũ
+
+DB, ảnh, bản nháp, metadata phiên, cấu hình trạm/cloud/kho vẫn ở
+`%LOCALAPPDATA%\TramCanQR`. Tên EXE/thư mục cài/AppId/kênh cập nhật giữ như rc80.
+Lần đầu rc82 sao lưu DB hiện tại (gồm WAL), config và metadata phiên chờ tại
+`backups\before-rapidocr-rc82-*`; ảnh được giữ nguyên đường dẫn gốc.
+
+Không lấy DB của bản cũ ghi đè lên dữ liệu hiện tại. Không đổi/xóa file
+`config.env` khi nâng cấp. Dù config cũ còn ghi Gemini/YOLO, rc82 tự chọn OCR local
+ở lúc khởi động; không dùng key Gemini để đọc cân.
+
+## Camera và lấy số
+
+1. Mở **Tram Can QR**. Giao diện ở `http://127.0.0.1:8080` trên chính máy xưởng.
+2. Chọn **Camera 0**, **DirectShow**, bấm **Mở camera**. Thiếu hình: thử Camera 1/2
+   hoặc đổi sang **Media Foundation** rồi mở lại. **Dừng** nhả camera.
+3. Chọn **Trình duyệt** nếu muốn dùng danh sách camera/nguồn ảo của rc80.
+   Có thể tiếp tục sử dụng cách gán camera và camera ảo đã có.
+4. Bấm **Chọn vùng số cân**, kéo bao trọn đúng một dòng số, gồm chữ số đầu/cuối
+   và dấu thập phân. Tránh lấy lẫn Tare/Net. **Esc** hủy thao tác chọn.
+5. Hoặc bấm **Tự tìm LED đỏ** để phần mềm tự tìm vùng. Vùng chọn bằng tay
+   được nhớ theo trạm/camera/driver trên trình duyệt hiện tại.
+6. **Cân luôn có 2 số thập phân** mặc định bật, như bản Small đã thử tại xưởng:
+   chuỗi `633` được diễn giải là `6,33 kg`. Tắt nếu muốn bắt buộc OCR thấy dấu
+   thập phân và đủ hai số sau dấu. Đơn vị OCR hiện là **kg**.
+7. Chờ hiện **ỔN ĐỊNH** sau ba lần đọc cùng số. Chọn ô **Cân lõi/Cân SP** của
+   cuộn cần lấy, nhấn **Space** hoặc nút đọc ô cân. Số hiện tại được điền ngay;
+   ảnh bằng chứng và số đến từ cùng khung hình, không OCR lại sau khi chụp.
+8. Đối chiếu ảnh, số và QR. Lưu từng cuộn hoặc Enter/Lưu tất cả theo luồng rc80.
+
+Đổi camera, dừng camera, đổi vùng hoặc đổi cách đọc thập phân sẽ bỏ kết quả live
+cũ và chờ số mới. Kết quả quá 2,3 giây trên giao diện không được dùng cho Space.
+Camera đổi vị trí thì chọn lại vùng LED.
+
+**Xem chuỗi OCR** hiển thị kết quả đọc thô. **Mở ảnh thử…** chỉ đọc ảnh có sẵn,
+không tự lưu phiếu; ảnh thử không được coi là kết quả live ổn định.
+Ảnh backup có panel zoom phía dưới dễ hơn ảnh camera gốc; nên thử cảnh gốc.
+
+## Các chức năng cũ
+
+Giữ QR/máy quét QR, nhiều cuộn và cặp lõi–sản phẩm, trạng thái/lý do lỗi,
+ghi chú, kiểm kho, danh sách, sửa/đọc lại, lọc bản ghi, đồng bộ Supabase,
+đẩy kho, xử lý trùng và bản nháp. Luồng ghi/sync dữ liệu giữ như rc80.
+Live preview không tự tạo phiếu hay ảnh chụp. Space/nút lấy số mới lưu ảnh
+tạm; nút Lưu/Enter xác nhận phiếu theo luồng cũ.
+
+Nhận diện chạy offline bằng **RapidOCR + PP-OCRv6 Small, CPU**. Internet cần
+khi đồng bộ cloud hoặc tải cập nhật. Không cần trả phí API để đọc cân.
+
+Model vẫn có thể nhầm chữ số dù ba khung hình cùng kết quả. Luôn đối chiếu số
+trước khi lưu; nếu sai, chỉnh vùng/ánh sáng/góc camera hoặc nhập số đã đối chiếu.
+
+## Cài máy mới
+
+Windows 10/11 x64 → chạy **TramCanQR-Setup.exe** → chọn đúng trạm 01–04.
+Lần cài đầu tạo cấu hình riêng. Điền bộ Supabase/kho của trạm nếu cần đồng bộ;
+không sao chép cấu hình nhận dạng trạm khác. Máy chỉ đọc cân local không cần key.
+
+## Khi không có hình
+
+- Đóng ứng dụng khác đang chiếm camera rồi mở lại; thử đúng số camera/driver.
+- Kiểm tra Windows Settings → Privacy → Camera → cho phép desktop apps.
+- Camera trình duyệt cần cho phép quyền camera ở Edge/Chrome.
+- Nếu nguồn camera thay đổi, bấm Làm mới/gán lại nguồn hoặc dùng camera USB theo số.
+- Đóng tab trình duyệt không đồng nghĩa thoát backend; camera native tự nhả
+  khi không còn được trang giao diện hỏi hình trong khoảng 8 giây.
+
+Log ứng dụng: `%LOCALAPPDATA%\TramCanQR\logs\app.log`.
+Không gửi nội dung `config.env` hoặc API/token cho người không có quyền.

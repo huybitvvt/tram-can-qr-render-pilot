@@ -4,22 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roll-qr-scale"
-version = "0.2.0rc80"
+version = "0.2.0rc82"
 description = "Capture a roll QR code and bind it to a scale reading."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
-    "cryptography==45.0.7",
-    "google-genai==2.16.0",
-    "paddleocr==3.7.0",
-    "paddlepaddle==3.3.1",
-    "ultralytics==8.4.114",
+    "cryptography==50.0.0",
+    "rapidocr==3.10.0",
+    "onnxruntime==1.31.0",
+    "numpy==2.4.6",
+    "opencv-python-headless==5.0.0.93",
+    "pillow==12.2.0",
+    "pydantic==2.13.4",
     "pyserial==3.5",
     "zxing-cpp==3.1.1",
 ]
 
 [project.optional-dependencies]
+legacy-ai = ["google-genai==2.16.0"]
 test = [
-    "pytest==8.4.2",
+    "pytest==9.0.3",
     "qrcode[pil]==8.2",
 ]
 build = [
@@ -40,3 +43,6 @@ where = ["backend/src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.setuptools.package-data]
+tramcan_rapidocr = ["model_sources.json"]

@@ -3982,7 +3982,7 @@ def test_ui_redirects_expired_session_without_showing_save_zero_retry() -> None:
     assert "if(failed&&isAuthenticationRequired(failed.error))" in TEST_UI_HTML
     assert "Phiên đăng nhập đã hết hạn. Đang mở trang đăng nhập" in TEST_UI_HTML
     assert "window.open('about:blank'" not in TEST_UI_HTML
-    assert "BACKEND ĐANG DÙNG OCR LOCAL" in TEST_UI_HTML
+    assert "OCR LOCAL · không gọi API." in TEST_UI_HTML
 
 
 def test_gemini_key_store_uses_supabase_legacy_compatible_action() -> None:

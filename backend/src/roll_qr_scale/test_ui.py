@@ -240,7 +240,7 @@ def _is_legacy_storage_path(value: object) -> bool:
 MAX_BURST_FRAMES = 9
 DEFAULT_WEIGHT_BURST_FRAMES = 5
 UNITS = {"kg", "g", "lb"}
-WEIGHT_ENGINES = {"local", "hybrid", "gemini"}
+WEIGHT_ENGINES = {"local", "hybrid", "gemini", "rapidocr"}
 GEMINI_RECOGNITION_PROFILES = {"flash31", "fast", "flash37", "accurate"}
 AI_RECOGNITION_PROVIDERS = {"gemini", "codex", "antigravity"}
 PRODUCTION_ORDER_TABLES = (
@@ -2703,6 +2703,14 @@ class StationUIService:
         self._ocr_lock = threading.Lock()
         self._ocr_preload_started = False
         self._ocr_preload_error: str | None = None
+        self.local_live = None
+        self.local_cameras = None
+        if weight_engine == 'rapidocr':
+            from .local_live import LocalLiveReader
+            from .local_camera_manager import LocalCameraManager
+            model_root = Path(os.environ.get('ROLL_SCALE_RAPIDOCR_MODELS', str(_project_root()/'models'/'rapidocr')))
+            self.local_live = LocalLiveReader(model_root)
+            self.local_cameras = LocalCameraManager()
         self._recent: dict[str, float] = {}
         self._lock = threading.Lock()
         self._cancelled_capture_photos: dict[str, None] = {}
@@ -2735,6 +2743,10 @@ class StationUIService:
 
     def _preload_ocr(self) -> None:
         try:
+            if self.local_live is not None:
+                self.local_live.preload()
+                self._ocr_reader = self.local_live.reader
+                return
             with self._ocr_lock:
                 if self._ocr_reader is None:
                     self._ocr_reader = PaddleOCRTextReader.create(
@@ -2742,10 +2754,12 @@ class StationUIService:
                         gpu=False,
                     )
             self._ocr_preload_error = None
-        except RuntimeError as exc:
+        except Exception as exc:
             self._ocr_preload_error = str(exc)
 
     def close(self) -> None:
+        if self.local_cameras is not None:
+            self.local_cameras.close()
         if self.auto_sync is not None:
             self.auto_sync.stop()
         if self._owns_inference:
@@ -3927,6 +3941,13 @@ class StationUIService:
         *,
         recognition_profile: str = "fast",
     ) -> dict[str, object]:
+        if self.local_live is not None:
+            from tramcan_rapidocr.regions import red_display_regions
+            h, w = frame.shape[:2]
+            return {'ok': True, 'regions': [{'label': f'Chỉ số {i}', 'x1': r.x1/w,
+                'y1': r.y1/h, 'x2': r.x2/w, 'y2': r.y2/h}
+                for i, r in enumerate(red_display_regions(frame, max_regions=24), 1)],
+                'fallback_used': False}
         active_slot = self._gemini_active_slot("day")
         reader = self._gemini_reader_for(recognition_profile, active_slot)
         detector = getattr(reader, "detect_panel_regions", None)
@@ -4006,6 +4027,18 @@ class StationUIService:
         *,
         recognition_profile: str = "fast",
     ) -> dict[str, object]:
+        if self.local_live is not None:
+            if not isinstance(regions, list) or not 1 <= len(regions) <= 24:
+                raise ValueError('Cần cấu hình từ 1 đến 24 vùng chỉ số')
+            items = []
+            for item in regions:
+                roi = ','.join(str(item[k]) for k in ('x1', 'y1', 'x2', 'y2'))
+                result = self.local_live.read(frame, roi)
+                items.append({'label': str(item.get('label', '')), 'value': result['weight'],
+                    'readable': result['weight_found'],
+                    'unit': 'kg', 'confidence': result['confidence'], 'raw': result['weight_raw']})
+            return {'ok': True, 'readings': items, 'regions': regions, 'fallback_used': False,
+                    'recognition_profile': 'small', 'model': 'PP-OCRv6 small local'}
         if self.gemini_reader is None:
             raise ValueError("Gemini chưa được bật trên backend")
         if not isinstance(regions, list) or not 1 <= len(regions) <= 24:
@@ -4507,6 +4540,25 @@ class StationUIService:
         payload = quality.as_dict(ignore_low_resolution=self.weight_engine == "gemini")
         return payload, bool(payload["accepted"])
 
+    def _local_analysis(self, frame, roi_text, unit, *, client_qr_code='', result=None, fixed_two=True):
+        if unit != 'kg':
+            raise ValueError('Cân OCR local được cấu hình theo kg; hãy chọn đơn vị kg')
+        if result is None:
+            result = self.local_live.read(frame, roi_text or 'auto', fixed_two)
+        decoded = self._decode_qr(frame)
+        client_qr = client_qr_code.strip()
+        if len(client_qr) > 512 or any(ord(c) < 32 for c in client_qr):
+            raise ValueError('Mã QR từ trình duyệt không hợp lệ')
+        local_qr = str(decoded.get('qr_code') or '').strip()
+        conflict = bool(client_qr and local_qr and client_qr != local_qr)
+        code = '' if conflict else local_qr or client_qr
+        quality, quality_pass = self.quality_result(self.assess_quality(frame))
+        return {**result, 'qr_found': bool(code), 'qr_code': code, 'qr_conflict': conflict,
+                'qr_decoder': 'dedicated-decoder-conflict' if conflict else decoded.get('decoder', 'local'),
+                'qr_roi': decoded.get('qr_roi'), 'quality': quality, 'quality_pass': quality_pass,
+                'requires_human_review': False, 'gemini_attempts': 0, 'ai_attempts': 0,
+                'ai_fallback_used': False, 'evidence_zoom_applied': False}
+
     def _analyze_frame(
         self,
         frame: np.ndarray,
@@ -4521,6 +4573,8 @@ class StationUIService:
         gemini_key_slot: str = "day",
         qr_frame: np.ndarray | None = None,
     ) -> dict[str, object]:
+        if self.local_live is not None:
+            return self._local_analysis(frame, roi_text, unit, client_qr_code=client_qr_code)
         if unit not in UNITS:
             raise ValueError("Đơn vị không hợp lệ")
         if recognition_profile not in GEMINI_RECOGNITION_PROFILES:
@@ -5023,7 +5077,39 @@ class StationUIService:
         context_camera_id: str | None = None,
         context_shift: str = "",
         photo_capture_id: str = "",
+        live_token: str = "",
+        capture_round: int = 0,
+        live_event_id: str = "",
+        local_fixed_two: bool = True,
     ) -> dict[str, object]:
+        if self.local_live is not None:
+            owner_station = context_station_id or station_id or str(self.station_configs[0]['station_id'])
+            owner_camera = context_camera_id or camera_id or str(self.station_configs[0]['camera_id'])
+            self.validate_station_source(owner_station, owner_camera)
+            configured = self.weight_rois.get(owner_station)
+            if roi_text in {'', 'auto'} and configured is not None:
+                roi_text = self._roi_text(configured)
+            pinned = self.local_live.resolve(live_token, frame, station=owner_station,
+                camera=owner_camera, event=event_id or live_event_id, kind=capture_kind,
+                round_index=capture_round) if live_token else None
+            binding = None
+            if event_id and station_id and camera_id:
+                with self._lock:
+                    if photo_capture_id:
+                        self._assert_capture_photo_current(photo_capture_id, event_id,
+                            station_id, capture_kind, capture_round)
+                    binding = self.sessions.stage(frame, event_id=event_id,
+                        station_id=station_id, camera_id=camera_id)
+            try:
+                result = self.inference.run(self._local_analysis, frame, roi_text, unit,
+                    client_qr_code=client_qr_code, result=pinned, fixed_two=local_fixed_two)
+                if binding:
+                    binding = self.sessions.mark_ready(binding.analysis_id)
+            except Exception as exc:
+                if binding:
+                    self.sessions.mark_failed(binding.analysis_id, exc)
+                raise
+            return {**result, **(binding.as_dict() if binding else {})}
         additional_frames = list(weight_frames or [])
         if len(additional_frames) >= MAX_BURST_FRAMES:
             raise ValueError(f"Burst chỉ được tối đa {MAX_BURST_FRAMES} frame kể cả ảnh chính")
@@ -5950,7 +6036,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 gemini_shift_keys["night"]
             )
     codex_reader: CodexWeightReader | CodexOAuthWeightReader | None = None
-    if args.codex_enabled:
+    if args.codex_enabled and weight_engine != 'rapidocr':
         codex_mode = args.codex_mode
         if codex_mode == "auto":
             codex_mode = "oauth" if os.environ.get("RENDER", "").strip() else "cli"
@@ -5973,7 +6059,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 model=args.codex_model,
                 timeout_seconds=args.codex_timeout,
             )
-    antigravity_reader = AntigravityWeightReader(
+    antigravity_reader = None if weight_engine == 'rapidocr' else AntigravityWeightReader(
         args.antigravity_command,
         model=args.antigravity_model,
         timeout_seconds=args.antigravity_timeout,
@@ -6330,6 +6416,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     return
                 self.send_bytes(200, "image/jpeg", image_path.read_bytes())
                 return
+            if parsed.path == "/local-ocr.js":
+                self.send_bytes(200, 'text/javascript; charset=utf-8',
+                    _frontend_index_path().with_name('local-ocr.js').read_bytes())
+                return
             if parsed.path == "/api/status":
                 identity_status = service.status()
                 self.send_json(
@@ -6341,7 +6431,7 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                          "yolo_mode": service.reader.yolo_mode,
                         "ocr_enabled": service.weight_engine != "gemini",
                         "ocr_engine": (
-                            PADDLE_OCR_MODEL_NAME
+                            ('PP-OCRv6_small_rec ONNX' if service.local_live else PADDLE_OCR_MODEL_NAME)
                             if service.weight_engine != "gemini"
                             else None
                         ),
@@ -7655,6 +7745,36 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                         },
                     )
                     return
+                if self.path.startswith('/api/local/'):
+                    if service.local_live is None:
+                        raise ValueError('Bản này không có OCR local')
+                    station = str(payload.get('station_id', ''))
+                    camera = str(payload.get('camera_id', ''))
+                    service.validate_station_source(station, camera)
+                    if self.path == '/api/local/live':
+                        result = service.local_live.preview(decode_image(str(payload.get('image', ''))),
+                            station=station, camera=camera, source=str(payload.get('source', '')),
+                            sequence=int(payload.get('sequence', 0)), roi=str(payload.get('roi') or 'auto'),
+                            fixed_two=payload.get('fixed_two', True) is True)
+                    elif self.path == '/api/local/still':
+                        result = service.local_live.read(decode_image(str(payload.get('image', ''))),
+                            str(payload.get('roi') or 'auto'), payload.get('fixed_two', True) is True)
+                    elif self.path == '/api/local/claim':
+                        event = str(payload.get('event_id', ''))
+                        uuid.UUID(event)
+                        kind = str(payload.get('kind', ''))
+                        round_index = int(payload.get('round', 0))
+                        if kind not in {'core', 'product', 'inventory'} or not 0 <= round_index <= 3:
+                            raise ValueError('Ô cân không hợp lệ')
+                        result = service.local_live.claim(str(payload.get('live_token', '')),
+                            station=station, camera=camera, source=str(payload.get('source', '')),
+                            event=event, kind=kind, round_index=round_index)
+                    elif self.path.startswith('/api/local/camera/'):
+                        result = service.local_cameras.handle(self.path, payload, station, camera)
+                    else:
+                        raise ValueError('Đường dẫn OCR local không hợp lệ')
+                    self.send_json(200, result)
+                    return
                 raw_frame = str(payload.get("image", "") or "")
                 product_frame_raw = str(payload.get("product_image", "") or "")
                 if self.path == "/api/capture" and (not raw_frame or not product_frame_raw):
@@ -7758,6 +7878,11 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             context_camera_id=str(payload.get("camera_id", "")) or None,
                             context_shift=str(payload.get("shift", "")),
                             photo_capture_id=str(payload.get("photo_capture_id") or ""),
+                            **({'live_token': str(payload.get('live_token') or ''),
+                                'live_event_id': str(payload.get('event_id') or ''),
+                                'capture_round': capture_round,
+                                'local_fixed_two': payload.get('fixed_two', True) is True}
+                               if service.local_live is not None else {}),
                         )
                     except Exception as exc:
                         logging.warning(

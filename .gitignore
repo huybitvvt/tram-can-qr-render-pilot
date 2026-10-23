@@ -1,4 +1,6 @@
 .venv/
+.local/
+models/rapidocr/
 node_modules/
 .test-tmp/
 build/

@@ -77,8 +77,12 @@ def main():
             "git", "show", "v0.2.0-rc79:packaging/CAP-NHAT-BAN-MOI.cmd"], cwd=project))
         harness = base / "harness.ps1"
         harness.write_text(HARNESS.replace("__TARGET_VERSION__", APP_VERSION), encoding="utf-8-sig")
+        rc80_updater = base / 'rc80.cmd'
+        rc80_updater.write_bytes(subprocess.check_output([
+            'git', 'show', 'v0.2.0-rc80:packaging/CAP-NHAT-BAN-MOI.cmd'], cwd=project))
         for label, updater, installed in (("rc74", legacy, "0.2.0-rc74"),
                 ("rc79", local_updater, "0.2.0-rc79"),
+                ('rc80', rc80_updater, '0.2.0-rc80'),
                 ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd", "0.2.0-rc79")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"
