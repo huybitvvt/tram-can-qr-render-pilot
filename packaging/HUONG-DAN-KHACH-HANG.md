@@ -1,6 +1,6 @@
-# Trạm Cân QR — rc82 OCR local
+# Trạm Cân QR — rc83 OCR và lưu local
 
-## Nâng cấp máy đang dùng rc80
+## Nâng cấp máy đang dùng rc80/rc82
 
 1. Hoàn tất/lưu lượt cân đang làm và đóng bản OCR thử nếu đang mở cùng camera.
 2. Bấm shortcut **Cập nhật Trạm Cân QR**. File cập nhật tự tải bản mới, kiểm tra
@@ -9,6 +9,21 @@
 4. Nếu trình duyệt còn hiện giao diện cũ, nhấn **Ctrl+F5**.
 
 Không cần cài Python, GPU, API key, sao chép `.env` hoặc xóa dữ liệu.
+
+## Cân khi mất Internet
+
+- Mở ứng dụng tại `http://127.0.0.1:8080`, chọn đúng camera và vùng số cân.
+- Chờ số ổn định, chọn ô và nhấn **Space**. Khi hiện **ĐÃ LƯU LOCAL**, số và
+  ảnh đã được ghi trên máy; ứng dụng tự chọn ô còn thiếu tiếp theo.
+- Đọc QR chạy sau bước lưu local. Nếu chưa có mã, dùng máy quét hoặc nhập mã
+  rồi bấm **Lưu phiếu cân**. Phiếu được ghi local; Supabase đồng bộ sau khi có mạng.
+- Nếu báo chưa xác nhận lưu local, Space thử lại đúng ảnh/ID. Bấm **Bỏ** để lấy
+  ảnh mới. Không coi ảnh đang hiển thị là đã lưu khi chưa có xác nhận thành công.
+- Camera DirectShow/Media Foundation mất hình sẽ thử mở lại đúng camera tối đa
+  hai lần. Nếu vẫn lỗi, kiểm tra USB rồi bấm **Mở camera**. Các ô đã lấy được giữ.
+- Lệnh sản xuất cần được chọn sẵn hoặc nhập tay nếu không tải được danh mục lúc
+  mất mạng. Việc nhập kho và xác minh QR trên các máy khác cần mạng/đồng bộ sau.
+
 Cài cho tài khoản Windows hiện tại. Bộ cài chưa ký số; chỉ dùng file từ repo
 phát hành và checksum đi kèm, không tắt Defender.
 

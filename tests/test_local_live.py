@@ -164,3 +164,92 @@ def test_claimed_product_uses_local_reader_without_gemini_or_ocr_again(tmp_path,
         assert analysis['qr_code'] == 'QR-LIVE' and not analysis['gemini_used']
     finally:
         service.close(); store.close()
+
+
+@pytest.mark.parametrize('interval', [.02, .10, .18, .20, .225, .24, .50])
+def test_fast_identical_readings_reach_stability_without_a_sliding_window_deadlock(interval):
+    live, _, frame, clock = setup_reader()
+    for i in range(1, 40):
+        clock[0] = i*interval
+        result = preview(live, frame, i)
+        expected = i >= 3 and (i-1)*interval >= .45
+        assert result['stable'] is expected
+    assert result['stable']
+
+
+def test_a_new_value_revokes_stability_and_cannot_reuse_an_old_matching_token():
+    live, reader, frame, clock = setup_reader()
+    old = stable_frame(live, frame, clock)
+    reader.value = Decimal('7.00');clock[0] += .2
+    assert not preview(live, frame, 4)['stable']
+    reader.value = Decimal('6.33');clock[0] += .2
+    assert not preview(live, frame, 5)['stable']
+    with pytest.raises(ValueError):
+        claim(live, old['live_token'])
+
+
+def test_local_capture_commits_image_and_weight_even_if_cloud_qr_and_inference_are_unavailable(tmp_path, monkeypatch):
+    from roll_qr_scale.sync import OutboxSyncWorker
+    store = MeasurementStore(tmp_path/'offline.db', tmp_path/'captures')
+    def forbidden(*args, **kwargs): pytest.fail('Critical local capture must not call cloud, QR, or inference')
+    worker = OutboxSyncWorker(store, 'https://offline.invalid/ingest', 'test-token', send=forbidden)
+    service = StationUIService(store, worker, None, None, weight_engine='rapidocr', auto_sync=False)
+    live, reader, frame, clock = setup_reader();service.local_live = live
+    monkeypatch.setattr(service, '_decode_qr', forbidden)
+    monkeypatch.setattr(service.inference, 'run', forbidden)
+    result = stable_frame(live, frame, clock)
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='product', round=1,
+        live_token=result['live_token'], unit='kg', machine='TEST-MACHINE')
+    try:
+        saved = service.capture_local_weight(frame, payload)
+        assert saved['local_saved'] and saved['live_reused'] and saved['weight'] == 6.33
+        assert saved['sync_status'] == 'pending'
+        repeated = service.capture_local_weight(frame, payload)
+        assert repeated['capture_id'] == saved['capture_id']
+        draft = store.get_photo_draft(payload['capture_id'])
+        assert draft.reread_weight == 6.33 and Path(draft.image_path).is_file()
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 1
+        assert len(reader.calls) == 3
+    finally:
+        service.close();store.close()
+    reopened = MeasurementStore(tmp_path/'offline.db', tmp_path/'captures')
+    try:
+        draft = reopened.get_photo_draft(payload['capture_id'])
+        assert draft.reread_weight == 6.33 and Path(draft.image_path).is_file()
+    finally: reopened.close()
+
+
+def test_local_capture_rejects_an_image_that_does_not_match_the_live_result(tmp_path):
+    store = MeasurementStore(tmp_path/'offline.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, _, frame, clock = setup_reader();service.local_live = live
+    result = stable_frame(live, frame, clock)
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='core', round=0,
+        live_token=result['live_token'], machine='TEST-MACHINE')
+    try:
+        with pytest.raises(ValueError, match='khớp'):
+            service.capture_local_weight(frame+1, payload)
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 0
+    finally: service.close();store.close()
+
+
+def test_local_capture_can_retry_a_disk_write_failure_without_another_ocr(tmp_path, monkeypatch):
+    store = MeasurementStore(tmp_path/'retry.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, reader, frame, clock = setup_reader();service.local_live = live
+    result = stable_frame(live, frame, clock)
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='core', round=0,
+        live_token=result['live_token'], machine='TEST-MACHINE')
+    write = store._write_durable_capture
+    def failed(*args): raise OSError('disk unavailable')
+    try:
+        monkeypatch.setattr(store, '_write_durable_capture', failed)
+        with pytest.raises(OSError): service.capture_local_weight(frame, payload)
+        monkeypatch.setattr(store, '_write_durable_capture', write)
+        assert service.capture_local_weight(frame, payload)['local_saved']
+        assert len(reader.calls) == 3
+        assert store.get_photo_draft(payload['capture_id']).reread_weight == 6.33
+    finally: service.close();store.close()

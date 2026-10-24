@@ -2,6 +2,7 @@
 import argparse
 import base64
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import uuid
@@ -24,6 +26,10 @@ def main():
     parser.add_argument('--expect', type=float, default=6.86)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--exe', type=Path)
+    parser.add_argument('--offline', action='store_true', help='Configure unavailable cloud and reject external browser traffic')
+    parser.add_argument('--next-image', type=Path, help='Second real scene for live value transition and another slot')
+    parser.add_argument('--next-expect', type=float, default=13.04)
+    parser.add_argument('--native-recovery', action='store_true', help='Simulate a native camera stall through the real UI')
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     args.out = args.out.resolve()
@@ -31,6 +37,15 @@ def main():
     sandbox = args.out/'user'
     root = sandbox/'TramCanQR'
     root.mkdir(parents=True, exist_ok=True)
+    remote_calls = []
+    class UnavailableCloud(BaseHTTPRequestHandler):
+        def do_GET(self):
+            remote_calls.append(self.path)
+            self.send_error(503, 'Simulated Internet outage')
+        do_POST = do_GET
+        def log_message(self, *args): pass
+    remote = ThreadingHTTPServer(('127.0.0.1', 0), UnavailableCloud)
+    threading.Thread(target=remote.serve_forever, daemon=True).start()
     with socket.socket() as port_socket:
         port_socket.bind(('127.0.0.1', 0)); port = port_socket.getsockname()[1]
     config = root/'config.env'
@@ -38,6 +53,11 @@ def main():
         'ROLL_SCALE_STATION_IDS=station-02', 'ROLL_SCALE_CAMERA_IDS=camera-02',
         'ROLL_SCALE_WEIGHT_ENGINE=gemini', 'ROLL_SCALE_GEMINI_API_KEY=invalid-unused-key',
         f'ROLL_SCALE_PORT={port}', 'ROLL_SCALE_OPEN_BROWSER=0', 'ROLL_SCALE_AUTO_SYNC=0'])+'\n', encoding='utf-8')
+    if args.offline:
+        with config.open('a', encoding='utf-8') as stream:
+            endpoint = f'http://127.0.0.1:{remote.server_port}'
+            stream.write(f'ROLL_SCALE_API_URL={endpoint}/ingest\nROLL_SCALE_DEVICE_TOKEN=offline-test\n'
+                f'ROLL_SCALE_SUPABASE_URL={endpoint}\nROLL_SCALE_SUPABASE_PUBLISHABLE_KEY=offline-test\n')
     config_bytes = config.read_bytes()
     frame = cv2.imdecode(__import__('numpy').fromfile(args.image, dtype='uint8'), cv2.IMREAD_COLOR)
     assert frame is not None
@@ -81,11 +101,13 @@ def main():
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(channel='msedge', headless=True)
             page = browser.new_page(viewport={'width':1600,'height':1080})
+            if args.offline:
+                page.route('**/*', lambda route: route.continue_() if route.request.url.startswith(base) else route.abort())
             page.on('pageerror',lambda error:errors.append(str(error)))
             page.on('request',lambda req:network.append(req.url))
             page.on('dialog',lambda dialog:dialog.dismiss())
             def record_response(response):
-                if response.url.endswith('/api/analyze'):
+                if response.url.endswith(('/api/analyze', '/api/local/capture')):
                     analyses.append({'status':response.status})
                 if response.url.endswith('/api/local/live'):
                     previews.append({'status':response.status})
@@ -120,10 +142,48 @@ def main():
             expected_image=page.evaluate('current().localLive.image')
             page.keyboard.press('Space')
             page.wait_for_function('(expected)=>Number(current().rounds[0].productWeight)===expected',arg=args.expect,timeout=1500)
-            page.wait_for_function('current().rounds[0].productAnalysis&&current().rounds[0].productAnalysis.live_reused',timeout=20000)
+            page.wait_for_function('current().rounds[0].productAnalysis&&current().rounds[0].productAnalysis.local_saved',timeout=20000)
             actual_analysis=page.evaluate('current().rounds[0].productAnalysis')
             assert actual_analysis['live_reused'] and not actual_analysis['gemini_used'],actual_analysis
             assert page.evaluate('current().rounds[0].productImage')==expected_image
+            assert page.evaluate('current().selectedSlot.kind')=='core'
+            transition_ms = None
+            if args.next_image:
+                next_frame = cv2.imdecode(__import__('numpy').fromfile(args.next_image, dtype='uint8'), cv2.IMREAD_COLOR)
+                assert next_frame is not None
+                ok, next_bytes = cv2.imencode('.jpg', next_frame, [cv2.IMWRITE_JPEG_QUALITY, 96]);assert ok
+                next_image = 'data:image/jpeg;base64,'+base64.b64encode(next_bytes).decode()
+                changed_at = time.monotonic()
+                page.evaluate('''async image=>{
+                    clearInterval(window.smokeTimer);
+                    const img=await new Promise(resolve=>{const i=new Image();i.onload=()=>resolve(i);i.src=image});
+                    const canvas=window.smokeCanvas;canvas.width=img.width;canvas.height=img.height;
+                    const draw=()=>{canvas.getContext('2d').fillRect(0,0,canvas.width,canvas.height);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height)};
+                    draw();window.smokeTimer=setInterval(draw,100);
+                    selectCaptureSlot('product',1,true);
+                }''', next_image)
+                page.wait_for_function('(expected)=>current().localLive?.result.stable&&current().localLive.result.weight===expected',arg=args.next_expect,timeout=15000)
+                transition_ms = round((time.monotonic()-changed_at)*1000)
+                page.locator('#localWeight').click();page.keyboard.press('Space')
+                page.wait_for_function('(expected)=>Number(current().rounds[1].productWeight)===expected',arg=args.next_expect,timeout=3000)
+                assert page.evaluate('Number(current().rounds[0].productWeight)') == args.expect
+                page.screenshot(path=str(args.out/'changed-live.png'),full_page=True)
+            # Final save uses the real UI, including duplicate-QR checking. Supply
+            # an operator-reviewed core so this test isolates local persistence.
+            cloud_before_save = len(remote_calls)
+            saved_event = page.evaluate('current().rounds[0].eventId')
+            page.evaluate('''image=>{
+                const session=current(),round=session.rounds[0];
+                round.coreImage=image;round.weight='0.50';round.qr='OFFLINE-LOCAL-QR';
+                syncSessionAliases(session);renderEvidence(session);renderControls();
+            }''', image)
+            page.evaluate('saveRoundEvidence(0)')
+            with sqlite3.connect(root/'data'/'measurements.db') as db:
+                assert db.execute('SELECT weight FROM measurements WHERE event_id=?',(saved_event,)).fetchone()==(.5,)
+                assert db.execute('SELECT product_weight FROM measurements WHERE event_id=?',(saved_event,)).fetchone()==(args.expect,)
+            # Background production-order requests may already be in flight;
+            # capture/save must never issue a remote measurement lookup.
+            assert not [path for path in remote_calls[cloud_before_save:] if 'can_tu_dong' in path], remote_calls
             # Manual ROI selection must work with letterboxing.
             page.locator('#localSelectLed').click()
             overlay=page.locator('.local-select-overlay')
@@ -137,6 +197,34 @@ def main():
             assert page.evaluate('localOcrState.fixedTwo===false&&current().localLive===null')
             page.locator('#localStopCamera').click()
             assert page.evaluate('current().stream===null&&current().localLive===null')
+            native_recovery = False
+            if args.native_recovery:
+                pending_weights = page.evaluate('current().rounds.map(round=>[round.weight,round.productWeight])')
+                native = {'opens': 0, 'sequence': 0, 'stall': False}
+                def native_bridge(route):
+                    path = route.request.url.rsplit('/', 1)[-1]
+                    if path == 'open':
+                        native['opens'] += 1
+                        data = {'ok': True, 'source': 'native-test-'+str(native['opens'])}
+                    elif path == 'stop': data = {'ok': True}
+                    elif native['stall'] and native['opens'] == 1: data = {'ok': True, 'waiting': True}
+                    else:
+                        native['sequence'] += 1
+                        data = {'ok': True, 'sequence': native['sequence'], 'image': image}
+                    route.fulfill(status=200, content_type='application/json', body=json.dumps(data))
+                page.route(base+'/api/local/camera/*', native_bridge)
+                page.locator('#localFixedTwo').check()
+                page.locator('#localCameraBackend').select_option(label='DirectShow')
+                page.locator('#localOpenCamera').click()
+                page.wait_for_function('current().localLive?.result.stable', timeout=20000)
+                original_source = page.evaluate('current()._nativeSource')
+                native['stall'] = True
+                page.wait_for_function('(old)=>current()._nativeSource&&current()._nativeSource!==old', arg=original_source, timeout=15000)
+                page.wait_for_function('current().localLive?.result.stable', timeout=15000)
+                assert native['opens'] == 2, native
+                assert page.evaluate('current().rounds.map(round=>[round.weight,round.productWeight])') == pending_weights
+                page.locator('#localStopCamera').click()
+                native_recovery = True
             page.screenshot(path=str(args.out/'capture.png'),full_page=True)
             assert not [url for url in network if any(s in url for s in ('generativelanguage.googleapis','/api/gemini/','/api/codex/','/api/antigravity/'))], network
             assert not errors, errors
@@ -150,7 +238,7 @@ def main():
             'weight_raw':'SOURCE_MACHINE=MÁY BAO BÌ 5; HUMAN_CONFIRMED=0.5'})
         assert saved['event_id']==saved_event
         with sqlite3.connect(root/'data'/'measurements.db') as db:
-            assert db.execute('SELECT COUNT(*) FROM measurements').fetchone()==(2,)
+            assert db.execute('SELECT COUNT(*) FROM measurements').fetchone()==(3,)
             assert db.execute('SELECT weight FROM measurements WHERE event_id=?',(previous.event_id,)).fetchone()==(.75,)
         assert config.read_bytes()==config_bytes
         assert hashlib.sha256(previous_photo.read_bytes()).hexdigest()==previous_hash
@@ -158,10 +246,15 @@ def main():
             'space_reused_without_ocr':True,'manual_roi':True,'auto_led':True,'decimal_switch':True,
             'existing_data_config_photo_draft_preserved':True,'preview_no_writes':True,'browser_errors':errors}
         summary['new_record_saved_alongside_rc80_data']=True
+        summary['offline_with_cloud_configured']=args.offline
+        summary['final_save_through_ui']=True
+        summary['live_transition_ms']=transition_ms
+        summary['native_camera_stall_recovery_simulated']=native_recovery
         (args.out/'result.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
         print(json.dumps(summary),flush=True)
     finally:
         process.terminate();process.wait(timeout=15)
+        remote.shutdown();remote.server_close()
 
 
 if __name__=='__main__': main()

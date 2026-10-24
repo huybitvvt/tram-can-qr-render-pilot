@@ -99,7 +99,8 @@ class LocalLiveReader:
         with self.lock:
             state = self.states.get(station)
             if not state or state['settings'] != settings:
-                state = self.states[station] = {'settings': settings, 'sequence': 0, 'history': deque(maxlen=3)}
+                state = self.states[station] = {'settings': settings, 'sequence': 0,
+                    'history': deque(maxlen=3), 'since': None, 'count': 0, 'stable': False}
             if sequence <= state['sequence']:
                 raise ValueError('Bỏ khung hình cũ của camera')
             state['sequence'] = sequence
@@ -113,9 +114,16 @@ class LocalLiveReader:
             history = state['history']
             if value is None or (history and (history[-1][0] != value or now-history[-1][1] > 2.5)):
                 history.clear()
+                state['since'], state['count'] = None, 0
             if value is not None:
+                if state['since'] is None:
+                    state['since'] = now
+                state['count'] += 1
                 history.append((value, now))
-            stable = len(history) == 3 and now-history[0][1] >= .45 and now-started <= 2.5
+            # The duration belongs to the entire unchanged run, not the last
+            # three samples: faster OCR must never prevent stability.
+            stable = state['count'] >= 3 and now-state['since'] >= .45 and now-started <= 2.5
+            state['stable'] = stable
             token = str(uuid.uuid4())
             recent = [key for key, item in self.frames.items() if item.station == station and not item.lease][-2:]
             self.frames = {key: item for key, item in self.frames.items()
@@ -126,7 +134,8 @@ class LocalLiveReader:
             self.frames[token] = LiveFrame(station, camera, source, settings,
                 frame_digest(frame), result, started, stable)
             return {**result, 'stable': stable, 'live_token': token,
-                    'stable_frames': len(history), 'sequence': sequence}
+                    'stable_frames': state['count'], 'stable_ms': round((now-state['since'])*1000) if state['since'] is not None else 0,
+                    'sequence': sequence}
 
     def claim(self, token, *, station, camera, source, event, kind, round_index):
         now = self.clock()
@@ -140,7 +149,7 @@ class LocalLiveReader:
                     raise ValueError('Số live đã được lấy cho ô khác hoặc đã hết hạn')
                 return dict(item.result)
             state = self.states.get(station)
-            if (not item.stable or now-item.created > 2.5 or not state or item.settings != state['settings']
+            if (not item.stable or now-item.created > 2.5 or not state or not state['stable'] or item.settings != state['settings']
                     or not state['history'] or state['history'][-1][0] != item.result['weight']):
                 raise ValueError('Số cân chưa ổn định hoặc đã cũ; chờ số mới rồi nhấn Space')
             item.lease, item.claimed_at = lease, now

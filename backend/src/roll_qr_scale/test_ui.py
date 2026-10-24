@@ -4265,6 +4265,7 @@ class StationUIService:
         shift: str = "",
         machine: str = "",
         production_order: str = "",
+        decode_qr: bool = True,
     ) -> dict[str, object]:
         """Save one image for later AI processing while decoding QR locally."""
 
@@ -4298,7 +4299,7 @@ class StationUIService:
         # QR is deliberately outside the shared AI/FIFO inference queue so a
         # busy or failed Gemini request cannot delay photo-only capture.
         try:
-            decoded = self._decode_qr(frame)
+            decoded = self._decode_qr(frame) if decode_qr else {}
         except Exception as exc:
             logging.warning("QR decode failed; saving photo draft without local QR: %s", exc)
             decoded = {"qr_code": "", "decoder": "unavailable"}
@@ -4360,6 +4361,42 @@ class StationUIService:
             "pending_count": self.store.pending_count(),
             "ai_requested": False,
         }
+
+    def capture_local_weight(self, frame: np.ndarray, payload: dict) -> dict:
+        """Commit a frame-bound local reading without cloud, QR or FIFO waits."""
+        station, camera = str(payload.get('station_id', '')), str(payload.get('camera_id', ''))
+        self.validate_station_source(station, camera, str(payload.get('machine', '')), require_machine=True)
+        event, capture = str(payload.get('event_id', '')), str(payload.get('capture_id', ''))
+        uuid.UUID(event)
+        uuid.UUID(capture)
+        kind, index = str(payload.get('kind', '')), int(payload.get('round', 0))
+        if kind not in {'core', 'product', 'inventory'} or not 0 <= index <= 3:
+            raise ValueError('Ô cân không hợp lệ')
+        if payload.get('unit', 'kg') != 'kg':
+            raise ValueError('Cân OCR local được cấu hình theo kg; hãy chọn đơn vị kg')
+        token = str(payload.get('live_token', ''))
+        self.local_live.claim(token, station=station, camera=camera, source=str(payload.get('source', '')),
+            event=event, kind=kind, round_index=index)
+        result = self.local_live.resolve(token, frame, station=station, camera=camera,
+            event=event, kind=kind, round_index=index)
+        # These existing stores keep the image and numeric weight across an app
+        # restart. No remote call or QR decoder runs before the local receipt.
+        photo = self.capture_photo_draft(frame, event_id=capture, parent_event_id=event,
+            capture_kind=kind, capture_round=index, station_id=station, camera_id=camera,
+            machine=str(payload.get('machine', '')), work_date=str(payload.get('work_date', '')),
+            shift=str(payload.get('shift', '')), production_order=str(payload.get('production_order', '')),
+            decode_qr=False)
+        self.store.set_photo_draft_reread_weight(capture, result['weight'])
+        staged = self.stage_evidence_step(frame, event_id=event, station_id=station, kind=kind,
+            weight=result['weight'], unit='kg', photo_capture_id=capture, capture_round=index)
+        quality, quality_pass = self.quality_result(self.assess_quality(frame))
+        logging.info('Local capture saved event=%s capture=%s kind=%s round=%s weight=%s',
+            event, capture, kind, index, result['weight'])
+        return {**result, 'event_id': event, 'capture_id': capture, 'capture_kind': kind,
+            'capture_round': index, 'step_saved': True, 'step_image_path': staged['image_path'],
+            'quality': quality, 'quality_pass': quality_pass,
+            'qr_found': False, 'qr_code': '', 'qr_decoder': 'pending-local',
+            'sync_status': photo['sync_status'], 'local_saved': True}
 
     def reread_photo_drafts(
         self,
@@ -7759,6 +7796,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     elif self.path == '/api/local/still':
                         result = service.local_live.read(decode_image(str(payload.get('image', ''))),
                             str(payload.get('roi') or 'auto'), payload.get('fixed_two', True) is True)
+                    elif self.path == '/api/local/capture':
+                        result = service.capture_local_weight(decode_image(str(payload.get('image', ''))), payload)
                     elif self.path == '/api/local/claim':
                         event = str(payload.get('event_id', ''))
                         uuid.UUID(event)

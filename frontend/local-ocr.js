@@ -7,6 +7,58 @@ function localSource(session){return session._localSource|| (session._localSourc
 function localInvalidate(session){if(!session)return;session.localLive=null;session._localSource=crypto.randomUUID();session._localKey='';session._localVideoTime=-1;localRender(session)}
 function localGetCapture(session){const live=session.localLive,now=performance.now();if(!live||live.key!==localKey(session)||!live.result.stable||now-live.startedAt>2300||!session.stream||session.video.readyState<2||session.video.paused||session.unit!=='kg'||(session._nativeSource&&now-session._nativeLastFrame>1500))throw new Error('Chờ số cân ổn định mới rồi nhấn Space. Kiểm tra camera/vùng LED và chọn kg.');return live}
 function localCapturePayload(session,capture){return {roi:capture?capture.roi:session.ledRoi?session.ledRoi.join(','):'auto',fixed_two:capture?capture.fixedTwo:localOcrState.fixedTwo,live_token:capture?capture.result.live_token:'',recognition_provider:'rapidocr',recognition_profile:'small'}}
+async function localCaptureSlot(session,capture,kind,index,context){
+ const round=session.rounds[index],product=kind==='product',prefix=product?'product':'core';
+ const retries=round.localCaptures||(round.localCaptures={});
+ let job=retries[kind];
+ if(!job||job.saved){
+  const event=round.eventId||newEventId();round.eventId=event;
+  job=retries[kind]={image:capture.image,key:capture.key,saved:false,payload:{image:capture.image,station_id:session.stationId,camera_id:session.cameraId,source:capture.source,live_token:capture.result.live_token,event_id:event,capture_id:newEventId(),kind,round:index,unit:session.unit,work_date:context.date,shift:context.shift,machine:context.machine,production_order:context.order}};
+  round[prefix+'Image']=job.image;round[prefix+'Analysis']=null;
+  if(product){round.productWeight='';round.productAnalyzedWeight=null}else{round.weight='';round.analyzedWeight=null}
+  syncSessionAliases(session);if(session===current())renderEvidence(session);
+ }
+ session._analyzeLock=true;renderControls();
+ status(captureStatus,'Đang ghi số và ảnh '+weighSlotLabel(kind,index)+' trên máy…','warn');
+ try{
+  const data=await api('/api/local/capture',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(job.payload)});
+  if(!data.local_saved||data.event_id!==round.eventId||data.capture_id!==job.payload.capture_id||data.capture_kind!==kind||data.capture_round!==index)throw new Error('Xác nhận lưu local không khớp ô cân.');
+  if(session.rounds[index]!==round||round.saved)return;
+  job.saved=true;round[prefix+'Image']=job.image;round[prefix+'Analysis']=data;round[prefix+'PhotoCaptureId']=data.capture_id;
+  if(product){round.productWeight=Number(data.weight).toFixed(2);round.productAnalyzedWeight=data.weight;round.productAnalyzedRaw=data.weight_raw||''}
+  else{round.weight=Number(data.weight).toFixed(2);round.analyzedWeight=data.weight;round.analyzedRaw=data.weight_raw||''}
+  session.lastAnalysis=data;syncSessionAliases(session);
+  const next=nextCaptureStep(session);if(next)session.selectedSlot={...next};
+  session._analyzeLock=false;session.state='awaiting-weight';advanceToNextCapture(session);refreshCompletionState(session);
+  if(session===current()){
+   renderEvidence(session);renderControls();markWeightThresholdAlerts(session,round,index,{popup:true});
+   status(captureStatus,'ĐÃ LƯU LOCAL · '+weighSlotLabel(kind,index)+' · '+Number(data.weight).toFixed(2)+' kg. '+(next?'Sẵn sàng lấy ô tiếp theo. ':'')+'Chưa lưu phiếu; Supabase đồng bộ sau.'+(!data.quality_pass?' Ảnh chưa đạt chất lượng; kiểm tra lại ảnh trước khi lưu phiếu.':''),'ok');
+  }
+  void localDecodeCapturedQr(session,round,kind,index,job);
+ }catch(error){if(session===current())status(captureStatus,'CHƯA XÁC NHẬN LƯU LOCAL: '+error.message+' Nhấn Space để thử lại đúng ảnh và ID; dùng Bỏ nếu muốn lấy ảnh mới.','bad')}
+ finally{session._analyzeLock=false;renderControls()}
+}
+async function localDecodeCapturedQr(session,round,kind,index,job){
+ if(round.qr)return;
+ try{
+  const data=await api('/api/decode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({image:job.image})});
+  if(session.rounds[index]!==round||round.saved||round.localCaptures?.[kind]!==job||round[(kind==='product'?'product':'core')+'Image']!==job.image||round.qr||!data.qr_code)return;
+  const code=String(data.qr_code).trim(),duplicate=qrDuplicateMessage(code,index,session);
+  if(duplicate){round.qrNotice='Đã đọc QR: '+code+' · '+duplicate}else{round.qr=code;round.qrNotice=''}
+  syncSessionAliases(session);if(session===current()){renderEvidence(session);syncCaptureProductCodes(session);renderControls()}
+ }catch(error){console.warn('Ảnh và số đã lưu local; quét hoặc nhập QR nếu chưa có:',error.message)}
+}
+function localRecoverCamera(session,error,generation){
+ if(session.streamGeneration!==generation)return;
+ const attempts=session._localRecoveryAttempts||0;
+ session.stop();session.setState('disconnected','MẤT HÌNH CAMERA','bad');
+ if(attempts>=2){status(captureStatus,error.message+'. Đã thử mở lại 2 lần. Kiểm tra USB rồi bấm Mở camera.','bad');return}
+ session._localRecoveryAttempts=attempts+1;
+ const stoppedGeneration=session.streamGeneration;
+ status(captureStatus,error.message+'. Đang mở lại đúng camera ('+(attempts+1)+'/2)…','warn');
+ const retry=()=>{if(session.streamGeneration!==stoppedGeneration||session.stream||session!==current()||document.hidden)return;if(blocksCameraChange(session)){setTimeout(retry,500);return}void openDefaultCamera(session,true)};
+ setTimeout(retry,700);
+}
 async function localClaimCapture(session,capture,eventId,kind,round){if(capture.key!==localKey(session))throw new Error('Camera/vùng đọc đã thay đổi; chờ số mới.');await api('/api/local/claim',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({station_id:session.stationId,camera_id:session.cameraId,source:capture.source,live_token:capture.result.live_token,event_id:eventId,kind,round})})}
 function localRender(session=current()){
  if(!localEnabled()||!session||session!==current()||!$('localWeight'))return;
@@ -68,10 +120,11 @@ const localOriginalPrimary=openPrimaryCamera;
 openPrimaryCamera=function(){if(localEnabled()&&$('localCameraBackend')?.value!=='Trình duyệt')return openDefaultCamera(current());return localOriginalPrimary()};
 const localOriginalMap=mapCamera;
 mapCamera=async function(session,deviceId){if(localEnabled()&&$('localCameraBackend'))$('localCameraBackend').value='Trình duyệt';session._localStill=null;localInvalidate(session);await localOriginalMap(session,deviceId);if(localEnabled()){session.ledRoi=localLoadRoi(session);localInvalidate(session)}};
-openDefaultCamera=async function(session=current()){
+openDefaultCamera=async function(session=current(),recovering=false){
  if(!localEnabled()||!$('localCameraBackend'))return localOriginalOpenDefault(session);
  if($('localCameraBackend').value==='Trình duyệt'){session._localStill=null;await localOriginalOpenDefault(session);session.ledRoi=localLoadRoi(session);localInvalidate(session);return}
  if(!session||blocksCameraChange(session))return;
+ if(!recovering)session._localRecoveryAttempts=0;
  session.stop();session._localStill=null;localInvalidate(session);const generation=session.streamGeneration;
  try{
   const opened=await api('/api/local/camera/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({station_id:session.stationId,camera_id:session.cameraId,index:Number($('localCameraIndex').value),backend:$('localCameraBackend').value})});
@@ -82,12 +135,12 @@ openDefaultCamera=async function(session=current()){
    try{
     const data=await api('/api/local/camera/frame',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({station_id:session.stationId,camera_id:session.cameraId,source:opened.source})});
     if(session._nativeSource!==opened.source||session.streamGeneration!==generation)return;
-    if(data.image){const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=data.image});if(session.streamGeneration!==generation)return;const canvas=session._nativeCanvas;canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);session._nativeLastFrame=performance.now();session._nativeSequence=data.sequence;session._nativeImage=data.image;if(!session.stream){const stream=canvas.captureStream(12);await bindOpenedStream(session,stream,generation);if(session.streamGeneration!==generation){stream.getTracks().forEach(track=>track.stop());return}session.ledRoi=localLoadRoi(session);localInvalidate(session)}}
+    if(data.image){const image=await new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error('Không giải mã được hình camera'));img.src=data.image});if(session.streamGeneration!==generation)return;const canvas=session._nativeCanvas;canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;canvas.getContext('2d').drawImage(image,0,0);session._nativeLastFrame=performance.now();session._nativeSequence=data.sequence;session._nativeImage=data.image;if(performance.now()-session._nativeStarted>10000)session._localRecoveryAttempts=0;if(!session.stream){const stream=canvas.captureStream(12);await bindOpenedStream(session,stream,generation);if(session.streamGeneration!==generation){stream.getTracks().forEach(track=>track.stop());return}session.ledRoi=localLoadRoi(session);localInvalidate(session)}}
     if(performance.now()-(session._nativeLastFrame||session._nativeStarted)>(session.stream?2500:12000))throw new Error('Không có hình camera; thử camera khác hoặc đổi driver');
     setTimeout(poll,70);
-   }catch(error){if(session.streamGeneration!==generation)return;session.stop();session.setState('disconnected','MẤT HÌNH CAMERA','bad');status(captureStatus,error.message,'bad')}
+   }catch(error){localRecoverCamera(session,error,generation)}
   };poll();status(captureStatus,'Đang mở camera USB qua '+$('localCameraBackend').value+'…','warn');
- }catch(error){if(session.streamGeneration!==generation)return;session.stop();status(captureStatus,'Không mở được camera: '+error.message,'bad')}
+ }catch(error){localRecoverCamera(session,error,generation)}
 };
 const localOriginalStop=StationSession.prototype.stop;
 StationSession.prototype.stop=function(){const source=this._nativeSource;this._nativeSource=null;this._nativeCanvas=null;this.localLive=null;this._localSource=crypto.randomUUID();if(source)api('/api/local/camera/stop',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({station_id:this.stationId,camera_id:this.cameraId,source})}).catch(()=>{});localOriginalStop.call(this);if(localEnabled())localRender(this)};
@@ -100,14 +153,15 @@ async function localTick(){
   localRender(session);
   if(localOcrState.busy||!session.stream||session._selectingLed||session.video.readyState<2||session.video.paused||panelMode||document.hidden)return;
   const videoTime=session._nativeSource?session._nativeSequence:session.video.currentTime;
-  if(session._localVideoTime===videoTime)return;
+  if(session._localVideoTime===videoTime){if(session._localFrameAt&&performance.now()-session._localFrameAt>2500){session.localLive=null;localRender(session);$('localWeightStatus').textContent='Camera chưa có khung hình mới. Kiểm tra USB hoặc bấm Mở camera.'}return}
+  session._localFrameAt=performance.now();
   session._localVideoTime=videoTime;
   if(session._nativeSource&&performance.now()-session._nativeLastFrame>1200){localInvalidate(session);return}
   const key=localKey(session);if(session._localKey!==key){localInvalidate(session);session._localKey=key}
   const canvas=document.createElement('canvas'),video=session._nativeCanvas||session.video;canvas.width=session.video.videoWidth;canvas.height=session.video.videoHeight;if(!canvas.width||!canvas.height)return;canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
   const image=session._nativeSource?session._nativeImage:canvas.toDataURL('image/jpeg',.96),source=localSource(session),roi=session.ledRoi?session.ledRoi.join(','):'auto',fixedTwo=localOcrState.fixedTwo,startedAt=performance.now();
   localOcrState.busy=true;
-  try{const result=await api('/api/local/live',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({image,station_id:session.stationId,camera_id:session.cameraId,source,sequence:++localOcrState.sequence,roi,fixed_two:fixedTwo})});if(!session.stream||key!==localKey(session)||source!==localSource(session))return;session.localLive={key,image,source,roi,fixedTwo,result,startedAt};localRender(session)}catch(error){session.localLive=null;if(session===current())$('localWeightStatus').textContent='Chưa đọc được: '+error.message}finally{localOcrState.busy=false}
+  try{const result=await api('/api/local/live',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({image,station_id:session.stationId,camera_id:session.cameraId,source,sequence:++localOcrState.sequence,roi,fixed_two:fixedTwo})});if(!session.stream||key!==localKey(session)||source!==localSource(session))return;session.localLive={key,image,source,roi,fixedTwo,result,startedAt};localRender(session)}catch(error){if(key===localKey(session)){session.localLive=null;if(session===current())$('localWeightStatus').textContent='Chưa đọc được: '+error.message}}finally{localOcrState.busy=false}
  }finally{setTimeout(localTick,180)}
 }
 setTimeout(localTick,150);

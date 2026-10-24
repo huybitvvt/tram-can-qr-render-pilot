@@ -1,4 +1,4 @@
-"""Verify frozen rc82 matches reviewed source, trial model and rc80 storage."""
+"""Verify the frozen local app matches reviewed source, trial model and rc80 storage."""
 import hashlib
 import json
 import marshal
