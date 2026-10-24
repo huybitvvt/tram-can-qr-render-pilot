@@ -26,11 +26,14 @@ def main():
     parser.add_argument('--expect', type=float, default=6.86)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--exe', type=Path)
+    parser.add_argument('--station', type=int, choices=range(1, 11), default=2)
     parser.add_argument('--offline', action='store_true', help='Configure unavailable cloud and reject external browser traffic')
     parser.add_argument('--next-image', type=Path, help='Second real scene for live value transition and another slot')
     parser.add_argument('--next-expect', type=float, default=13.04)
     parser.add_argument('--native-recovery', action='store_true', help='Simulate a native camera stall through the real UI')
     args = parser.parse_args()
+    suffix = f'{args.station:02d}'
+    station_id, camera_id, gateway_id = f'station-{suffix}', f'camera-{suffix}', f'gateway-{suffix}'
     project = Path(__file__).resolve().parents[1]
     args.out = args.out.resolve()
     args.out.mkdir(parents=True, exist_ok=True)
@@ -49,8 +52,8 @@ def main():
     with socket.socket() as port_socket:
         port_socket.bind(('127.0.0.1', 0)); port = port_socket.getsockname()[1]
     config = root/'config.env'
-    config.write_text('\n'.join(['ROLL_SCALE_STATION_COUNT=1', 'ROLL_SCALE_GATEWAY_ID=gateway-02',
-        'ROLL_SCALE_STATION_IDS=station-02', 'ROLL_SCALE_CAMERA_IDS=camera-02',
+    config.write_text('\n'.join(['ROLL_SCALE_STATION_COUNT=1', f'ROLL_SCALE_GATEWAY_ID={gateway_id}',
+        f'ROLL_SCALE_STATION_IDS={station_id}', f'ROLL_SCALE_CAMERA_IDS={camera_id}',
         'ROLL_SCALE_WEIGHT_ENGINE=gemini', 'ROLL_SCALE_GEMINI_API_KEY=invalid-unused-key',
         f'ROLL_SCALE_PORT={port}', 'ROLL_SCALE_OPEN_BROWSER=0', 'ROLL_SCALE_AUTO_SYNC=0'])+'\n', encoding='utf-8')
     if args.offline:
@@ -71,7 +74,7 @@ def main():
     previous_photo = Path(previous.image_path)
     previous_hash = hashlib.sha256(previous_photo.read_bytes()).hexdigest()
     draft, _ = store.save_photo_draft_idempotent(frame, capture_kind='product',
-        event_id=str(uuid.uuid4()), parent_event_id=str(uuid.uuid4()), station_id='station-02', camera_id='camera-02')
+        event_id=str(uuid.uuid4()), parent_event_id=str(uuid.uuid4()), station_id=station_id, camera_id=camera_id)
     store.close()
     env = {key:value for key,value in os.environ.items() if not key.startswith(('ROLL_SCALE_','SUPABASE_KHO_','GOOGLE_','GEMINI_'))}
     env.update(LOCALAPPDATA=str(sandbox), ROLL_SCALE_OPEN_BROWSER='0', ROLL_SCALE_AUTO_SYNC='0')
@@ -94,6 +97,8 @@ def main():
             except OSError: pass
             time.sleep(.25)
         assert status['weight_engine']=='rapidocr' and not status['gemini']['enabled'],status
+        assert status['gateway_id']==gateway_id and status['stations'][0]['station_id']==station_id
+        assert status['stations'][0]['camera_id']==camera_id
         assert config.read_bytes()==config_bytes
         with sqlite3.connect(root/'backups'/json.loads((root/'backups'/'rapidocr-rc82.json').read_text())['directory']/'measurements.db') as db:
             assert db.execute('SELECT weight FROM measurements').fetchone()==(.75,)
@@ -231,8 +236,8 @@ def main():
             browser.close()
         # Confirming a new operator-reviewed record still uses the rc80 storage flow.
         saved_event=str(uuid.uuid4())
-        saved=request('/api/capture', {'event_id':saved_event,'station_id':'station-02',
-            'camera_id':'camera-02','qr_code':actual_analysis.get('qr_code') or 'TEST-LOCAL-QR',
+        saved=request('/api/capture', {'event_id':saved_event,'station_id':station_id,
+            'camera_id':camera_id,'qr_code':actual_analysis.get('qr_code') or 'TEST-LOCAL-QR',
             'weight':.5,'product_weight':args.expect,'image':image,'product_image':image,
             'unit':'kg','vision_confirmed':False,'machine':'MÁY BAO BÌ 5',
             'weight_raw':'SOURCE_MACHINE=MÁY BAO BÌ 5; HUMAN_CONFIRMED=0.5'})
@@ -246,6 +251,7 @@ def main():
             'space_reused_without_ocr':True,'manual_roi':True,'auto_led':True,'decimal_switch':True,
             'existing_data_config_photo_draft_preserved':True,'preview_no_writes':True,'browser_errors':errors}
         summary['new_record_saved_alongside_rc80_data']=True
+        summary['station_identity']={'gateway':gateway_id,'station':station_id,'camera':camera_id}
         summary['offline_with_cloud_configured']=args.offline
         summary['final_save_through_ui']=True
         summary['live_transition_ms']=transition_ms

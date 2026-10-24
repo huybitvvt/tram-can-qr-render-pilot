@@ -216,6 +216,36 @@ def test_packaged_runtime_accepts_two_explicit_station_and_camera_ids(
     ]
 
 
+@pytest.mark.parametrize("station_number", range(1, 11))
+def test_ten_workstations_keep_one_station_each_and_preserve_explicit_identity(tmp_path, monkeypatch, station_number):
+    from roll_qr_scale.test_ui import StationUIService, build_parser
+    from roll_qr_scale.storage import MeasurementStore
+    from roll_qr_scale.windows_app import build_rapidocr_argv
+
+    for key in list(os.environ):
+        if key.startswith('ROLL_SCALE_'):
+            monkeypatch.delenv(key)
+    suffix = f'{station_number:02d}'
+    monkeypatch.setenv('ROLL_SCALE_STATION_COUNT', '1')
+    monkeypatch.setenv('ROLL_SCALE_GATEWAY_ID', f'gateway-{suffix}')
+    monkeypatch.setenv('ROLL_SCALE_STATION_IDS', f'station-{suffix}')
+    monkeypatch.setenv('ROLL_SCALE_CAMERA_IDS', f'camera-{suffix}')
+    args = build_parser().parse_args(build_rapidocr_argv(tmp_path, tmp_path/'assets'))
+    store = MeasurementStore(args.db, args.captures)
+    service = StationUIService(store, None, None, None, weight_engine=args.weight_engine,
+        station_count=args.station_count, station_ids=args.station_ids,
+        camera_ids=args.camera_ids, gateway_id=args.gateway_id, auto_sync=False)
+    try:
+        assert service.station_count == 1
+        assert service.gateway_id == f'gateway-{suffix}'
+        source = service.validate_station_source(f'station-{suffix}', f'camera-{suffix}')
+        assert source['station_id'] == f'station-{suffix}'
+        assert source['camera_id'] == f'camera-{suffix}'
+    finally:
+        service.close()
+        store.close()
+
+
 def test_packaged_runtime_accepts_one_calibrated_weight_roi_per_station(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

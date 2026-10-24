@@ -1,4 +1,4 @@
-# Trạm Cân QR — rc83 OCR và lưu local
+# Trạm Cân QR — rc84 hỗ trợ 10 máy trạm
 
 ## Nâng cấp máy đang dùng rc80/rc82
 
@@ -81,7 +81,9 @@ trước khi lưu; nếu sai, chỉnh vùng/ánh sáng/góc camera hoặc nhập
 
 ## Cài máy mới
 
-Windows 10/11 x64 → chạy **TramCanQR-Setup.exe** → chọn đúng trạm 01–04.
+Windows 10/11 x64 → chạy **TramCanQR-Setup.exe** → chọn đúng trạm 01–10.
+Mỗi máy tính chọn một số trạm khác nhau. Ví dụ máy thứ 10 chọn **Trạm 10**,
+ứng dụng tạo `gateway-10`, `station-10`, `camera-10`; mỗi máy vẫn chạy một trạm.
 Lần cài đầu tạo cấu hình riêng. Điền bộ Supabase/kho của trạm nếu cần đồng bộ;
 không sao chép cấu hình nhận dạng trạm khác. Máy chỉ đọc cân local không cần key.
 

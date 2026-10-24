@@ -1,5 +1,5 @@
 ﻿#define MyAppName "Tram Can QR"
-#define MyAppVersion "0.2.0-rc83"
+#define MyAppVersion "0.2.0-rc84"
 #define MyAppExeName "TramCanQR.exe"
 
 [Setup]
@@ -65,7 +65,7 @@ begin
     wpSelectTasks,
     'Chọn trạm cho máy tính này',
     'Mỗi máy tính chỉ chạy một trạm độc lập.',
-    'Chọn đúng trạm 01-04. Lựa chọn chỉ tạo cấu hình ở lần cài đầu; khi cập nhật, cấu hình và dữ liệu hiện có được giữ nguyên.',
+    'Chọn đúng trạm 01-10. Mỗi máy tính chọn một số trạm khác nhau. Khi cập nhật, cấu hình và dữ liệu hiện có được giữ nguyên.',
     True,
     False
   );
@@ -73,6 +73,12 @@ begin
   StationPage.Add('Trạm 02');
   StationPage.Add('Trạm 03');
   StationPage.Add('Trạm 04');
+  StationPage.Add('Trạm 05');
+  StationPage.Add('Trạm 06');
+  StationPage.Add('Trạm 07');
+  StationPage.Add('Trạm 08');
+  StationPage.Add('Trạm 09');
+  StationPage.Add('Trạm 10');
   StationPage.SelectedValueIndex := 0;
 end;
 
