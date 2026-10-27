@@ -17,6 +17,8 @@ from tramcan_rapidocr.engine import ScaleReader
 from tramcan_rapidocr.parsing import parse_weight
 from .weight_ocr import parse_normalized_roi
 
+SNAPSHOT_TTL_SECONDS = 600
+
 
 def frame_digest(frame):
     return hashlib.sha256(str(frame.shape).encode()+frame.tobytes()).hexdigest()
@@ -32,6 +34,7 @@ class LiveFrame:
     result: dict
     created: float
     stable: bool
+    manual_capture: bool = False
     lease: tuple | None = None
     claimed_at: float = 0
 
@@ -125,17 +128,40 @@ class LocalLiveReader:
             stable = state['count'] >= 3 and now-state['since'] >= .45 and now-started <= 2.5
             state['stable'] = stable
             token = str(uuid.uuid4())
-            recent = [key for key, item in self.frames.items() if item.station == station and not item.lease][-2:]
-            self.frames = {key: item for key, item in self.frames.items()
-                if now-(item.claimed_at or item.created) < (90 if item.lease else 3)
-                and (item.lease or item.station != station or key in recent)}
-            if len(self.frames) >= 128:
-                raise ValueError('Có quá nhiều lượt cân đang chờ; hãy lưu hoặc bỏ lượt cũ')
+            self._prune_frames(now, station)
             self.frames[token] = LiveFrame(station, camera, source, settings,
                 frame_digest(frame), result, started, stable)
             return {**result, 'stable': stable, 'live_token': token,
                     'stable_frames': state['count'], 'stable_ms': round((now-state['since'])*1000) if state['since'] is not None else 0,
                     'sequence': sequence}
+
+    def _prune_frames(self, now, station):
+        recent = [key for key, item in self.frames.items()
+                  if item.station == station and not item.lease and not item.manual_capture][-2:]
+        recent_snapshots = [key for key, item in self.frames.items()
+                            if item.station == station and not item.lease and item.manual_capture][-2:]
+        self.frames = {key: item for key, item in self.frames.items()
+            if now-(item.claimed_at if item.lease else item.created)
+                < (90 if item.lease else SNAPSHOT_TTL_SECONDS if item.manual_capture else 3)
+            and (item.lease or item.station != station or key in recent or key in recent_snapshots)}
+        if len(self.frames) >= 128:
+            raise ValueError('Có quá nhiều lượt cân đang chờ; hãy lưu hoặc bỏ lượt cũ')
+
+    def snapshot(self, frame, *, station, camera, source, roi='auto', fixed_two=True):
+        """Read one operator-frozen frame; never claim temporal stability."""
+        if not source or len(source) > 128:
+            raise ValueError('Nguồn camera không hợp lệ')
+        started = self.clock()
+        result = {**self.read(frame, roi, fixed_two), 'manual_capture': True}
+        result['weight_raw'] += '; MANUAL_SNAPSHOT=1'
+        settings = (camera, source, roi, bool(fixed_two), frame.shape)
+        with self.lock:
+            self._prune_frames(self.clock(), station)
+            token = str(uuid.uuid4())
+            self.frames[token] = LiveFrame(station, camera, source, settings,
+                frame_digest(frame), result, started, False, manual_capture=True)
+        return {**result, 'stable': False, 'live_token': token,
+                'snapshot_ttl_ms': SNAPSHOT_TTL_SECONDS*1000}
 
     def claim(self, token, *, station, camera, source, event, kind, round_index):
         now = self.clock()
@@ -147,6 +173,13 @@ class LocalLiveReader:
             if item.lease:
                 if item.lease != lease or now-item.claimed_at > 90:
                     raise ValueError('Số live đã được lấy cho ô khác hoặc đã hết hạn')
+                return dict(item.result)
+            if item.manual_capture:
+                if now-item.created > SNAPSHOT_TTL_SECONDS:
+                    raise ValueError('Ảnh đã giữ quá 10 phút; hãy chụp lại')
+                if not item.result['weight_found']:
+                    raise ValueError('Ảnh chưa đọc được số cân; hãy chụp lại hoặc chỉnh vùng LED')
+                item.lease, item.claimed_at = lease, now
                 return dict(item.result)
             state = self.states.get(station)
             if (not item.stable or now-item.created > 2.5 or not state or not state['stable'] or item.settings != state['settings']

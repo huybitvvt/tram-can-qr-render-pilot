@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--next-image', type=Path, help='Second real scene for live value transition and another slot')
     parser.add_argument('--next-expect', type=float, default=13.04)
     parser.add_argument('--native-recovery', action='store_true', help='Simulate a native camera stall through the real UI')
+    parser.add_argument('--snapshot', action='store_true', help='Freeze one real frame and take its weight without live stability')
     args = parser.parse_args()
     suffix = f'{args.station:02d}'
     station_id, camera_id, gateway_id = f'station-{suffix}', f'camera-{suffix}', f'gateway-{suffix}'
@@ -132,7 +133,18 @@ def main():
                 $('sourceMachine').value=sourceContext.machine;selectSourceOrder('TEST-LOCAL');
             }''', image)
             try:
-                page.wait_for_function('current().localLive&&current().localLive.result.stable',timeout=30000)
+                if args.snapshot:
+                    page.locator('#localSnapshot').click()
+                    page.wait_for_function('current()._localSnapshot?.result?.weight_found',timeout=30000)
+                    assert page.evaluate('current().localLive.result.stable') is False
+                    live_requests = sum(url.endswith('/api/local/live') for url in network)
+                    # An operator may inspect a frozen image beyond the live TTL.
+                    page.wait_for_timeout(3000)
+                    assert sum(url.endswith('/api/local/live') for url in network) == live_requests
+                    assert page.evaluate('current().preview.style.display') == 'block'
+                    page.screenshot(path=str(args.out/'held.png'),full_page=True)
+                else:
+                    page.wait_for_function('current().localLive&&current().localLive.result.stable',timeout=30000)
             except Exception:
                 page.screenshot(path=str(args.out/'failure.png'),full_page=True)
                 print(json.dumps({'errors':errors,'previews':previews[-3:],'state':page.evaluate('({text:$("localWeightStatus").textContent,stream:!!current().stream,ready:current().video.readyState,paused:current().video.paused,time:current().video.currentTime,hidden:document.hidden,busy:localOcrState.busy})')},ensure_ascii=False),flush=True)
@@ -152,6 +164,14 @@ def main():
             assert actual_analysis['live_reused'] and not actual_analysis['gemini_used'],actual_analysis
             assert page.evaluate('current().rounds[0].productImage')==expected_image
             assert page.evaluate('current().selectedSlot.kind')=='core'
+            if args.snapshot:
+                assert actual_analysis['manual_capture']
+                assert 'MANUAL_SNAPSHOT=1' in actual_analysis['weight_raw']
+                assert page.evaluate('current()._localSnapshot.used')
+                page.keyboard.press('Space')
+                assert page.evaluate('Boolean(current().rounds[0].coreImage)') is False
+                page.locator('#localResumeLive').click()
+                assert page.evaluate('current()._localSnapshot===null&&current().preview.style.display!=="block"')
             transition_ms = None
             if args.next_image:
                 next_frame = cv2.imdecode(__import__('numpy').fromfile(args.next_image, dtype='uint8'), cv2.IMREAD_COLOR)
@@ -222,6 +242,13 @@ def main():
                 page.locator('#localCameraBackend').select_option(label='DirectShow')
                 page.locator('#localOpenCamera').click()
                 page.wait_for_function('current().localLive?.result.stable', timeout=20000)
+                if args.snapshot:
+                    page.locator('#localSnapshot').click()
+                    page.wait_for_function('current()._localSnapshot?.result?.weight_found',timeout=20000)
+                    assert page.evaluate('current()._localSnapshot.image===current()._nativeImage')
+                    assert page.evaluate('current().localLive.result.stable') is False
+                    page.locator('#localResumeLive').click()
+                    page.wait_for_function('current().localLive?.result.stable',timeout=20000)
                 original_source = page.evaluate('current()._nativeSource')
                 native['stall'] = True
                 page.wait_for_function('(old)=>current()._nativeSource&&current()._nativeSource!==old', arg=original_source, timeout=15000)
@@ -231,6 +258,20 @@ def main():
                 page.locator('#localStopCamera').click()
                 native_recovery = True
             page.screenshot(path=str(args.out/'capture.png'),full_page=True)
+            # Printing uses a synthetic receipt, never the warehouse production DB.
+            page.evaluate('''()=>{
+                nhapKhoSummaryCache=[{ma_phieu:'PN-TEST-AI',ma_sp:'SP01',so_luong:3,ngay:'2026-10-27',
+                    ca:'HC1',may:'Máy bao bì 5',kho:'Kho thành phẩm',saved_at:'2026-10-27T01:02:03Z'}];
+                $('nhapKhoSummaryDate').value='2026-10-27';$('nhapKhoSummaryCa').value='';
+                window.print=()=>{};renderNhapKhoSummary();printNhapKhoSummary();
+            }''')
+            printed = page.locator('#printSheet').inner_text()
+            assert 'Phiếu đẩy kho từ trạm cân AI' in printed
+            assert 'Công nhân SX' in printed and 'Người đẩy kho' not in printed
+            assert 'Giờ đẩy' in printed and '08:02:03' in printed
+            page.pdf(path=str(args.out/'phieu-day-kho.pdf'),format='A4',print_background=True)
+            page.emulate_media(media='print')
+            page.screenshot(path=str(args.out/'phieu-day-kho.png'),full_page=True)
             assert not [url for url in network if any(s in url for s in ('generativelanguage.googleapis','/api/gemini/','/api/codex/','/api/antigravity/'))], network
             assert not errors, errors
             browser.close()
@@ -256,6 +297,8 @@ def main():
         summary['final_save_through_ui']=True
         summary['live_transition_ms']=transition_ms
         summary['native_camera_stall_recovery_simulated']=native_recovery
+        summary['manual_snapshot']=args.snapshot
+        summary['warehouse_print_title_signature_time']=True
         (args.out/'result.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
         print(json.dumps(summary),flush=True)
     finally:

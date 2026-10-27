@@ -1,4 +1,4 @@
-# Trạm Cân QR — rc84 hỗ trợ 10 máy trạm
+# Trạm Cân QR — rc85 giữ ảnh cân thủ công
 
 ## Nâng cấp máy đang dùng rc80/rc82
 
@@ -23,6 +23,22 @@ Không cần cài Python, GPU, API key, sao chép `.env` hoặc xóa dữ liệu
   hai lần. Nếu vẫn lỗi, kiểm tra USB rồi bấm **Mở camera**. Các ô đã lấy được giữ.
 - Lệnh sản xuất cần được chọn sẵn hoặc nhập tay nếu không tải được danh mục lúc
   mất mạng. Việc nhập kho và xác minh QR trên các máy khác cần mạng/đồng bộ sau.
+
+## Giữ ảnh khi cân dao động
+
+1. Bấm **Chụp ảnh / Giữ ảnh** ngay cạnh nút camera. Khung hình được giữ lại,
+   OCR đọc một lần trên chính ảnh đó; các ô cân chưa thay đổi.
+2. Kiểm tra số trên ảnh. Chọn ô cân lõi/SP cần lấy rồi nhấn **Space** hoặc
+   nút **Chụp cân lõi / Chụp cân SP**. Chỉ khi hiện **ĐÃ LƯU LOCAL** thì ảnh
+   và số đã ghi trên máy. Đây là lấy số thủ công, không xác nhận cân ổn định.
+3. Bấm **Chụp lại** để lấy ảnh mới cho ô tiếp theo, hoặc **Tiếp tục live**.
+   Mỗi ảnh chỉ dùng cho một ô cân; ảnh giữ quá 10 phút phải chụp lại.
+
+## Phiếu đẩy kho
+
+Bản in có tên **Phiếu đẩy kho từ trạm cân AI**, chữ ký **Công nhân SX** và
+cột **Giờ đẩy** (giờ Việt Nam), lấy từ thời điểm đẩy kho đã lưu. Dòng cũ thiếu
+thời điểm hiện `--`. Tên công nhân để ký/ghi tay; chưa tự điền trưởng máy.
 
 Cài cho tài khoản Windows hiện tại. Bộ cài chưa ký số; chỉ dùng file từ repo
 phát hành và checksum đi kèm, không tắt Defender.

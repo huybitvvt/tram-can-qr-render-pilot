@@ -253,3 +253,69 @@ def test_local_capture_can_retry_a_disk_write_failure_without_another_ocr(tmp_pa
         assert len(reader.calls) == 3
         assert store.get_photo_draft(payload['capture_id']).reread_weight == 6.33
     finally: service.close();store.close()
+
+
+def snapshot(live, frame):
+    return live.snapshot(frame, station='station-01', camera='camera-01', source='source-1')
+
+
+def test_manual_snapshot_reads_once_and_can_be_claimed_without_live_stability():
+    live, reader, frame, clock = setup_reader()
+    result = snapshot(live, frame)
+    assert result['manual_capture'] and not result['stable']
+    assert len(reader.calls) == 1
+    clock[0] = 120
+    # A different live reading cannot change the frozen photo or its weight.
+    reader.value = Decimal('13.04')
+    preview(live, frame+1, 1)
+    assert claim(live, result['live_token'])['weight'] == 6.33
+    resolved = live.resolve(result['live_token'], frame, station='station-01', camera='camera-01',
+        event='event-1', kind='product', round_index=1)
+    assert resolved['weight'] == 6.33 and resolved['manual_capture']
+    assert len(reader.calls) == 2
+    with pytest.raises(ValueError, match='khớp'):
+        live.resolve(result['live_token'], frame+1, station='station-01', camera='camera-01',
+            event='event-1', kind='product', round_index=1)
+    with pytest.raises(ValueError, match='ô khác'):
+        live.claim(result['live_token'], station='station-01', camera='camera-01', source='source-1',
+            event='event-1', kind='core', round_index=0)
+
+
+def test_repeated_snapshot_retakes_do_not_fill_the_capture_queue():
+    live, _, frame, _ = setup_reader()
+    for _ in range(150): result = snapshot(live, frame)
+    assert claim(live, result['live_token'])['weight'] == 6.33
+
+
+@pytest.mark.parametrize('change', ['expired', 'missing', 'station', 'camera', 'source'])
+def test_manual_snapshot_rejects_missing_expired_or_mismatched_results(change):
+    live, reader, frame, clock = setup_reader()
+    if change == 'missing': reader.value = None
+    result = snapshot(live, frame)
+    if change == 'expired': clock[0] = 601
+    args = dict(station='station-01', camera='camera-01', source='source-1',
+        event='event-1', kind='product', round_index=1)
+    if change in {'station', 'camera', 'source'}: args[change] = 'other'
+    with pytest.raises(ValueError): live.claim(result['live_token'], **args)
+
+
+def test_manual_snapshot_is_durable_only_after_space_and_retries_without_ocr(tmp_path, monkeypatch):
+    store = MeasurementStore(tmp_path/'snapshot.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, reader, frame, clock = setup_reader();service.local_live = live
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='product', round=0,
+        machine='TEST-MACHINE')
+    try:
+        result = snapshot(live, frame);payload['live_token'] = result['live_token']
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 0
+        clock[0] = 60
+        monkeypatch.setattr(live, 'read', lambda *a, **k: pytest.fail('Must reuse snapshot OCR'))
+        monkeypatch.setattr(service, '_decode_qr', lambda *a, **k: pytest.fail('Must not wait for QR'))
+        receipt = service.capture_local_weight(frame, payload)
+        assert receipt['local_saved'] and receipt['manual_capture'] and not receipt.get('stable', False)
+        assert service.capture_local_weight(frame, payload)['local_saved']
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 1
+        assert store.get_photo_draft(payload['capture_id']).reread_weight == 6.33
+        assert len(reader.calls) == 1
+    finally: service.close();store.close()

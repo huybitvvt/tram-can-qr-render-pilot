@@ -7796,6 +7796,10 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                     elif self.path == '/api/local/still':
                         result = service.local_live.read(decode_image(str(payload.get('image', ''))),
                             str(payload.get('roi') or 'auto'), payload.get('fixed_two', True) is True)
+                    elif self.path == '/api/local/snapshot':
+                        result = service.local_live.snapshot(decode_image(str(payload.get('image', ''))),
+                            station=station, camera=camera, source=str(payload.get('source', '')),
+                            roi=str(payload.get('roi') or 'auto'), fixed_two=payload.get('fixed_two', True) is True)
                     elif self.path == '/api/local/capture':
                         result = service.capture_local_weight(decode_image(str(payload.get('image', ''))), payload)
                     elif self.path == '/api/local/claim':

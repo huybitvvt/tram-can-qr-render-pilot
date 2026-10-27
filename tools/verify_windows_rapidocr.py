@@ -1,4 +1,5 @@
 """Verify the frozen local app matches reviewed source, trial model and rc80 storage."""
+import ast
 import hashlib
 import json
 import marshal
@@ -31,10 +32,19 @@ def main():
     assert normalized(marshal.loads(executable.extract('windows_app')))==normalized(compile(entry.read_bytes(),str(entry),'exec',dont_inherit=True))
     for name in ('index.html','local-ocr.js'):
         assert (package/'_internal/assets/frontend'/name).read_bytes()==(root/'frontend'/name).read_bytes(),name
-    for name in ('storage','station_session','sync','api_client','warehouse'):
+    for name in ('storage','station_session','sync','api_client'):
         relative = f'backend/src/roll_qr_scale/{name}.py'
         old = subprocess.check_output(['git','show',f'v0.2.0-rc80:{relative}'],cwd=root)
         assert (root/relative).read_bytes().replace(b'\r\n',b'\n')==old.replace(b'\r\n',b'\n'),name
+    warehouse_path = 'backend/src/roll_qr_scale/warehouse.py'
+    old_warehouse = subprocess.check_output(['git','show',f'v0.2.0-rc80:{warehouse_path}'],cwd=root)
+    def warehouse_core(source):
+        module = ast.parse(source)
+        module.body = [node for node in module.body
+            if not (isinstance(node, ast.FunctionDef) and node.name in {'_push_time_text','_summary_csv_text'})
+            and not (isinstance(node, ast.ImportFrom) and node.module == 'datetime')]
+        return ast.dump(module, include_attributes=False)
+    assert warehouse_core(old_warehouse) == warehouse_core((root/warehouse_path).read_bytes())
     info = json.loads((root/'backend/src/tramcan_rapidocr/model_sources.json').read_text())['models']
     for key in ('det-small','rec-small'):
         model = package/'_internal/assets/models/rapidocr'/info[key]['file']
@@ -51,7 +61,8 @@ def main():
     assert digest(handoff/'TramCanQR-Setup.exe')==digest(handoff/f'TramCanQR-Setup-{APP_VERSION}.exe')
     assert (handoff/'CAP-NHAT-BAN-MOI.cmd').read_bytes()==(root/'packaging/CAP-NHAT-BAN-MOI.cmd').read_bytes()
     print(f'PASS {APP_VERSION}: frozen modules/frontend match source; trial model SHA matches; '
-          'rc80 storage/sync/schema unchanged; Gemini SDK absent; no private config/DB; installer hashes match')
+          'rc80 storage/sync/schema and warehouse write path unchanged; warehouse export time added; '
+          'Gemini SDK absent; no private config/DB; installer hashes match')
 
 
 if __name__=='__main__':main()
