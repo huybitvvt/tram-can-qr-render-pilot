@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--next-expect', type=float, default=13.04)
     parser.add_argument('--native-recovery', action='store_true', help='Simulate a native camera stall through the real UI')
     parser.add_argument('--snapshot', action='store_true', help='Freeze one real frame and take its weight without live stability')
+    parser.add_argument('--damaged', action='store_true', help='One-photo NKM/NC/RM workflow and warehouse routing')
     args = parser.parse_args()
     suffix = f'{args.station:02d}'
     station_id, camera_id, gateway_id = f'station-{suffix}', f'camera-{suffix}', f'gateway-{suffix}'
@@ -132,6 +133,19 @@ def main():
                 sourceContext={...sourceContext,machine:'MÁY BAO BÌ 5',order:'TEST-LOCAL',shift:'HC1'};
                 $('sourceMachine').value=sourceContext.machine;selectSourceOrder('TEST-LOCAL');
             }''', image)
+            if args.damaged:
+                from smoke_damaged_goods import verify_damaged
+                summary = verify_damaged(page, base, root, args.out, image, args.expect)
+                assert config.read_bytes() == config_bytes
+                assert hashlib.sha256(previous_photo.read_bytes()).hexdigest() == previous_hash
+                assert not errors, errors
+                summary.update(ok=True, real_model=True, browser='Edge', browser_errors=errors,
+                               offline_with_cloud_configured=args.offline,
+                               existing_data_config_photo_draft_preserved=True)
+                (args.out/'result.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+                print(json.dumps(summary), flush=True)
+                browser.close()
+                return
             try:
                 if args.snapshot:
                     page.locator('#localSnapshot').click()

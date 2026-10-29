@@ -31,6 +31,7 @@ function setup(){
     paintNhapKhoSelectBtn(){},appendNhapKhoStatusCell(){},syncSelectAllNhapKho(){},
     status(){},
   });
+  vm.runInContext(script.slice(script.indexOf('function recordDamagedKind('),script.indexOf('\nfunction damagedWarehouse(')),ctx);
   vm.runInContext('let recordsLoading=false,recordsRequestId=0,productionRowsByEvent={},selectedNhapKhoIds=new Set(),nhapKhoSelectedEventIds=[],productionSelectionFilter="",productionAllSelectedFilter="",recordsSelectionBusy=false;\n'+script.slice(start,end),ctx);
   return {ctx,body,pending,calls};
 }
@@ -60,6 +61,17 @@ test('refresh keeps selected rows beyond the visible page',async()=>{
   await loading;
   assert.equal(vm.runInContext("selectedNhapKhoIds.has('offpage')",ctx),true);
   assert.equal(vm.runInContext("productionRowsByEvent.offpage.qr_code",ctx),'SP_204');
+});
+
+test('damaged rows show no core and retain the whole photographed weight as net',async()=>{
+  const {ctx,body,pending}=setup();
+  const loading=ctx.loadRecords();
+  pending.older.resolve({items:[{event_id:'damaged',qr_code:'NKM_HH_1',core_weight:null,
+    product_weight:13.04,weight_raw:'DAMAGED_KIND=NKM; BI_WEIGHT=0',captured_at:'2026-10-29T05:00:00Z'}]});
+  await loading;
+  assert.equal(body.children[0].cells[6],'--');
+  assert.equal(body.children[0].cells[9],'13.04');
+  assert.equal(body.children[0].cells[10],'Hàng hỏng · NKM');
 });
 
 test('refresh never inserts an unsaved photo backup into the saved records table',async()=>{

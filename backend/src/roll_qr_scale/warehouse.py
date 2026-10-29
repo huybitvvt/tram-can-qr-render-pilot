@@ -18,6 +18,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
+from .damaged_goods import warehouse_for_items
+
 NHAP_KHO_CHO = "Chờ nhập kho"
 NHAP_KHO_DA = "Đã nhập kho"
 SUMMARY_JSON_NAME = "tong-hop-day-kho.json"
@@ -1130,6 +1132,7 @@ def confirm_nhap_kho(
     )
     if not preview:
         raise ValueError("Không còn mã QR chờ nhập kho cho Mã SP này")
+    kho = warehouse_for_items(preview, kho)
     event_ids = [str(row.get("event_id") or "").strip() for row in preview]
     if not all(event_ids):
         raise ValueError("Phiếu cân thiếu event_id; chưa thể đẩy kho")

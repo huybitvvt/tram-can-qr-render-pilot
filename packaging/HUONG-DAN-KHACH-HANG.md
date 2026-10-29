@@ -1,4 +1,19 @@
-# Trạm Cân QR — rc85 giữ ảnh cân thủ công
+# Trạm Cân QR — rc86 cân hàng lỗi hỏng
+
+## Cân hàng lỗi hỏng
+
+Chọn mục **Cân hàng lỗi hỏng**, chọn **NKM**, **NC** hoặc **RM** tại ô
+**Mã QR / Loại hàng hỏng**, kiểm tra ngày/ca/máy rồi bấm **Chụp và lưu hàng hỏng**.
+Hệ thống đọc đúng một ảnh và lưu phiếu local; không chụp lõi, không trừ lõi hoặc bì.
+Kiểm tra ảnh và số cân đã lưu trước khi đẩy kho. OCR chưa đọc được số thì chưa lưu phiếu.
+
+Đẩy Supabase, chọn các dòng cùng loại rồi **Nhập kho** như bình thường.
+Loại kho tự chọn **Kho hàng hỏng**. Đẩy riêng hàng hỏng và thành phẩm.
+Mỗi lần cân có mã riêng, nên có thể cân NKM/NC/RM nhiều lần.
+
+Nếu chưa nhận xác nhận lưu, bấm **Thử lưu lại đúng ảnh** để dùng lại đúng lần cân.
+Muốn đổi ảnh thì bấm **Bỏ ảnh chưa lưu**. Không đổi loại khi ảnh đang chờ lưu.
+Luồng này lấy số từ một ảnh chụp thủ công; không xác nhận cân đã ổn định.
 
 ## Nâng cấp máy đang dùng rc80/rc82
 

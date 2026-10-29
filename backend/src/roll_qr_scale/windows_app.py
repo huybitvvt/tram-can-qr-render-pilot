@@ -21,7 +21,7 @@ from roll_qr_scale.test_ui import build_parser, create_server
 
 
 APP_NAME = "TramCanQR"
-APP_VERSION = "0.2.0-rc85"
+APP_VERSION = "0.2.0-rc86"
 CONFIG_NAME = "config.env"
 PADDLE_MODEL_NAME = "PP-OCRv6_medium_rec"
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

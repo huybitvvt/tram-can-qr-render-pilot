@@ -70,6 +70,7 @@ from .quality import FrameQuality, assess_frame_quality
 from .qr_reader import QRReader
 from .scale import WeightReading
 from .weight_limits import validate_production_weights
+from .damaged_goods import DAMAGED_KINDS, DAMAGED_WAREHOUSE, damaged_kind
 from .warehouse import (
     append_nhap_kho_summary_row,
     check_nhap_kho_codes,
@@ -1456,6 +1457,12 @@ def _local_measurement_items(
                 }
             ),
         }
+        category = damaged_kind(payload)
+        if category:
+            payload.update(damaged_kind=category, warehouse=DAMAGED_WAREHOUSE,
+                           core_weight=None, tare_weight=None, net_weight=product_weight,
+                           core_image_url=None, has_core_image=False,
+                           product_image_url=core_url, has_product_image=bool(core_url))
         items.append(payload)
         if len(items) >= limit:
             break
@@ -3552,6 +3559,8 @@ class StationUIService:
                     "qr_code": item.get("qr_code"),
                     "ma_sp": product_code_from_qr(str(item.get("qr_code") or "")),
                     "captured_at": item.get("captured_at"),
+                    "damaged_kind": damaged_kind(item),
+                    "warehouse": DAMAGED_WAREHOUSE if damaged_kind(item) else "",
                 }
                 for item in preview
             ],
@@ -5276,11 +5285,21 @@ class StationUIService:
         camera_id: str | None = None,
         machine: str = "",
         frame_sha256: str | None = None,
+        damaged_category: str = "",
+        weight_stable: bool = True,
     ) -> dict[str, object]:
+        if damaged_category and (
+            damaged_category not in DAMAGED_KINDS or not event_id
+            or qr_code != f"{damaged_category}_HH_{event_id}"
+            or product_weight is None or weight != 0
+        ):
+            raise ValueError("Phiếu hàng hỏng không hợp lệ")
         if (
             frame is None or frame.size == 0
-            or product_frame is None or product_frame.size == 0
-            or _raw_tag(weight_raw, "CORE_IMAGE_MISSING") == "1"
+            or (not damaged_category and (
+                product_frame is None or product_frame.size == 0
+                or _raw_tag(weight_raw, "CORE_IMAGE_MISSING") == "1"
+            ))
         ):
             raise ValueError("Mỗi cuộn cần đủ ảnh lõi và ảnh sản phẩm mới được lưu phiếu cân")
         qr_code = qr_code.strip()
@@ -5436,7 +5455,7 @@ class StationUIService:
                     weight=weight,
                     vision_confirmed=vision_confirmed,
                 ),
-                weight_stable=True,
+                weight_stable=weight_stable,
                 event_id=event_id,
                 captured_at=captured_at,
                 gateway_id=self.gateway_id if (bound_capture or event_id) else "",
@@ -5479,6 +5498,40 @@ class StationUIService:
             "sync_error": current.sync_error,
             "pending_count": self.store.pending_count(),
         }
+
+    def capture_damaged(self, frame: np.ndarray, payload: dict) -> dict:
+        category = str(payload.get("damaged_kind") or "").strip()
+        if category not in DAMAGED_KINDS:
+            raise ValueError("Loại hàng hỏng phải là NKM, NC hoặc RM")
+        event = str(payload.get("event_id") or "")
+        if uuid.UUID(event).version != 4:
+            raise ValueError("event_id hàng hỏng không hợp lệ")
+        station, camera = str(payload.get("station_id") or ""), str(payload.get("camera_id") or "")
+        self.validate_station_source(station, camera, str(payload.get("machine") or ""), require_machine=True)
+        if self.local_live is None:
+            raise ValueError("Cân hàng hỏng cần OCR local")
+        if payload.get("unit", "kg") != "kg":
+            raise ValueError("Cân hàng hỏng dùng đơn vị kg")
+        token = str(payload.get("live_token") or "")
+        self.local_live.claim(token, station=station, camera=camera,
+                              source=str(payload.get("source") or ""),
+                              event=event, kind="product", round_index=0)
+        reading = self.local_live.resolve(token, frame, station=station, camera=camera,
+                                          event=event, kind="product", round_index=0)
+        # Put routing/identity first so the existing 1000-character metadata cap
+        # cannot truncate the warehouse or category. Zero is the deduction for
+        # this workflow; it is never represented as a photographed core reading.
+        raw = (f"DAMAGED_KIND={category}; WAREHOUSE={DAMAGED_WAREHOUSE}; CORE_NOT_REQUIRED=1; "
+               f"BI_WEIGHT=0; ERROR_STATUS=ok; PRODUCT_WEIGHT={reading['weight']:g}; "
+               + _merge_source_tags("", {**payload, "bi_weight": 0})
+               + "; " + str(reading.get("weight_raw") or ""))
+        result = self.capture(f"{category}_HH_{event}", 0, "kg", frame, True, raw,
+                              product_weight=reading["weight"], event_id=event,
+                              station_id=station, camera_id=camera,
+                              machine=str(payload.get("machine") or ""),
+                              damaged_category=category, weight_stable=bool(reading.get("stable")))
+        return {**result, "local_saved": True, "damaged_kind": category,
+                "warehouse": DAMAGED_WAREHOUSE, "product_weight": reading["weight"]}
 
     def capture_inventory(
         self,
@@ -7802,6 +7855,8 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             roi=str(payload.get('roi') or 'auto'), fixed_two=payload.get('fixed_two', True) is True)
                     elif self.path == '/api/local/capture':
                         result = service.capture_local_weight(decode_image(str(payload.get('image', ''))), payload)
+                    elif self.path == '/api/local/damaged-capture':
+                        result = service.capture_damaged(decode_image(str(payload.get('image', ''))), payload)
                     elif self.path == '/api/local/claim':
                         event = str(payload.get('event_id', ''))
                         uuid.UUID(event)

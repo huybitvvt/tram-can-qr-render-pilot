@@ -22,7 +22,7 @@ def main():
     executable = CArchiveReader(str(package/'TramCanQR.exe'))
     archive = executable.open_embedded_archive('PYZ.pyz')
     for prefix, names in [('roll_qr_scale', ['test_ui','storage','station_session','sync','api_client',
-        'warehouse','local_live','local_camera','local_camera_manager']),
+        'warehouse','damaged_goods','local_live','local_camera','local_camera_manager']),
         ('tramcan_rapidocr', ['engine','decision','parsing','regions'])]:
         for name in names:
             source = root/'backend'/'src'/prefix/(name+'.py')
@@ -38,13 +38,25 @@ def main():
         assert (root/relative).read_bytes().replace(b'\r\n',b'\n')==old.replace(b'\r\n',b'\n'),name
     warehouse_path = 'backend/src/roll_qr_scale/warehouse.py'
     old_warehouse = subprocess.check_output(['git','show',f'v0.2.0-rc80:{warehouse_path}'],cwd=root)
-    def warehouse_core(source):
+    def warehouse_core(source, *, damaged=False):
         module = ast.parse(source)
+        routing = ast.dump(ast.parse('kho = warehouse_for_items(preview, kho)').body[0], include_attributes=False)
+        found = 0
+        for node in module.body:
+            if isinstance(node, ast.FunctionDef) and node.name == 'confirm_nhap_kho':
+                kept = []
+                for statement in node.body:
+                    if ast.dump(statement, include_attributes=False) == routing:
+                        found += 1
+                    else:
+                        kept.append(statement)
+                node.body = kept
+        assert found == int(damaged), 'Only the reviewed damaged-goods routing may differ'
         module.body = [node for node in module.body
             if not (isinstance(node, ast.FunctionDef) and node.name in {'_push_time_text','_summary_csv_text'})
-            and not (isinstance(node, ast.ImportFrom) and node.module == 'datetime')]
+            and not (isinstance(node, ast.ImportFrom) and node.module in {'datetime', 'damaged_goods'})]
         return ast.dump(module, include_attributes=False)
-    assert warehouse_core(old_warehouse) == warehouse_core((root/warehouse_path).read_bytes())
+    assert warehouse_core(old_warehouse) == warehouse_core((root/warehouse_path).read_bytes(), damaged=True)
     info = json.loads((root/'backend/src/tramcan_rapidocr/model_sources.json').read_text())['models']
     for key in ('det-small','rec-small'):
         model = package/'_internal/assets/models/rapidocr'/info[key]['file']
@@ -61,7 +73,7 @@ def main():
     assert digest(handoff/'TramCanQR-Setup.exe')==digest(handoff/f'TramCanQR-Setup-{APP_VERSION}.exe')
     assert (handoff/'CAP-NHAT-BAN-MOI.cmd').read_bytes()==(root/'packaging/CAP-NHAT-BAN-MOI.cmd').read_bytes()
     print(f'PASS {APP_VERSION}: frozen modules/frontend match source; trial model SHA matches; '
-          'rc80 storage/sync/schema and warehouse write path unchanged; warehouse export time added; '
+          'rc80 storage/sync/schema unchanged; warehouse differs only by reviewed damaged routing and export time; '
           'Gemini SDK absent; no private config/DB; installer hashes match')
 
 
