@@ -182,7 +182,7 @@ showPostCaptureSource=function(session,next){if(localEnabled()&&session._localSn
 async function localTick(){
  try{
   if(!localEnabled())return;
-  localSetup();const session=current();if(!session)return;
+  localSetup();const session=current();if(!session)return;if(typeof workflowMode!=='undefined'&&workflowMode==='counter')return;
   if(!Object.hasOwn(session,'ledRoi'))session.ledRoi=session.configuredRoi?Object.values(session.configuredRoi):null;
   localRender(session);
   if(localOcrState.busy||session._localSnapshot||!session.stream||session._selectingLed||session.video.readyState<2||session.video.paused||panelMode||document.hidden)return;

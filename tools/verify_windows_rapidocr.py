@@ -22,7 +22,7 @@ def main():
     executable = CArchiveReader(str(package/'TramCanQR.exe'))
     archive = executable.open_embedded_archive('PYZ.pyz')
     for prefix, names in [('roll_qr_scale', ['test_ui','storage','station_session','sync','api_client',
-        'warehouse','damaged_goods','local_live','local_camera','local_camera_manager']),
+        'warehouse','damaged_goods','roll_counter','local_live','local_camera','local_camera_manager']),
         ('tramcan_rapidocr', ['engine','decision','parsing','regions'])]:
         for name in names:
             source = root/'backend'/'src'/prefix/(name+'.py')
@@ -30,7 +30,7 @@ def main():
             assert normalized(actual)==normalized(compile(source.read_bytes(), str(source), 'exec', dont_inherit=True)),name
     entry = root/'backend/src/roll_qr_scale/windows_app.py'
     assert normalized(marshal.loads(executable.extract('windows_app')))==normalized(compile(entry.read_bytes(),str(entry),'exec',dont_inherit=True))
-    for name in ('index.html','local-ocr.js'):
+    for name in ('index.html','local-ocr.js','roll-counter.js'):
         assert (package/'_internal/assets/frontend'/name).read_bytes()==(root/'frontend'/name).read_bytes(),name
     for name in ('storage','station_session','sync','api_client'):
         relative = f'backend/src/roll_qr_scale/{name}.py'
@@ -61,6 +61,9 @@ def main():
     for key in ('det-small','rec-small'):
         model = package/'_internal/assets/models/rapidocr'/info[key]['file']
         assert digest(model)==info[key]['sha256'],model
+    counter_manifest = json.loads((root/'backend/src/roll_qr_scale/counter_model.json').read_text())
+    assert digest(package/'_internal/assets/models/roll-counter'/counter_manifest['file']) == counter_manifest['sha256']
+    assert json.loads((package/'_internal/roll_qr_scale/counter_model.json').read_text()) == counter_manifest
     forbidden = {'.env','.env.local','config.env','measurements.db','.active-bindings.json','telegram-token.txt'}
     assert not [p for p in package.rglob('*') if p.name in forbidden]
     assert not [name for name in archive.toc if name.startswith(('google.genai','google.generativeai','torch','paddleocr','ultralytics'))]
@@ -74,7 +77,7 @@ def main():
     assert (handoff/'CAP-NHAT-BAN-MOI.cmd').read_bytes()==(root/'packaging/CAP-NHAT-BAN-MOI.cmd').read_bytes()
     print(f'PASS {APP_VERSION}: frozen modules/frontend match source; trial model SHA matches; '
           'rc80 storage/sync/schema unchanged; warehouse differs only by reviewed damaged routing and export time; '
-          'Gemini SDK absent; no private config/DB; installer hashes match')
+          'counter model SHA matches; Gemini SDK absent; no private config/DB; installer hashes match')
 
 
 if __name__=='__main__':main()

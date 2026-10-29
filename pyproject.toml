@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roll-qr-scale"
-version = "0.2.0rc86"
+version = "0.2.0rc87"
 description = "Capture a roll QR code and bind it to a scale reading."
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,9 @@ dependencies = [
     "pydantic==2.13.4",
     "pyserial==3.5",
     "zxing-cpp==3.1.1",
+    "supervision==0.23.0",
+    "scipy==1.16.0",
+    "matplotlib==3.10.3",
 ]
 
 [project.optional-dependencies]
@@ -45,4 +48,5 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.setuptools.package-data]
+roll_qr_scale = ["counter_model.json"]
 tramcan_rapidocr = ["model_sources.json"]

@@ -2712,12 +2712,15 @@ class StationUIService:
         self._ocr_preload_error: str | None = None
         self.local_live = None
         self.local_cameras = None
+        self.roll_counter = None
         if weight_engine == 'rapidocr':
             from .local_live import LocalLiveReader
             from .local_camera_manager import LocalCameraManager
             model_root = Path(os.environ.get('ROLL_SCALE_RAPIDOCR_MODELS', str(_project_root()/'models'/'rapidocr')))
             self.local_live = LocalLiveReader(model_root)
             self.local_cameras = LocalCameraManager()
+            from .roll_counter import RollCounterManager
+            self.roll_counter = RollCounterManager(Path(store.capture_dir).parent/'roll-counter')
         self._recent: dict[str, float] = {}
         self._lock = threading.Lock()
         self._cancelled_capture_photos: dict[str, None] = {}
@@ -2765,6 +2768,8 @@ class StationUIService:
             self._ocr_preload_error = str(exc)
 
     def close(self) -> None:
+        if self.roll_counter is not None:
+            self.roll_counter.close()
         if self.local_cameras is not None:
             self.local_cameras.close()
         if self.auto_sync is not None:
@@ -6510,6 +6515,24 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 self.send_bytes(200, 'text/javascript; charset=utf-8',
                     _frontend_index_path().with_name('local-ocr.js').read_bytes())
                 return
+            if parsed.path == '/roll-counter.js':
+                self.send_bytes(200, 'text/javascript; charset=utf-8',
+                                _frontend_index_path().with_name('roll-counter.js').read_bytes())
+                return
+            if parsed.path.startswith('/api/counter/'):
+                try:
+                    if service.roll_counter is None:
+                        raise ValueError('Bộ đếm thử chỉ có trong bản Windows OCR local')
+                    if parsed.path == '/api/counter/history':
+                        self.send_json(200, {'ok': True, 'items': service.roll_counter.history()})
+                    elif parsed.path == '/api/counter/export':
+                        query = urllib.parse.parse_qs(parsed.query)
+                        self.send_bytes(200, 'text/csv; charset=utf-8', service.roll_counter.export(query.get('session_id', [''])[0]))
+                    else:
+                        self.send_json(404, {'ok': False, 'error': 'not_found'})
+                except (ValueError, OSError) as exc:
+                    self.send_json(422, {'ok': False, 'error': 'counter_error', 'message': str(exc)})
+                return
             if parsed.path == "/api/status":
                 identity_status = service.status()
                 self.send_json(
@@ -7834,6 +7857,26 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                             ),
                         },
                     )
+                    return
+                if self.path.startswith('/api/counter/'):
+                    if service.roll_counter is None:
+                        raise ValueError('Bộ đếm thử chỉ có trong bản Windows OCR local')
+                    station, camera = str(payload.get('station_id') or ''), str(payload.get('camera_id') or '')
+                    service.validate_station_source(station, camera)
+                    action = self.path.removeprefix('/api/counter/')
+                    if action == 'start':
+                        result = service.roll_counter.start(payload)
+                    elif action == 'frame':
+                        result = service.roll_counter.frame(decode_image(str(payload.get('image') or '')), payload)
+                    elif action == 'detect':
+                        result = service.roll_counter.detect(decode_image(str(payload.get('image') or '')), payload)
+                    elif action == 'stop':
+                        result = service.roll_counter.stop(payload)
+                    elif action == 'status':
+                        result = service.roll_counter.status(payload)
+                    else:
+                        raise ValueError('Lệnh bộ đếm không hợp lệ')
+                    self.send_json(200, result)
                     return
                 if self.path.startswith('/api/local/'):
                     if service.local_live is None:

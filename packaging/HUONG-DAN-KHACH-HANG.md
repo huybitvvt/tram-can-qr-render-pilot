@@ -1,4 +1,32 @@
-# Trạm Cân QR — rc86 cân hàng lỗi hỏng
+# Trạm Cân QR — rc87 cân hàng hỏng và đếm cuộn thử
+
+## Đếm cuộn ra máy — bản thử
+
+1. Mở mục **Đếm cuộn (thử)**. Chọn **Dùng camera hiện tại** hoặc chọn video
+   MP4/WebM để thử. Video được xử lý lần lượt theo thời gian nguồn, không tua vòng.
+2. Chọn **Chuyển động · camera cố định** để thử cửa ra máy; giữ camera cố định
+   và để vùng ra máy trống khoảng 2 giây đầu cho học nền.
+3. Bấm **Kéo chọn vùng ra máy** trên hình; chỉ bao vùng cuộn đi qua. Có thể
+   chỉnh bốn tọa độ bằng số phần trăm. Chọn hướng ra và vị trí vạch nằm trong vùng.
+4. Bấm **Bắt đầu lượt mới**. Chỉ tăng số khi một vật đã theo dõi đi qua vạch
+   đúng hướng; cùng ID không được cộng lại khi đi lui rồi đi ra.
+5. **Tạm dừng / Tiếp tục** giữ số đã ghi. **Dừng và lưu kết quả** kết thúc lượt;
+   vào lịch sử bên dưới để **Tải CSV**. Kết quả và ảnh nhỏ bằng chứng lưu riêng
+   trên máy, không tạo phiếu cân hoặc tự đẩy kho.
+
+**RF-DETR Nano · thử nghiệm** được đóng gói sẵn, chạy CPU/offline, không cần
+API key hoặc tải model tại xưởng. Đây là model COCO tổng quát, chưa huấn luyện
+riêng cho cuộn của xưởng: có thể bắt nhầm cân/đồ vật hoặc bỏ sót cuộn.
+**Thử ảnh nhận diện** chỉ vẽ vùng vật thể tìm được; số qua vạch của ảnh tĩnh là 0.
+
+Camera chuyển động, người che khuất, cuộn dính nhau hoặc tốc độ quá nhanh đều
+có thể gây đếm sai. Chọn vùng chỉ có cuộn đi ra, đối chiếu số tay/video thực tế.
+Nguồn gián đoạn không được tự bù số. Đếm ngược hướng không trừ tổng đã ghi.
+Sau khi dừng, một lượt mới có bộ theo dõi mới. Chưa dùng số thử để tự chốt kho.
+
+Camera/video đổi nguồn, tua lùi hoặc đổi độ phân giải phải mở lượt mới.
+Không mở hai ứng dụng cùng chiếm một camera USB.
+Kết quả nằm trong thư mục dữ liệu ứng dụng `data\roll-counter`, tách khỏi DB cân.
 
 ## Cân hàng lỗi hỏng
 

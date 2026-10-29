@@ -1,6 +1,7 @@
 .venv/
 .local/
 models/rapidocr/
+models/roll-counter/
 node_modules/
 .test-tmp/
 build/

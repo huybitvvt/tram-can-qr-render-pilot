@@ -11,6 +11,9 @@ datas = [
     (str(project_root / "data" / "viet_nhat_ipt_logo.jpg"), "assets/data"),
     (str(project_root / "frontend" / "index.html"), "assets/frontend"),
     (str(project_root / "frontend" / "local-ocr.js"), "assets/frontend"),
+    (str(project_root / "frontend" / "roll-counter.js"), "assets/frontend"),
+    (str(project_root / "backend/src/roll_qr_scale/counter_model.json"), "roll_qr_scale"),
+    (str(project_root / "models/roll-counter/rfdetr-nano-coco.onnx"), "assets/models/roll-counter"),
     (str(project_root / "frontend" / "fonts"), "assets/frontend/fonts"),
 ]
 binaries = []
@@ -23,6 +26,7 @@ for package in ("zxingcpp",):
 
 datas += collect_data_files('rapidocr') + collect_data_files('tramcan_rapidocr')
 datas += copy_metadata('rapidocr') + copy_metadata('onnxruntime')
+datas += copy_metadata('supervision')
 hiddenimports += collect_submodules('rapidocr')
 for name in ('PP-OCRv6_det_small.onnx', 'PP-OCRv6_rec_small.onnx', 'manifest-small.json'):
     datas.append((str(project_root/'models'/'rapidocr'/name), 'assets/models/rapidocr'))
@@ -30,7 +34,9 @@ datas.append((str(project_root/'licenses'), 'licenses'))
 for name in ['rapidocr','onnxruntime','numpy','opencv-python-headless','Pillow','omegaconf',
              'pyclipper','shapely','PyYAML','requests','tqdm','six','colorlog','colorama',
              'certifi','charset-normalizer','idna','urllib3','protobuf','flatbuffers',
-             'packaging','cryptography','cffi','pycparser','pyserial','zxing-cpp']:
+             'packaging','cryptography','cffi','pycparser','pyserial','zxing-cpp',
+             'supervision','scipy','matplotlib','contourpy','cycler','fonttools','kiwisolver',
+             'pyparsing','python-dateutil','defusedxml']:
     dist = distribution(name)
     for entry in dist.files or []:
         path = Path(dist.locate_file(entry))
@@ -46,7 +52,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    hooksconfig={},
+    hooksconfig={'matplotlib': {'backends': ['Agg']}},
     runtime_hooks=[],
     excludes=[
         "easyocr",
@@ -63,8 +69,6 @@ a = Analysis(
         "openvino",
         "tensorrt",
         "pytest",
-        "matplotlib",
-        "scipy",
         "matplotlib.tests",
         "numpy.tests",
     ],

@@ -89,12 +89,17 @@ def main():
         rc84_updater = base / 'rc84.cmd'
         rc84_updater.write_bytes(subprocess.check_output([
             'git', 'show', 'v0.2.0-rc84:packaging/CAP-NHAT-BAN-MOI.cmd'], cwd=project))
+        rc85_updater = base / 'rc85.cmd'
+        rc85_updater.write_bytes(subprocess.check_output([
+            'git', 'show', 'v0.2.0-rc85:packaging/CAP-NHAT-BAN-MOI.cmd'], cwd=project))
         for label, updater, installed in (("rc74", legacy, "0.2.0-rc74"),
                 ("rc79", local_updater, "0.2.0-rc79"),
                 ('rc80', rc80_updater, '0.2.0-rc80'),
                 ('rc82', rc82_updater, '0.2.0-rc82'),
                 ('rc83', rc83_updater, '0.2.0-rc83'),
                 ('rc84', rc84_updater, '0.2.0-rc84'),
+                ('rc85', rc85_updater, '0.2.0-rc85'),
+                ('rc86', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc86'),
                 ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd", "0.2.0-rc79")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"
