@@ -100,6 +100,7 @@ def main():
                 ('rc84', rc84_updater, '0.2.0-rc84'),
                 ('rc85', rc85_updater, '0.2.0-rc85'),
                 ('rc86', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc86'),
+                ('rc87', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc87'),
                 ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd", "0.2.0-rc79")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"

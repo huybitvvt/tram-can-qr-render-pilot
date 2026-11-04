@@ -54,9 +54,30 @@ def red_display_regions(frame: np.ndarray, *, max_regions: int = 3) -> list[Regi
 
 
 def recognition_variants(crop: np.ndarray) -> list[tuple[str,np.ndarray]]:
-    """Use original pixels and a contrast-only view; do not reconstruct digits."""
+    """Read the lit row at a consistent scale without reconstructing digits.
+
+    Dark panel margins change the recognizer's digit scale, particularly for
+    a narrow leading 7. CLAHE on the green channel can also amplify its halo
+    into a false 2. Keep the camera pixels and use ordinary grayscale as the
+    second view instead of enhancing individual segments.
+    """
     if crop.size == 0:
         return []
-    green = cv2.createCLAHE(clipLimit=2,tileGridSize=(4,4)).apply(crop[:,:,1])
-    gray = cv2.cvtColor(green,cv2.COLOR_GRAY2BGR)
-    return [('original',crop),('green-clahe',gray)]
+    blue,green,red = cv2.split(crop)
+    threshold,_ = cv2.threshold(green,0,255,cv2.THRESH_BINARY|cv2.THRESH_OTSU)
+    # Locate bright red pixels, including decimal points and minus signs.
+    # Signed arithmetic prevents uint8 wraparound from admitting blue pixels.
+    lit = ((green >= max(1,threshold))
+           & (red.astype(np.int16)-green > 10)
+           & (red.astype(np.int16)-blue > 15))
+    ys,xs = np.nonzero(lit)
+    if len(xs):
+        x1,y1,x2,y2 = int(xs.min()),int(ys.min()),int(xs.max())+1,int(ys.max())+1
+        padx,pady = max(1,round((x2-x1)*.10)),max(1,round((y2-y1)*.10))
+        row = crop[max(0,y1-pady):min(crop.shape[0],y2+pady),
+                   max(0,x1-padx):min(crop.shape[1],x2+padx)]
+        name = 'red-row'
+    else:
+        row,name = crop,'original'
+    gray = cv2.cvtColor(cv2.cvtColor(row,cv2.COLOR_BGR2GRAY),cv2.COLOR_GRAY2BGR)
+    return [(name,row),('gray',gray)]

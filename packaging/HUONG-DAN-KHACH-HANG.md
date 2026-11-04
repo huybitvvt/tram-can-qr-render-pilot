@@ -1,4 +1,10 @@
-# Trạm Cân QR — rc87 cân hàng hỏng và đếm cuộn thử
+# Trạm Cân QR — rc88 cải thiện OCR số đầu 7
+
+rc88 cắt sát vùng LED và thay bước tăng tương phản để giảm nhầm `7` thành `2`.
+Trên 31 mẫu từ video quay màn hình, số lần đọc sai `2.08` giảm từ 4 xuống 0;
+vẫn còn 4 mẫu không đọc được. Chưa xác nhận hết lỗi trên luồng camera xưởng.
+Đối chiếu số trên cân trước khi lưu. Các chức năng cân hàng hỏng và đếm cuộn
+thử của rc87 được giữ nguyên.
 
 ## Đếm cuộn ra máy — bản thử
 

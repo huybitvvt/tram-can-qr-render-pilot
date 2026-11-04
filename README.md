@@ -1,13 +1,14 @@
-# Trạm Cân QR — OCR local rc82
+# Trạm Cân QR — OCR local rc88
 
-Bản Windows **0.2.0-rc82** giữ chức năng và dữ liệu rc80, chuyển nhận diện cân
-sang **RapidOCR + PP-OCRv6 Small**, chạy offline trên CPU. Không gọi Gemini,
-Codex hay Antigravity để đọc cân trong bộ cài Windows này.
+Bản Windows **0.2.0-rc88** cải thiện lỗi OCR nhầm số đầu `7` thành `2`,
+giữ các chức năng rc87. Nhận diện cân dùng **RapidOCR + PP-OCRv6 Small**,
+chạy offline trên CPU. Không gọi Gemini, Codex hay Antigravity để đọc cân
+trong bộ cài Windows này.
 
 - [Tải bộ cài TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
 - [Tải file cập nhật CAP-NHAT-BAN-MOI.cmd](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 - [Hướng dẫn máy khách](packaging/HUONG-DAN-KHACH-HANG.md)
-- [Ghi chú rc82](docs/release-notes-0.2.0-rc82.md)
+- [Ghi chú rc88 và giới hạn kiểm chứng](docs/release-notes-0.2.0-rc88.md)
 
 Camera đọc liên tục và hiện số; **Space lấy ngay số ổn định vào ô cân được chọn**,
 giữ ảnh đúng khung hình đã đọc. Không chờ chụp rồi gọi OCR lại.
