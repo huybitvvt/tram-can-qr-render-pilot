@@ -32,10 +32,31 @@ def main():
     assert normalized(marshal.loads(executable.extract('windows_app')))==normalized(compile(entry.read_bytes(),str(entry),'exec',dont_inherit=True))
     for name in ('index.html','local-ocr.js','roll-counter.js'):
         assert (package/'_internal/assets/frontend'/name).read_bytes()==(root/'frontend'/name).read_bytes(),name
-    for name in ('storage','station_session','sync','api_client'):
+    for name in ('station_session','sync'):
         relative = f'backend/src/roll_qr_scale/{name}.py'
         old = subprocess.check_output(['git','show',f'v0.2.0-rc80:{relative}'],cwd=root)
         assert (root/relative).read_bytes().replace(b'\r\n',b'\n')==old.replace(b'\r\n',b'\n'),name
+    # rc89 adds only an outbox requeue helper and an exact cloud event filter.
+    # Keep verifying the remaining rc80 persistence/API implementation verbatim
+    # at the AST level, alongside the frozen-to-current-source check above.
+    for name in ('storage', 'api_client'):
+        relative = f'backend/src/roll_qr_scale/{name}.py'
+        old = ast.parse(subprocess.check_output(['git', 'show', f'v0.2.0-rc80:{relative}'], cwd=root))
+        current = ast.parse((root/relative).read_bytes())
+        if name == 'storage':
+            cls = next(node for node in current.body if isinstance(node, ast.ClassDef) and node.name == 'MeasurementStore')
+            assert sum(isinstance(node, ast.FunctionDef) and node.name == 'requeue_measurements' for node in cls.body) == 1
+            cls.body = [node for node in cls.body if not (isinstance(node, ast.FunctionDef) and node.name == 'requeue_measurements')]
+        else:
+            func = next(node for node in current.body if isinstance(node, ast.FunctionDef) and node.name == 'fetch_supabase_table')
+            index = next(i for i, arg in enumerate(func.args.kwonlyargs) if arg.arg == 'event_id')
+            func.args.kwonlyargs.pop(index)
+            func.args.kw_defaults.pop(index)
+            added = [node for node in func.body if isinstance(node, ast.If) and isinstance(node.test, ast.Name) and node.test.id == 'event_id']
+            assert len(added) == 1
+            assert ast.dump(added[0], include_attributes=False) == ast.dump(ast.parse('if event_id:\n    params["event_id"] = f"eq.{event_id}"').body[0], include_attributes=False)
+            func.body.remove(added[0])
+        assert ast.dump(current, include_attributes=False) == ast.dump(old, include_attributes=False), name
     warehouse_path = 'backend/src/roll_qr_scale/warehouse.py'
     old_warehouse = subprocess.check_output(['git','show',f'v0.2.0-rc80:{warehouse_path}'],cwd=root)
     def warehouse_core(source, *, damaged=False):
@@ -76,7 +97,7 @@ def main():
     assert digest(handoff/'TramCanQR-Setup.exe')==digest(handoff/f'TramCanQR-Setup-{APP_VERSION}.exe')
     assert (handoff/'CAP-NHAT-BAN-MOI.cmd').read_bytes()==(root/'packaging/CAP-NHAT-BAN-MOI.cmd').read_bytes()
     print(f'PASS {APP_VERSION}: frozen modules/frontend match source; trial model SHA matches; '
-          'rc80 storage/sync/schema unchanged; warehouse differs only by reviewed damaged routing and export time; '
+          'rc80 persistence/API preserved except rc89 requeue helper and event filter; sync/schema unchanged; warehouse differs only by reviewed damaged routing and export time; '
           'counter model SHA matches; Gemini SDK absent; no private config/DB; installer hashes match')
 
 
