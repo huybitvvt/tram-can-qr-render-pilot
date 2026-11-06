@@ -31,6 +31,7 @@ function setup(){
     paintNhapKhoSelectBtn(){},appendNhapKhoStatusCell(){},syncSelectAllNhapKho(){},
     status(){},
   });
+  vm.runInContext(script.slice(script.indexOf('function recordDamagedKind('),script.indexOf('\nfunction damagedWarehouse(')),ctx);
   vm.runInContext('let recordsLoading=false,recordsRequestId=0,productionRowsByEvent={},selectedNhapKhoIds=new Set(),nhapKhoSelectedEventIds=[],productionSelectionFilter="",productionAllSelectedFilter="",recordsSelectionBusy=false;\n'+script.slice(start,end),ctx);
   return {ctx,body,pending,calls};
 }
@@ -45,11 +46,11 @@ test('fresh local row wins over an older list request after save',async()=>{
   pending.fresh.resolve({items:[{event_id:'saved',qr_code:'QR-SAVED',captured_at:'2026-09-22T12:00:00',core_weight:null,product_weight:7.5,unit:'kg'}]});
   await fresh;
   assert.equal(body.children.length,1);
-  assert.equal(body.children[0].cells[2],'QR-SAVED');
-  assert.equal(body.children[0].cells[4],'--');
+  assert.equal(body.children[0].cells[4],'QR-SAVED');
+  assert.equal(body.children[0].cells[6],'--');
   pending.older.resolve({items:[]});
   await old;
-  assert.equal(body.children[0].cells[2],'QR-SAVED');
+  assert.equal(body.children[0].cells[4],'QR-SAVED');
 });
 
 test('refresh keeps selected rows beyond the visible page',async()=>{
@@ -62,6 +63,17 @@ test('refresh keeps selected rows beyond the visible page',async()=>{
   assert.equal(vm.runInContext("productionRowsByEvent.offpage.qr_code",ctx),'SP_204');
 });
 
+test('damaged rows show no core and retain the whole photographed weight as net',async()=>{
+  const {ctx,body,pending}=setup();
+  const loading=ctx.loadRecords();
+  pending.older.resolve({items:[{event_id:'damaged',qr_code:'NKM_HH_1',core_weight:null,
+    product_weight:13.04,weight_raw:'DAMAGED_KIND=NKM; BI_WEIGHT=0',captured_at:'2026-10-29T05:00:00Z'}]});
+  await loading;
+  assert.equal(body.children[0].cells[6],'--');
+  assert.equal(body.children[0].cells[9],'13.04');
+  assert.equal(body.children[0].cells[10],'Hàng hỏng · NKM');
+});
+
 test('refresh never inserts an unsaved photo backup into the saved records table',async()=>{
   const {ctx,body,pending}=setup();
   const loading=ctx.loadRecords();
@@ -71,6 +83,6 @@ test('refresh never inserts an unsaved photo backup into the saved records table
   ]});
   await loading;
   assert.equal(body.children.length,1);
-  assert.equal(body.children[0].cells[2],'QR-SAVED');
+  assert.equal(body.children[0].cells[4],'QR-SAVED');
   assert.equal(vm.runInContext('Boolean(productionRowsByEvent.draft)',ctx),false);
 });

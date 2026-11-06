@@ -1,0 +1,1 @@
+export function SaveButton({ enabled, saving, onSave }: { enabled: boolean; saving: boolean; onSave: () => void }) { return <button className="save-button" type="button" disabled={!enabled || saving} onClick={onSave}>{saving ? 'Saving…' : 'Save measurement'}</button> }

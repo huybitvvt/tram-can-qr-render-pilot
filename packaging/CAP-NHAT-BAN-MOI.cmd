@@ -99,7 +99,7 @@ try {
     }
 
     Write-Host 'Dang cai dat ban moi...'
-    $setup = Start-Process -FilePath $installerPath -ArgumentList '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS' -Wait -PassThru
+    $setup = Start-Process -FilePath $installerPath -ArgumentList '/SP-', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS' -WindowStyle Hidden -Wait -PassThru
     if ($setup.ExitCode -ne 0) { throw "Bo cai tra ma loi $($setup.ExitCode)." }
 
     Write-Host "Da cap nhat len ban $latestVersion. Dang mo Tram Can QR..."
@@ -114,6 +114,10 @@ try {
     exit 1
 } finally {
     if ($temporaryDirectory -and (Test-Path -LiteralPath $temporaryDirectory)) {
-        Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force -ErrorAction SilentlyContinue
+        $resolvedTemporary = [IO.Path]::GetFullPath($temporaryDirectory)
+        $expectedPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\TramCanQR-update-'
+        if ($resolvedTemporary.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 }

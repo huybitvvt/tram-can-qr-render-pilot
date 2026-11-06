@@ -1,0 +1,11 @@
+{
+  "name": "tram-can-qr-tests",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/*.test.cjs"
+  },
+  "devDependencies": {
+    "acorn": "8.15.0",
+    "terser": "5.44.0"
+  }
+}

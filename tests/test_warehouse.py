@@ -176,6 +176,7 @@ def test_nhap_kho_summary_writes_csv_json(tmp_path: Path, monkeypatch) -> None:
     csv_text = Path(saved["csv_path"]).read_text(encoding="utf-8-sig")
     assert "PN-MBB15-20261008-010203" in csv_text
     assert "TỔNG" in csv_text
+    assert "Giờ đẩy" in csv_text and "08:02:03" in csv_text
     rows = load_nhap_kho_summary_rows()
     assert len(rows) == 1
     assert rows[0]["ma_sp"] == "SP01"
@@ -187,3 +188,12 @@ def test_nhap_kho_summary_writes_csv_json(tmp_path: Path, monkeypatch) -> None:
     status = nhap_kho_summary_status()
     assert status["count"] == 0
     assert status["folder"] == str(tmp_path)
+
+
+def test_legacy_summary_without_push_time_does_not_invent_one(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("ROLL_SCALE_NHAP_KHO_EXPORT_DIR", str(tmp_path))
+    result = save_nhap_kho_summary_rows([{
+        "ma_phieu": "PN-OLD", "ngay": "2026-10-08", "so_luong": 1,
+    }])
+    assert result["rows"][0]["saved_at"] == ""
+    assert ",--," in Path(result["csv_path"]).read_text(encoding="utf-8-sig")

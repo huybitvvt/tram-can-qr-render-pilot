@@ -1,0 +1,11 @@
+{
+  "name": "RF-DETR Nano COCO (experimental, not trained for factory rolls)",
+  "file": "rfdetr-nano-coco.onnx",
+  "source": "https://huggingface.co/Deeds67/rfdetr-nano/resolve/59ef71605920ba0f1653133ecc8641064a2b0246/detection/model.onnx",
+  "revision": "59ef71605920ba0f1653133ecc8641064a2b0246",
+  "sha256": "21045851f3906c7d424874363fe933477fda7210bad0d7a69659fb98f8845890",
+  "bytes": 107835234,
+  "license": "Apache-2.0",
+  "input": [1, 3, 384, 384],
+  "outputs": {"dets": [1, 300, 4], "labels": [1, 300, 91]}
+}

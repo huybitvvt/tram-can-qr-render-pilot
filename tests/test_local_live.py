@@ -1,0 +1,321 @@
+from decimal import Decimal
+from pathlib import Path
+import sqlite3
+import uuid
+
+import numpy as np
+import pytest
+
+from tramcan_rapidocr.decision import Reading, Observation
+from roll_qr_scale.local_live import LocalLiveReader
+from roll_qr_scale.test_ui import StationUIService, build_parser, create_server
+from roll_qr_scale.storage import MeasurementStore
+from roll_qr_scale.windows_app import build_rapidocr_argv, backup_before_rapidocr_upgrade
+
+
+class Reader:
+    def __init__(self):
+        self.value = Decimal('6.33')
+        self.calls = []
+        self.fixed_digits = True
+
+    def read(self, image):
+        self.calls.append((image.copy(), self.fixed_digits))
+        return Reading(self.value, 'complete-reading', [Observation('6.33', .99, 'original', (1, 1, 25, 12))], 20)
+
+    read_crop = read
+
+
+def setup_reader():
+    clock = [0.]
+    reader = Reader()
+    live = LocalLiveReader(Path('not-used'), reader=reader, clock=lambda: clock[0])
+    frame = np.zeros((30, 40, 3), np.uint8)
+    return live, reader, frame, clock
+
+
+def preview(live, frame, seq, **kwargs):
+    return live.preview(frame, station='station-01', camera='camera-01', source='source-1', sequence=seq, **kwargs)
+
+
+def stable_frame(live, frame, clock):
+    result = None
+    for i in range(1, 4):
+        clock[0] = i*.4
+        result = preview(live, frame, i)
+        assert result['stable'] == (i == 3)
+    return result
+
+
+def claim(live, token, **kwargs):
+    return live.claim(token, station='station-01', camera='camera-01', source='source-1',
+                      event='event-1', kind='product', round_index=1, **kwargs)
+
+
+def test_space_claim_reuses_exact_frame_without_another_ocr_call():
+    live, reader, frame, clock = setup_reader()
+    result = stable_frame(live, frame, clock)
+    claim(live, result['live_token'])
+    # Replace OCR with a failure: a capture must still resolve the already-read frame.
+    reader.read = lambda _: pytest.fail('Space must never rerun OCR')
+    reused = live.resolve(result['live_token'], frame, station='station-01', camera='camera-01',
+                          event='event-1', kind='product', round_index=1)
+    assert reused['live_reused'] and reused['weight'] == 6.33 and len(reader.calls) == 3
+    with pytest.raises(ValueError, match='khớp'):
+        live.resolve(result['live_token'], frame+1, station='station-01', camera='camera-01',
+                     event='event-1', kind='product', round_index=1)
+
+
+@pytest.mark.parametrize('change', ['age', 'value', 'roi', 'decimal', 'missing'])
+def test_stale_or_reconfigured_live_weight_is_never_claimed(change):
+    live, reader, frame, clock = setup_reader()
+    result = stable_frame(live, frame, clock)
+    if change == 'age':
+        clock[0] += 3
+    else:
+        if change == 'value': reader.value = Decimal('7.00')
+        if change == 'missing': reader.value = None
+        preview(live, frame, 4, **({'roi': '.1,.1,.9,.9'} if change == 'roi' else
+                                  {'fixed_two': False} if change == 'decimal' else {}))
+    with pytest.raises(ValueError): claim(live, result['live_token'])
+
+
+def test_previous_frame_of_same_stable_value_can_be_claimed_while_new_preview_completes():
+    live, reader, frame, clock = setup_reader()
+    result = stable_frame(live, frame, clock)
+    clock[0] += .4
+    preview(live, frame, 4)
+    assert claim(live, result['live_token'])['weight'] == 6.33
+
+
+def test_claim_cannot_be_used_for_another_round_camera_or_station():
+    live, reader, frame, clock = setup_reader()
+    result = stable_frame(live, frame, clock)
+    claim(live, result['live_token'])
+    for field, value in [('station', 'station-02'), ('camera', 'camera-02'),
+                         ('round_index', 2), ('kind', 'core'), ('event', 'event-2')]:
+        args = dict(station='station-01', camera='camera-01', event='event-1', kind='product', round_index=1)
+        args[field] = value
+        with pytest.raises(ValueError): live.resolve(result['live_token'], frame, **args)
+
+
+def test_manual_roi_reads_only_selected_pixels_and_obeys_decimal_switch():
+    live, reader, frame, clock = setup_reader()
+    frame[:] = np.arange(40, dtype=np.uint8)[None, :, None]
+    result = live.read(frame, '.1,.1,.9,.9', False)
+    assert reader.calls[0][0].shape == (24, 32, 3)
+    assert np.array_equal(reader.calls[0][0], frame[3:27, 4:36])
+    assert reader.calls[0][1] is False and result['roi_method'] == 'manual-led'
+
+
+@pytest.mark.parametrize('engine', ['gemini', 'local-yolo', 'local', 'rapidocr'])
+def test_upgrade_uses_old_config_and_data_paths_without_gemini(tmp_path, monkeypatch, engine):
+    for key in list(__import__('os').environ):
+        if key.startswith('ROLL_SCALE_'): monkeypatch.delenv(key)
+    monkeypatch.setenv('ROLL_SCALE_WEIGHT_ENGINE', engine)
+    monkeypatch.setenv('ROLL_SCALE_GEMINI_API_KEY', 'invalid-old-key-never-used')
+    args = build_parser().parse_args(build_rapidocr_argv(tmp_path, tmp_path))
+    assert args.weight_engine == 'rapidocr' and not args.gemini_fallback
+    assert Path(args.db) == tmp_path/'data'/'measurements.db'
+    assert Path(args.captures) == tmp_path/'data'/'captures'
+
+
+def test_upgrade_snapshot_contains_latest_wal_and_does_not_restore_older_data(tmp_path):
+    data = tmp_path/'data';data.mkdir()
+    config = tmp_path/'config.env';config.write_bytes(b'ROLL_SCALE_WEIGHT_ENGINE=gemini\r\n')
+    with sqlite3.connect(data/'measurements.db') as connection:
+        connection.execute('PRAGMA journal_mode=WAL')
+        connection.execute('PRAGMA wal_autocheckpoint=0')
+        connection.execute('CREATE TABLE customer_data (value TEXT)')
+        connection.execute("INSERT INTO customer_data VALUES ('latest-rc80')")
+        connection.commit()
+        backup = backup_before_rapidocr_upgrade(tmp_path, config)
+        with sqlite3.connect(backup/'measurements.db') as snapshot:
+            assert snapshot.execute('SELECT value FROM customer_data').fetchone() == ('latest-rc80',)
+        assert backup_before_rapidocr_upgrade(tmp_path, config) == backup
+        assert connection.execute('SELECT value FROM customer_data').fetchone() == ('latest-rc80',)
+    assert config.read_bytes() == (backup/'config.env').read_bytes()
+
+
+def test_upgrade_does_not_mark_corrupt_database_backed_up(tmp_path):
+    data = tmp_path/'data';data.mkdir()
+    (data/'measurements.db').write_bytes(b'corrupt sqlite')
+    with pytest.raises(sqlite3.DatabaseError):
+        backup_before_rapidocr_upgrade(tmp_path, None)
+    assert not (tmp_path/'backups'/'rapidocr-rc82.json').exists()
+
+
+def test_claimed_product_uses_local_reader_without_gemini_or_ocr_again(tmp_path, monkeypatch):
+    store = MeasurementStore(tmp_path/'existing.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, reader, frame, clock = setup_reader()
+    service.local_live = live
+    monkeypatch.setattr(service, '_decode_qr', lambda image: {'found': True, 'qr_code': 'QR-LIVE', 'decoder': 'zxing'})
+    try:
+        result = stable_frame(live, frame, clock)
+        event = str(uuid.uuid4())
+        live.claim(result['live_token'], station='station-01', camera='camera-01', source='source-1',
+                   event=event, kind='product', round_index=1)
+        monkeypatch.setattr(live, 'read', lambda *a, **k: pytest.fail('Must reuse live result'))
+        analysis = service.analyze(frame, 'auto', 'kg', context_station_id='station-01',
+            context_camera_id='camera-01', live_event_id=event, capture_kind='product',
+            capture_round=1, live_token=result['live_token'])
+        assert analysis['weight'] == 6.33 and analysis['live_reused']
+        assert analysis['qr_code'] == 'QR-LIVE' and not analysis['gemini_used']
+    finally:
+        service.close(); store.close()
+
+
+@pytest.mark.parametrize('interval', [.02, .10, .18, .20, .225, .24, .50])
+def test_fast_identical_readings_reach_stability_without_a_sliding_window_deadlock(interval):
+    live, _, frame, clock = setup_reader()
+    for i in range(1, 40):
+        clock[0] = i*interval
+        result = preview(live, frame, i)
+        expected = i >= 3 and (i-1)*interval >= .45
+        assert result['stable'] is expected
+    assert result['stable']
+
+
+def test_a_new_value_revokes_stability_and_cannot_reuse_an_old_matching_token():
+    live, reader, frame, clock = setup_reader()
+    old = stable_frame(live, frame, clock)
+    reader.value = Decimal('7.00');clock[0] += .2
+    assert not preview(live, frame, 4)['stable']
+    reader.value = Decimal('6.33');clock[0] += .2
+    assert not preview(live, frame, 5)['stable']
+    with pytest.raises(ValueError):
+        claim(live, old['live_token'])
+
+
+def test_local_capture_commits_image_and_weight_even_if_cloud_qr_and_inference_are_unavailable(tmp_path, monkeypatch):
+    from roll_qr_scale.sync import OutboxSyncWorker
+    store = MeasurementStore(tmp_path/'offline.db', tmp_path/'captures')
+    def forbidden(*args, **kwargs): pytest.fail('Critical local capture must not call cloud, QR, or inference')
+    worker = OutboxSyncWorker(store, 'https://offline.invalid/ingest', 'test-token', send=forbidden)
+    service = StationUIService(store, worker, None, None, weight_engine='rapidocr', auto_sync=False)
+    live, reader, frame, clock = setup_reader();service.local_live = live
+    monkeypatch.setattr(service, '_decode_qr', forbidden)
+    monkeypatch.setattr(service.inference, 'run', forbidden)
+    result = stable_frame(live, frame, clock)
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='product', round=1,
+        live_token=result['live_token'], unit='kg', machine='TEST-MACHINE')
+    try:
+        saved = service.capture_local_weight(frame, payload)
+        assert saved['local_saved'] and saved['live_reused'] and saved['weight'] == 6.33
+        assert saved['sync_status'] == 'pending'
+        repeated = service.capture_local_weight(frame, payload)
+        assert repeated['capture_id'] == saved['capture_id']
+        draft = store.get_photo_draft(payload['capture_id'])
+        assert draft.reread_weight == 6.33 and Path(draft.image_path).is_file()
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 1
+        assert len(reader.calls) == 3
+    finally:
+        service.close();store.close()
+    reopened = MeasurementStore(tmp_path/'offline.db', tmp_path/'captures')
+    try:
+        draft = reopened.get_photo_draft(payload['capture_id'])
+        assert draft.reread_weight == 6.33 and Path(draft.image_path).is_file()
+    finally: reopened.close()
+
+
+def test_local_capture_rejects_an_image_that_does_not_match_the_live_result(tmp_path):
+    store = MeasurementStore(tmp_path/'offline.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, _, frame, clock = setup_reader();service.local_live = live
+    result = stable_frame(live, frame, clock)
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='core', round=0,
+        live_token=result['live_token'], machine='TEST-MACHINE')
+    try:
+        with pytest.raises(ValueError, match='khớp'):
+            service.capture_local_weight(frame+1, payload)
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 0
+    finally: service.close();store.close()
+
+
+def test_local_capture_can_retry_a_disk_write_failure_without_another_ocr(tmp_path, monkeypatch):
+    store = MeasurementStore(tmp_path/'retry.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, reader, frame, clock = setup_reader();service.local_live = live
+    result = stable_frame(live, frame, clock)
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='core', round=0,
+        live_token=result['live_token'], machine='TEST-MACHINE')
+    write = store._write_durable_capture
+    def failed(*args): raise OSError('disk unavailable')
+    try:
+        monkeypatch.setattr(store, '_write_durable_capture', failed)
+        with pytest.raises(OSError): service.capture_local_weight(frame, payload)
+        monkeypatch.setattr(store, '_write_durable_capture', write)
+        assert service.capture_local_weight(frame, payload)['local_saved']
+        assert len(reader.calls) == 3
+        assert store.get_photo_draft(payload['capture_id']).reread_weight == 6.33
+    finally: service.close();store.close()
+
+
+def snapshot(live, frame):
+    return live.snapshot(frame, station='station-01', camera='camera-01', source='source-1')
+
+
+def test_manual_snapshot_reads_once_and_can_be_claimed_without_live_stability():
+    live, reader, frame, clock = setup_reader()
+    result = snapshot(live, frame)
+    assert result['manual_capture'] and not result['stable']
+    assert len(reader.calls) == 1
+    clock[0] = 120
+    # A different live reading cannot change the frozen photo or its weight.
+    reader.value = Decimal('13.04')
+    preview(live, frame+1, 1)
+    assert claim(live, result['live_token'])['weight'] == 6.33
+    resolved = live.resolve(result['live_token'], frame, station='station-01', camera='camera-01',
+        event='event-1', kind='product', round_index=1)
+    assert resolved['weight'] == 6.33 and resolved['manual_capture']
+    assert len(reader.calls) == 2
+    with pytest.raises(ValueError, match='khớp'):
+        live.resolve(result['live_token'], frame+1, station='station-01', camera='camera-01',
+            event='event-1', kind='product', round_index=1)
+    with pytest.raises(ValueError, match='ô khác'):
+        live.claim(result['live_token'], station='station-01', camera='camera-01', source='source-1',
+            event='event-1', kind='core', round_index=0)
+
+
+def test_repeated_snapshot_retakes_do_not_fill_the_capture_queue():
+    live, _, frame, _ = setup_reader()
+    for _ in range(150): result = snapshot(live, frame)
+    assert claim(live, result['live_token'])['weight'] == 6.33
+
+
+@pytest.mark.parametrize('change', ['expired', 'missing', 'station', 'camera', 'source'])
+def test_manual_snapshot_rejects_missing_expired_or_mismatched_results(change):
+    live, reader, frame, clock = setup_reader()
+    if change == 'missing': reader.value = None
+    result = snapshot(live, frame)
+    if change == 'expired': clock[0] = 601
+    args = dict(station='station-01', camera='camera-01', source='source-1',
+        event='event-1', kind='product', round_index=1)
+    if change in {'station', 'camera', 'source'}: args[change] = 'other'
+    with pytest.raises(ValueError): live.claim(result['live_token'], **args)
+
+
+def test_manual_snapshot_is_durable_only_after_space_and_retries_without_ocr(tmp_path, monkeypatch):
+    store = MeasurementStore(tmp_path/'snapshot.db', tmp_path/'captures')
+    service = StationUIService(store, None, None, None, weight_engine='rapidocr')
+    live, reader, frame, clock = setup_reader();service.local_live = live
+    payload = dict(station_id='station-01', camera_id='camera-01', source='source-1',
+        event_id=str(uuid.uuid4()), capture_id=str(uuid.uuid4()), kind='product', round=0,
+        machine='TEST-MACHINE')
+    try:
+        result = snapshot(live, frame);payload['live_token'] = result['live_token']
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 0
+        clock[0] = 60
+        monkeypatch.setattr(live, 'read', lambda *a, **k: pytest.fail('Must reuse snapshot OCR'))
+        monkeypatch.setattr(service, '_decode_qr', lambda *a, **k: pytest.fail('Must not wait for QR'))
+        receipt = service.capture_local_weight(frame, payload)
+        assert receipt['local_saved'] and receipt['manual_capture'] and not receipt.get('stable', False)
+        assert service.capture_local_weight(frame, payload)['local_saved']
+        assert store.connection.execute('SELECT COUNT(*) FROM photo_drafts').fetchone()[0] == 1
+        assert store.get_photo_draft(payload['capture_id']).reread_weight == 6.33
+        assert len(reader.calls) == 1
+    finally: service.close();store.close()

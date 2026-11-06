@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import os
+import base64
+import json
 import logging
+import multiprocessing
 import re
+import shutil
+import sqlite3
 import sys
+import tempfile
 import threading
 import traceback
 import urllib.error
@@ -15,6 +21,7 @@ from roll_qr_scale.test_ui import build_parser, create_server
 
 
 APP_NAME = "TramCanQR"
+APP_VERSION = "0.2.0-rc88"
 CONFIG_NAME = "config.env"
 PADDLE_MODEL_NAME = "PP-OCRv6_medium_rec"
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -196,16 +203,90 @@ def open_existing_server(port: int) -> bool:
     """Reopen the existing local UI instead of starting a second gateway."""
     url = f"http://127.0.0.1:{port}/api/status"
     try:
-        with urllib.request.urlopen(url, timeout=0.8) as response:
+        request = urllib.request.Request(url)
+        username = os.environ.get("ROLL_SCALE_WEB_USERNAME", "")
+        password = os.environ.get("ROLL_SCALE_WEB_PASSWORD", "")
+        if username and password:
+            credentials = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+            request.add_header("Authorization", "Basic " + credentials)
+        with urllib.request.urlopen(request, timeout=0.8) as response:
             if response.status != 200:
                 return False
-            payload = response.read(512).decode("utf-8", errors="ignore")
-            if '"ok"' not in payload:
+            payload = json.load(response)
+            if not payload.get("ok"):
                 return False
     except (OSError, urllib.error.URLError, ValueError):
         return False
-    webbrowser.open(f"http://127.0.0.1:{port}")
+    if payload.get("weight_engine") != "rapidocr":
+        raise RuntimeError("Bản cân cũ vẫn đang chạy. Hãy lưu lượt cân, thoát TramCanQR.exe rồi mở lại bản OCR local.")
+    if os.environ.get("ROLL_SCALE_OPEN_BROWSER", "1") != "0":
+        webbrowser.open(f"http://127.0.0.1:{port}")
     return True
+
+
+def build_gemini_argv(root: Path, assets: Path) -> list[str]:
+    """Restore rc74 recognition without rewriting the customer's configuration."""
+    return [*build_runtime_argv(root, assets), "--weight-engine", "gemini"]
+
+
+def build_rapidocr_argv(root: Path, assets: Path) -> list[str]:
+    # Keep customer config bytes intact; override old Gemini/YOLO settings at runtime.
+    return [*build_runtime_argv(root, assets), '--weight-engine', 'rapidocr',
+            '--no-gemini-fallback', '--ocr-min-confidence', '0.85', '--weight-burst-frames', '1']
+
+
+def backup_before_rapidocr_upgrade(root: Path, config_path: Path | None) -> Path:
+    marker = root/'backups'/'rapidocr-rc82.json'
+    if marker.is_file():
+        return Path(json.loads(marker.read_text(encoding='utf-8'))['directory'])
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    backup = Path(tempfile.mkdtemp(prefix='before-rapidocr-rc82-', dir=marker.parent))
+    database = root/'data'/'measurements.db'
+    if database.is_file():
+        with sqlite3.connect(database.as_uri()+'?mode=ro', uri=True) as source:
+            with sqlite3.connect(backup/'measurements.db') as destination:
+                source.backup(destination)
+                if destination.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                    raise RuntimeError('Không kiểm chứng được DB sao lưu; chưa khởi động bản mới.')
+    if config_path is not None:
+        shutil.copy2(config_path, backup/CONFIG_NAME)
+    # Back up active session metadata too. All images remain in their original paths.
+    sessions = root/'data'/'captures'/'.staging'/'.active-bindings.json'
+    if sessions.is_file():
+        shutil.copy2(sessions, backup/'active-bindings.json')
+    manifest = {'version': APP_VERSION, 'directory': str(backup),
+                'captures': str(root/'data'/'captures')}
+    temporary = backup/'manifest.json'
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+    shutil.copy2(temporary, marker)
+    return backup
+
+
+def backup_before_gemini_recovery(root: Path, config_path: Path | None) -> Path:
+    """Snapshot the current DB, including its WAL, before opening rc74 runtime."""
+    marker = root / "backups" / "gemini-rc80.json"
+    if marker.is_file():
+        return Path(json.loads(marker.read_text(encoding="utf-8"))["directory"])
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    backup = Path(tempfile.mkdtemp(prefix="before-gemini-rc80-", dir=marker.parent))
+    database = root / "data" / "measurements.db"
+    if database.is_file():
+        with sqlite3.connect(database.as_uri() + "?mode=ro", uri=True) as source:
+            with sqlite3.connect(backup / "measurements.db") as destination:
+                source.backup(destination)
+                if destination.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise RuntimeError("Không kiểm chứng được DB sao lưu; chưa khởi động bản Gemini.")
+    if config_path is not None:
+        shutil.copy2(config_path, backup / CONFIG_NAME)
+    # Photos and pending-session files keep their original locations. Never
+    # restore the older rc75 backup over measurements created by newer builds.
+    manifest = {"version": APP_VERSION, "directory": str(backup),
+                "captures": str(root / "data" / "captures")}
+    temporary_marker = backup / "manifest.json"
+    temporary_marker.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    shutil.copy2(temporary_marker, marker)
+    logging.info("Pre-Gemini recovery backup: %s", backup)
+    return backup
 
 
 def prepare_paddleocr_model(root: Path) -> None:
@@ -237,25 +318,30 @@ def show_startup_error(message: str) -> None:
 
 
 def main() -> None:
+    multiprocessing.freeze_support()
     root = writable_root()
     config_path = load_runtime_config(root)
     configure_logging(root)
-    logging.info("Starting TramCanQR")
+    logging.info("Starting TramCanQR %s (RapidOCR PP-OCRv6 small offline)", APP_VERSION)
     if config_path is not None:
         logging.info("Loaded runtime configuration from %s", config_path)
-    prepare_paddleocr_model(root)
+    os.environ["ROLL_SCALE_APP_VARIANT"] = "rapidocr"
+    os.environ["ROLL_SCALE_APP_VERSION"] = APP_VERSION
     assets = bundle_root()
     if getattr(sys, "frozen", False):
         assets = assets / "assets"
-    argv = build_runtime_argv(root, assets)
+    os.environ['ROLL_SCALE_RAPIDOCR_MODELS'] = str(assets/'models'/'rapidocr')
+    argv = build_rapidocr_argv(root, assets)
     args = build_parser().parse_args(argv)
     if open_existing_server(args.port):
         logging.info("Existing gateway found on port %s; opened its UI", args.port)
         return
+    backup_before_rapidocr_upgrade(root, config_path)
     server, service = create_server(args)
     service.start_ocr_preload()
     url = f"http://127.0.0.1:{server.server_port}"
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    if os.environ.get("ROLL_SCALE_OPEN_BROWSER", "1") != "0":
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()
     finally:
@@ -267,6 +353,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     try:
         main()
     except Exception as exc:

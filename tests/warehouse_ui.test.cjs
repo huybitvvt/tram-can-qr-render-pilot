@@ -46,7 +46,7 @@ assert.match(html, /\/api\/warehouse\/nhap-kho\/summary-export/);
 assert.match(html, /Mở thư mục Excel/);
 assert.match(html, /id="printNhapKhoSummaryBtn"/);
 assert.match(html, /function printNhapKhoSummary\(/);
-assert.match(html, /TỔNG HỢP ĐẨY KHO/);
+assert.match(html, /Phiếu đẩy kho từ trạm cân AI/);
 assert.match(html, /In PDF/);
 assert.doesNotMatch(html, /function downloadNhapKhoSummaryCsv\(/);
 assert.doesNotMatch(html, /bindActionButton\('pushSupabaseBtn',\(\)=>openNhapKhoModal\(\)\)/);
@@ -55,6 +55,16 @@ console.log('warehouse_ui.test.cjs: ok');
 
 const vm = require('node:vm');
 const { test } = require('node:test');
+
+test('push time uses Vietnam timezone and never invents missing or ambiguous timestamps', () => {
+  const context = vm.createContext({});
+  vm.runInContext(html.match(/^function formatNhapKhoPushTime\(.*$/m)[0], context);
+  assert.equal(context.formatNhapKhoPushTime('2026-10-27T01:02:03Z'), '08:02:03');
+  assert.equal(context.formatNhapKhoPushTime('2026-10-27T23:59:58+00:00'), '06:59:58');
+  for (const value of ['', null, 'bad-date', '2026-10-27', '2026-10-27T01:02:03']) {
+    assert.equal(context.formatNhapKhoPushTime(value), '--');
+  }
+});
 
 function confirmContext(api) {
   const fields = {};

@@ -2629,7 +2629,7 @@ def test_ui_uses_camera_left_params_right_capture_layout() -> None:
     assert "Mở thư mục Excel" in TEST_UI_HTML
     assert 'id="printNhapKhoSummaryBtn"' in TEST_UI_HTML
     assert "function printNhapKhoSummary(" in TEST_UI_HTML
-    assert "TỔNG HỢP ĐẨY KHO" in TEST_UI_HTML
+    assert "Phiếu đẩy kho từ trạm cân AI" in TEST_UI_HTML
     assert "In PDF" in TEST_UI_HTML
     assert "downloadNhapKhoSummaryCsv" not in TEST_UI_HTML
 
@@ -3846,7 +3846,7 @@ def test_ui_records_error_state_and_confirms_printable_ten_roll_batches() -> Non
     assert "function appendPrintLetterhead" in TEST_UI_HTML
     assert "print-letterhead-logo" in TEST_UI_HTML
     assert "appendPrintLetterhead(sheet,'PHIẾU XÁC NHẬN ĐỢT CÂN')" in TEST_UI_HTML
-    assert "appendPrintLetterhead(sheet,'TỔNG HỢP ĐẨY KHO')" in TEST_UI_HTML
+    assert "appendPrintLetterhead(sheet,'Phiếu đẩy kho từ trạm cân AI')" in TEST_UI_HTML
     assert "/api/weighing-batches/confirm" in TEST_UI_HTML
     assert "Đang lưu đợt cân trên máy" in TEST_UI_HTML
     assert "writeRollBatchConfirmed(0)" in TEST_UI_HTML
@@ -4038,7 +4038,7 @@ def test_ui_redirects_expired_session_without_showing_save_zero_retry() -> None:
     assert "if(failed&&isAuthenticationRequired(failed.error))" in TEST_UI_HTML
     assert "Phiên đăng nhập đã hết hạn. Đang mở trang đăng nhập" in TEST_UI_HTML
     assert "window.open('about:blank'" not in TEST_UI_HTML
-    assert "BACKEND ĐANG DÙNG OCR LOCAL" in TEST_UI_HTML
+    assert "OCR LOCAL · không gọi API." in TEST_UI_HTML
 
 
 def test_gemini_key_store_uses_supabase_legacy_compatible_action() -> None:

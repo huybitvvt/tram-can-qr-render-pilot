@@ -14,9 +14,11 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
+
+from .damaged_goods import warehouse_for_items
 
 NHAP_KHO_CHO = "Chờ nhập kho"
 NHAP_KHO_DA = "Đã nhập kho"
@@ -85,6 +87,16 @@ def load_nhap_kho_summary_rows() -> list[dict[str, object]]:
     return cleaned[-500:]
 
 
+def _push_time_text(value: object) -> str:
+    try:
+        stamp = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            return "--"
+        return stamp.astimezone(timezone(timedelta(hours=7))).strftime("%H:%M:%S")
+    except (ValueError, OverflowError):
+        return "--"
+
+
 def _summary_csv_text(rows: list[dict[str, object]]) -> str:
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\r\n")
@@ -95,6 +107,7 @@ def _summary_csv_text(rows: list[dict[str, object]]) -> str:
             "Sản phẩm",
             "Số lượng",
             "Ngày",
+            "Giờ đẩy",
             "Ca",
             "Máy",
             "Kho",
@@ -112,13 +125,14 @@ def _summary_csv_text(rows: list[dict[str, object]]) -> str:
                 row.get("ma_sp") or "",
                 qty,
                 row.get("ngay") or "",
+                _push_time_text(row.get("saved_at")),
                 row.get("ca") or "",
                 row.get("may") or "",
                 row.get("kho") or "",
                 row.get("saved_at") or "",
             ]
         )
-    writer.writerow(["", "TỔNG", "", total, "", "", "", "", ""])
+    writer.writerow(["", "TỔNG", "", total, "", "", "", "", "", ""])
     return "\ufeff" + buffer.getvalue()
 
 
@@ -1118,6 +1132,7 @@ def confirm_nhap_kho(
     )
     if not preview:
         raise ValueError("Không còn mã QR chờ nhập kho cho Mã SP này")
+    kho = warehouse_for_items(preview, kho)
     event_ids = [str(row.get("event_id") or "").strip() for row in preview]
     if not all(event_ids):
         raise ValueError("Phiếu cân thiếu event_id; chưa thể đẩy kho")

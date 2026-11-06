@@ -18,7 +18,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from roll_qr_scale.qr_reader import QRReader
 from roll_qr_scale.weight_ocr import PaddleOCRTextReader, detect_weight_roi
 
@@ -159,7 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("image", type=Path, help="Đường dẫn tới ảnh đầu vào")
     parser.add_argument("--unit", default="kg", help="Đơn vị mặc định (mặc định: kg)")
-    parser.add_argument("--json", action="store_true", help="In JSON để tích hợp hệ thống")
+    parser.add_argument(
+        "--json", action="store_true", help="In JSON để tích hợp hệ thống"
+    )
     return parser
 
 
@@ -178,7 +179,11 @@ def main() -> int:
         print(json.dumps(asdict(result), ensure_ascii=False))
     else:
         print(f"QR: {result.qr if result.qr is not None else 'KHÔNG ĐỌC ĐƯỢC'}")
-        value = f"{result.weight:g} {result.unit}" if result.weight is not None else "KHÔNG ĐỌC ĐƯỢC"
+        value = (
+            f"{result.weight:g} {result.unit}"
+            if result.weight is not None
+            else "KHÔNG ĐỌC ĐƯỢC"
+        )
         print(f"Số cân: {value}")
     return 0 if result.qr is not None and result.weight is not None else 1
 
