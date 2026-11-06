@@ -630,6 +630,62 @@ def test_manual_sync_sends_only_rows_matching_all_selected_filters(tmp_path) -> 
         store.close()
 
 
+@pytest.mark.parametrize("local_synced", [False, True])
+def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, local_synced) -> None:
+    import roll_qr_scale.test_ui as ui
+
+    store = MeasurementStore(tmp_path / "retry.db", tmp_path / "captures")
+    frame = np.zeros((80, 100, 3), dtype=np.uint8)
+    tags = "SOURCE_DATE=2026-09-26; SOURCE_SHIFT=12C1; SOURCE_MACHINE=Máy 11"
+    existing = store.save("SP-EXISTS", 2, "kg", frame, "manual", needs_sync=True, weight_raw=tags)
+    missing = store.save("SP-MISSING", 3, "kg", frame, "manual", needs_sync=True, weight_raw=tags)
+    unreadable = store.save("SP-READ-FAIL", 4, "kg", frame, "manual", needs_sync=True, weight_raw=tags)
+    if local_synced:
+        for row in (existing, missing, unreadable):
+            store.mark_synced(row.event_id, 99)
+    sent, checked = [], []
+    monkeypatch.setattr(ui, "_supabase_project_url", lambda: "https://test.supabase.co")
+    monkeypatch.setattr(ui, "_supabase_read_key", lambda: "test-key")
+
+    def read_cloud(url, key, *, event_id, limit):
+        checked.append(event_id)
+        if event_id == unreadable.event_id:
+            raise OSError("Cannot read Supabase")
+        if event_id == existing.event_id:
+            return [{"id": 22, "event_id": event_id}]
+        return []
+
+    def send(url, payload, image_path, token):
+        assert payload["event_id"] in checked
+        assert payload["skip_cloudinary"] is True
+        sent.append(payload["event_id"])
+        return {"ok": True, "id": 23, "event_id": payload["event_id"], "local_backup_committed": True}
+
+    monkeypatch.setattr(ui, "fetch_supabase_table", read_cloud)
+    worker = OutboxSyncWorker(store, "https://test/ingest", "token", send=send, include_images=False)
+    controller = ManualSyncController(store, worker)
+    filters = {"scope": "production", "date_from": "2026-09-26", "date_to": "2026-09-26", "force": True}
+    try:
+        assert controller.preview(filters)["total"] == 3
+        assert checked == []
+        assert store.get(missing.event_id).sync_status == ("synced" if local_synced else "pending")
+        result = controller.run_now(filters)
+        assert result["skipped"] == 1
+        assert result["synced"] == 1
+        assert result["failed"] >= 1
+        assert sent == [missing.event_id]
+        assert store.get(existing.event_id).remote_id == 22
+        assert store.get(missing.event_id).sync_status == "synced"
+        assert store.get(unreadable.event_id).sync_status == ("synced" if local_synced else "pending")
+        # A repeated click checks again; both cloud rows now exist.
+        monkeypatch.setattr(ui, "fetch_supabase_table", lambda url, key, *, event_id, limit: [{"id": 23, "event_id": event_id}])
+        second = controller.run_now(filters)
+        assert second["skipped"] == 3
+        assert sent == [missing.event_id]
+    finally:
+        store.close()
+
+
 def test_manual_sync_skips_error_rows_and_retries_waiting_rows(tmp_path) -> None:
     store = MeasurementStore(tmp_path / "measurements.db", tmp_path / "captures")
     frame = np.zeros((80, 100, 3), dtype=np.uint8)

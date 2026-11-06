@@ -226,6 +226,13 @@ def test_fetch_supabase_table_limits_columns_rows_and_filters(monkeypatch) -> No
     assert query["metadata->>machine"] == ["eq.Máy Bao Bì"]
     assert query["metadata->>production_order"] == ["eq.LSX-DH067"]
     assert "image_public_id" not in query["select"][0]
+    assert "event_id" not in query
+
+    fetch_supabase_table("https://project.supabase.co", "public-key", event_id="event-1", limit=1)
+    retry_query = urllib.parse.parse_qs(urllib.parse.urlsplit(captured["request"].full_url).query)
+    assert retry_query["event_id"] == ["eq.event-1"]
+    assert retry_query["limit"] == ["1"]
+    assert "metadata->>work_date" not in retry_query
 
 
 def test_fetch_supabase_table_count_uses_all_source_filters(monkeypatch) -> None:

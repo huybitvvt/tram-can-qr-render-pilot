@@ -303,6 +303,7 @@ def fetch_supabase_table(
     machine: str = "",
     production_order: str = "",
     qr_code: str = "",
+    event_id: str = "",
     timeout: float = 10.0,
 ) -> list[dict[str, object]]:
     params: dict[str, object] = {
@@ -335,6 +336,8 @@ def fetch_supabase_table(
         if selected:
             params[f"metadata->>{field}"] = f"eq.{selected}"
     selected_qr = str(qr_code or "").strip()
+    if event_id:
+        params["event_id"] = f"eq.{event_id}"
     if selected_qr:
         safe = selected_qr.replace("*", "").replace(",", "").replace(")", "")
         if safe:

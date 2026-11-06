@@ -104,6 +104,16 @@ test('production sync and list filtering preserve the open capture and use lower
   assert.deepEqual(requests.map(([path])=>path),['/api/manual-sync/preview','/api/manual-sync/start']);
   assert.deepEqual(requests[0][1],{date_from:'2026-10-11',date_to:'2026-10-11',shift:'12C2',machine:'LOWER',production_order:'LSX-OPEN',qr_code:'FILTER-SP',scope:'production',skip_cloudinary:true,event_ids:['saved']});
   assert.equal(JSON.stringify({upper,round}),before);
+  requests.length=0;
+  await ctx.startManualSync(true,true);
+  assert.deepEqual(requests.map(([path])=>path),['/api/manual-sync/preview','/api/manual-sync/start']);
+  for(const [,payload] of requests){
+    assert.equal(payload.force,true);
+    assert.equal(payload.skip_cloudinary,true);
+    assert.deepEqual(payload.event_ids,['saved']);
+    assert.equal(payload.machine,'LOWER');
+  }
+  assert.equal(JSON.stringify({upper,round}),before);
   const query=new URLSearchParams(ctx.recordsListQuery());
   assert.equal(query.get('machine'),'LOWER');
   assert.equal(query.get('include_drafts'),'0');

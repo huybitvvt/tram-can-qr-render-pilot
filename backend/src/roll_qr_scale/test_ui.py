@@ -1265,11 +1265,14 @@ def _manual_sync_filters(payload: dict[str, object]) -> dict[str, str]:
         event_ids = str(event_ids_raw or "").strip()
     if len(event_ids) > 20000:
         raise ValueError("Danh sách event_id đồng bộ quá dài")
+    force_raw = payload.get("force")
+    force_flag = "1" if str(force_raw).lower() in {"1", "true"} else "0"
     return {
         **filters,
         "scope": scope,
         "skip_cloudinary": skip_flag,
         "event_ids": event_ids,
+        "force": force_flag,
     }
 
 
@@ -2253,6 +2256,20 @@ class ManualSyncController:
         self._job: dict[str, object] = {"state": "idle", "queue_length": 0}
         self._queue: list[dict[str, str]] = []
 
+    def _reconcile_measurement_ids(self, filters: dict[str, str]) -> list[str]:
+        ids: list[str] = []
+        for row in self.store.measurement_source_rows():
+            if _sync_row_has_error(row):
+                continue
+            if not _manual_sync_matches(row, filters):
+                continue
+            event_id = str(row.get("event_id") or "").strip()
+            if event_id:
+                ids.append(event_id)
+        if len(ids) > self.MAX_JOB:
+            raise ValueError("Có hơn 5.000 dòng khớp bộ lọc; hãy thu hẹp khoảng ngày")
+        return ids
+
     def _plan(
         self,
         filters: dict[str, str],
@@ -2262,6 +2279,7 @@ class ManualSyncController:
     ) -> tuple[list[tuple[str, object]], dict[str, int]]:
         selected: list[tuple[str, object, str, int]] = []
         counts = {"measurements": 0, "photo_drafts": 0, "inventory_checks": 0, "weigh_batches": 0}
+        force = filters.get("force") == "1"
 
         def candidates(load: object, **extra: object) -> list[object]:
             rows = load(
@@ -2274,7 +2292,12 @@ class ManualSyncController:
                 raise ValueError("Quá nhiều dữ liệu chờ đồng bộ; hãy thu hẹp khoảng ngày")
             return rows
 
+        force_ids: list[str] = []
+        if force and filters["scope"] in {"production", "all"} and not waiting_only:
+            force_ids = self._reconcile_measurement_ids(filters)
+
         if filters["scope"] in {"production", "all"}:
+            seen_measurement_ids: set[str] = set()
             for item in candidates(self.store.pending):
                 if _sync_row_has_error(item):
                     continue
@@ -2282,18 +2305,26 @@ class ManualSyncController:
                     continue
                 if _manual_sync_matches(vars(item), filters):
                     selected.append(("measurement", item.event_id, item.captured_at, item.id))
+                    seen_measurement_ids.add(item.event_id)
                     counts["measurements"] += 1
-            if filters.get("skip_cloudinary") != "1":
+            if force and not waiting_only:
+                for index, event_id in enumerate(force_ids):
+                    if event_id in seen_measurement_ids:
+                        continue
+                    selected.append(("measurement", event_id, "", index))
+                    seen_measurement_ids.add(event_id)
+                    counts["measurements"] += 1
+            if not force and filters.get("skip_cloudinary") != "1":
                 for item in candidates(self.store.pending_photo_drafts):
                     if _manual_sync_matches(vars(item), filters):
                         selected.append(("photo_draft", item.event_id, item.captured_at, item.id))
                         counts["photo_drafts"] += 1
-            if not filters["qr_code"]:
+            if not force and not filters["qr_code"]:
                 for batch in candidates(self.store.pending_weigh_batches):
                     if _manual_sync_matches(batch, filters):
                         selected.append(("weigh_batch", batch, str(batch["work_date"]), int(batch["id"])))
                         counts["weigh_batches"] += 1
-        if filters["scope"] in {"inventory", "all"}:
+        if not force and filters["scope"] in {"inventory", "all"}:
             for item in candidates(self.store.pending_inventory_checks):
                 source = {**vars(item), "qr_code": item.product_code}
                 if _manual_sync_matches(source, filters):
@@ -2345,6 +2376,7 @@ class ManualSyncController:
             "total": total,
             "done": 0,
             "synced": 0,
+            "skipped": 0,
             "failed": 0,
             "deferred": 0,
             "last_error": "",
@@ -2423,6 +2455,15 @@ class ManualSyncController:
             error = ""
             try:
                 if kind == "measurement":
+                    if (self._job.get("filters") or {}).get("force") == "1":
+                        result, error = self._reconcile_measurement(str(value))
+                        with self._lock:
+                            self._job["done"] = int(self._job["done"]) + 1
+                            self._job[result] = int(self._job.get(result, 0)) + 1
+                            if error:
+                                self._job["last_error"] = error[:500]
+                            self._job["current"] = ""
+                        continue
                     ok = self.worker.sync_event(str(value))
                     row = self.store.get(str(value))
                 elif kind == "photo_draft":
@@ -2444,6 +2485,34 @@ class ManualSyncController:
                 if error:
                     self._job["last_error"] = error[:500]
                 self._job["current"] = ""
+
+    def _reconcile_measurement(self, event_id: str) -> tuple[str, str]:
+        """Read cloud truth before resending, including locally 'synced' rows."""
+        url, key = _supabase_project_url(), _supabase_read_key()
+        if not url or not key:
+            raise ValueError("Chưa cấu hình kết nối đọc Supabase để kiểm tra phiếu đã có")
+        with self.worker._sync_lock:
+            row = self.store.get(event_id)
+            if row is None:
+                return "failed", "Dòng local không còn tồn tại"
+            if _sync_row_has_error(row):
+                return "skipped", ""
+            # An HTTP/auth/read failure propagates: never assume a failed read
+            # means the record is missing and never change local state then.
+            existing = fetch_supabase_table(url, key, event_id=event_id, limit=1)
+            if existing:
+                if str(existing[0].get("event_id") or "") != event_id:
+                    raise ValueError("Supabase trả sai event_id khi kiểm tra phiếu")
+                remote = existing[0]
+                self.store.mark_synced(
+                    event_id, int(remote["id"]),
+                    remote.get("core_image_url") or remote.get("image_url") or row.remote_image_url,
+                    row.remote_image_public_id,
+                )
+                return "skipped", ""
+            self.store.requeue_measurements([event_id])
+            ok = self.worker._sync_measurement(self.store.get(event_id))
+            return self._classify("measurement", ok, self.store.get(event_id))
 
     def _worker_loop(self, filters: dict[str, str], plan: list[tuple[str, object]]) -> None:
         try:
@@ -2480,6 +2549,7 @@ class ManualSyncController:
                         "total": len(next_plan),
                         "done": 0,
                         "synced": 0,
+                        "skipped": 0,
                         "failed": 0,
                         "deferred": 0,
                         "last_error": "",

@@ -1170,6 +1170,29 @@ class MeasurementStore:
             )
             self.connection.commit()
 
+    def requeue_measurements(self, event_ids: list[str]) -> int:
+        """Put already-synced (or stuck) tickets back into the outbox as pending."""
+        ids = [str(event_id or "").strip() for event_id in event_ids if str(event_id or "").strip()]
+        if not ids:
+            return 0
+        now = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        updated = 0
+        with self._lock:
+            for event_id in ids:
+                cursor = self.connection.execute(
+                    """
+                    UPDATE measurements
+                    SET sync_status = 'pending', sync_error = NULL,
+                        next_retry_at = NULL, last_attempt_at = ?
+                    WHERE event_id = ?
+                      AND sync_status IN ('synced', 'failed', 'local', 'pending')
+                    """,
+                    (now, event_id),
+                )
+                updated += int(cursor.rowcount or 0)
+            self.connection.commit()
+        return updated
+
     def _mark_cloudinary_pending(
         self,
         table: str,
