@@ -630,6 +630,69 @@ def test_manual_sync_sends_only_rows_matching_all_selected_filters(tmp_path) -> 
         store.close()
 
 
+def test_reset_supabase_selected_rows_can_be_sent_again(tmp_path) -> None:
+    import json
+    import urllib.error
+    import urllib.request
+
+    args = test_ui_module.build_parser().parse_args([
+        "--db", str(tmp_path / "measurements.db"),
+        "--captures", str(tmp_path / "captures"),
+        "--yolo-model", "", "--weight-engine", "local", "--port", "0",
+    ])
+    server, service = test_ui_module.create_server(args)
+    frame = np.zeros((80, 100, 3), dtype=np.uint8)
+    tags = "SOURCE_DATE=2026-09-26; SOURCE_SHIFT=HC1; SOURCE_MACHINE=Máy 03; NHAP_KHO_STATUS=Đã nhập kho"
+    selected = service.store.save("SP-RESET", 3, "kg", frame, "manual", weight_raw=tags)
+    other = service.store.save("SP-OTHER", 4, "kg", frame, "manual", weight_raw=tags)
+    for row in (selected, other):
+        service.store.mark_synced(row.event_id, 99)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    sent = []
+
+    def send(url, payload, image_path, token):
+        sent.append(payload["event_id"])
+        return {"ok": True, "id": 99, "event_id": payload["event_id"], "local_backup_committed": True}
+
+    worker = OutboxSyncWorker(service.store, "https://test/ingest", "token", send=send, include_images=False)
+    controller = ManualSyncController(service.store, worker)
+
+    def reset(payload):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/api/manual-sync/reset",
+            data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request) as response:
+            return json.load(response)
+
+    try:
+        for invalid in ({}, {"event_ids": []}, {"event_ids": "all"}, {"event_ids": [selected.event_id, None]}):
+            with pytest.raises(urllib.error.HTTPError) as error:
+                reset(invalid)
+            assert error.value.code == 400
+        assert service.store.get(selected.event_id).sync_status == "synced"
+        result = reset({"event_ids": [selected.event_id, selected.event_id, "missing-event"]})
+        assert result["updated"] == 1
+        saved = service.store.get(selected.event_id)
+        assert saved.sync_status == "pending"
+        assert saved.weight_raw == tags
+        assert saved.weight == selected.weight
+        assert service.store.get(other.event_id).sync_status == "synced"
+        assert sent == []
+        result = controller.run_now({"scope": "production", "date_from": "2026-09-26", "date_to": "2026-09-26",
+                                     "event_ids": [selected.event_id], "skip_cloudinary": True})
+        assert result["synced"] == 1, result
+        assert sent == [selected.event_id]
+        assert service.store.get(selected.event_id).sync_status == "synced"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        service.close()
+        service.store.close()
+
+
 @pytest.mark.parametrize("local_synced", [False, True])
 def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, local_synced) -> None:
     import roll_qr_scale.test_ui as ui

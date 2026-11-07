@@ -7338,6 +7338,21 @@ def create_server(args: argparse.Namespace) -> tuple[ThreadingHTTPServer, Statio
                 return
             try:
                 payload = self.read_json()
+                if self.path == "/api/manual-sync/reset":
+                    event_ids = payload.get("event_ids")
+                    if not isinstance(event_ids, list) or not event_ids or any(
+                        not isinstance(event_id, str) or not event_id.strip()
+                        for event_id in event_ids
+                    ):
+                        self.send_json(400, {"ok": False, "message": "Chọn các phiếu cần đặt lại chưa đẩy Supabase"})
+                        return
+                    if service.manual_sync is not None and service.manual_sync.status().get("state") == "running":
+                        self.send_json(409, {"ok": False, "message": "Đang đẩy Supabase; chờ hoàn tất rồi đặt lại trạng thái"})
+                        return
+                    ids = list(dict.fromkeys(event_id.strip() for event_id in event_ids))
+                    updated = service.store.requeue_measurements(ids)
+                    self.send_json(200, {"ok": True, "updated": updated, "sync_status": "pending"})
+                    return
                 if self.path in {"/api/manual-sync/preview", "/api/manual-sync/start"}:
                     if service.manual_sync is None:
                         self.send_json(503, {"ok": False, "message": "Chưa cấu hình Supabase để đồng bộ"})

@@ -2046,7 +2046,7 @@ async function loadRecords(options={}){
       recordCell(row,formatRecordWeight(core,unit));recordCell(row,formatRecordWeight(product,unit));recordCell(row,formatRecordWeight(bi,unit));recordCell(row,formatRecordWeight(nvl,unit));
       recordCell(row,recordDamagedKind(item)?'Hàng hỏng · '+recordDamagedKind(item):errorState==='error'?'Có lỗi':'Không lỗi','quality-state '+errorState);
       recordCell(row,recordErrorReason(item)||'--',errorState==='error'?'record-error':'');recordImages(row,item);
-      const state=String(item.sync_status||'local');const syncCell=recordCell(row,state==='synced'?'Đã đồng bộ':state==='failed'?'Đang chờ':state==='pending'?'Đang chờ':'Lưu local','sync-state '+(state==='failed'?'pending':state));if(state==='failed'&&item.sync_error){syncCell.title=item.sync_error}
+      const state=String(item.sync_status||'local');const syncCell=recordCell(row,state==='synced'?'Đã đồng bộ':state==='failed'?'Đang chờ':state==='pending'?'Chưa đẩy':'Lưu local','sync-state '+(state==='failed'?'pending':state));if(state==='failed'&&item.sync_error){syncCell.title=item.sync_error}
       appendNhapKhoStatusCell(row,item);
       const detail=recordCell(row,recordDamagedKind(item)?'Kho hàng hỏng':extraRoundsFromRaw(item.weight_raw)||'');if(item.sync_error){detail.title=item.sync_error}appendProductionDeleteAction(row,item,errorState);body.appendChild(row)
     }
@@ -2092,7 +2092,19 @@ function productionSyncFilters(){const fields=readRecordsFilterFields();const pr
 function manualSyncFilters(){const filters=readListFilters();return{date_from:filters.dateFrom,date_to:filters.dateTo,shift:filters.shift,qr_code:filters.qrCode,machine:filters.machine,production_order:filters.productionOrder,scope:$('manualSyncScope').value,skip_cloudinary:true}}
 function activeManualSyncFilters(){return workflowMode==='production'?productionSyncFilters():manualSyncFilters()}
 function manualSyncCounts(data){const c=data.counts||{};return 'Phiếu cân '+(c.measurements||0)+' · Ảnh lỗi '+(c.photo_drafts||0)+' · Đợt cân '+(c.weigh_batches||0)+' · Kiểm kho '+(c.inventory_checks||0)}
-function setManualSyncRunning(running){const ids=['manualSyncPreviewBtn','manualSyncStartBtn','pushSupabaseBtn','retrySupabaseBtn','nhapKhoBtn','recordsFilterBtn'];for(const id of ids){const el=$(id);if(el)el.disabled=running}}
+function setManualSyncRunning(running){const ids=['manualSyncPreviewBtn','manualSyncStartBtn','pushSupabaseBtn','retrySupabaseBtn','resetSupabaseBtn','nhapKhoBtn','recordsFilterBtn'];for(const id of ids){const el=$(id);if(el)el.disabled=running}}
+async function resetSelectedSupabase(){
+ const host=$('productionRecordsStatus'),eventIds=[...selectedNhapKhoIds].filter(id=>canSelectProductionRecord(productionRowsByEvent[id]));
+ if(host)host.hidden=false;
+ if(!eventIds.length){status(host,'Chọn các phiếu cần đặt lại chưa đẩy Supabase.','warn');return}
+ setManualSyncRunning(true);
+ try{
+  const data=await api('/api/manual-sync/reset',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({event_ids:eventIds})});
+  await loadRecords();
+  status(host,'Đã đặt '+data.updated+' phiếu về Chưa đẩy Supabase. Bấm Đẩy Supabase để đồng bộ lại.','ok');
+ }catch(error){status(host,'Không đặt lại được trạng thái Supabase: '+error.message,'bad')}
+ finally{setManualSyncRunning(false)}
+}
 function manualSyncStatusEl(){return $(manualSyncStatusHost)||$('manualSyncStatus')}
 async function previewManualSync(filters=activeManualSyncFilters(),host=manualSyncStatusEl()){try{const data=await api('/api/manual-sync/preview',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(filters)});if(host){host.hidden=false;status(host,'Có '+data.total+' dòng chờ theo bộ lọc. '+manualSyncCounts(data)+'.',data.total?'ok':'warn')}return data}catch(error){if(host){host.hidden=false;status(host,'Không kiểm tra được: '+error.message,'bad')}return null}}
 async function pollManualSync(){try{const job=await api('/api/manual-sync/status'),host=manualSyncStatusEl(),queue=Number(job.queue_length||0),current=String(job.current||''),queueText=queue?' · hàng chờ '+queue:'',currentText=current?' · đang '+current:'',skippedText=' · đã có, bỏ qua '+Number(job.skipped||0);if(job.state==='running'){setManualSyncRunning(true);if(host){host.hidden=false;status(host,'Đang xử lý theo bộ lọc '+job.done+'/'+job.total+' · đẩy thành công '+job.synced+skippedText+' · lỗi '+job.failed+' · chờ điều kiện '+job.deferred+queueText+currentText+'.','warn')}manualSyncTimer=setTimeout(pollManualSync,1200);return}setManualSyncRunning(false);if(job.state==='complete'||job.state==='error'){if(host){host.hidden=false;status(host,'Đã xử lý theo bộ lọc '+job.done+'/'+job.total+' · đẩy thành công '+job.synced+skippedText+' · lỗi '+job.failed+' · chờ điều kiện '+job.deferred+(job.last_error?' · lỗi cuối: '+job.last_error:'')+'.',job.failed||job.deferred||job.state==='error'?'warn':'ok')}if(workflowMode==='list')loadListRecords(false);else if(workflowMode==='production')loadRecords()}}catch(error){setManualSyncRunning(false);const host=manualSyncStatusEl();if(host){host.hidden=false;status(host,'Không đọc được tiến độ: '+error.message,'bad')}}}
@@ -2222,6 +2234,7 @@ $('showGeminiSpareKeyBtn').onclick=()=>{const input=$('geminiSpareApiKeyInput'),
 $('closeGeminiSpareKeyBtn').onclick=()=>{$('geminiSpareApiKeyInput').value='';$('geminiSpareApiKeyInput').type='password';$('showGeminiSpareKeyBtn').textContent='Hiện';$('geminiSpareKeyPanel').hidden=true};
 syncGeminiBackupWhenReady();
 const retrySupabaseBtn=document.createElement('button');retrySupabaseBtn.id='retrySupabaseBtn';retrySupabaseBtn.type='button';retrySupabaseBtn.textContent='Đẩy lại Supabase';retrySupabaseBtn.title='Kiểm tra các phiếu đã lưu theo dòng chọn hoặc bộ lọc: chưa có trên Supabase thì đẩy, đã có thì bỏ qua';$('pushSupabaseBtn').insertAdjacentElement('afterend',retrySupabaseBtn);bindActionButton('retrySupabaseBtn',()=>startManualSync(true,true));
+const resetSupabaseBtn=document.createElement('button');resetSupabaseBtn.id='resetSupabaseBtn';resetSupabaseBtn.type='button';resetSupabaseBtn.textContent='Đặt lại chưa đẩy Supabase';resetSupabaseBtn.title='Đặt các phiếu đã chọn về chưa đẩy để đồng bộ Supabase lại';retrySupabaseBtn.insertAdjacentElement('afterend',resetSupabaseBtn);bindActionButton('resetSupabaseBtn',()=>resetSelectedSupabase());
 bindActionButton('manualSyncPreviewBtn',()=>{manualSyncStatusHost='manualSyncStatus';return previewManualSync(manualSyncFilters())});bindActionButton('manualSyncStartBtn',()=>startManualSync(false));bindActionButton('recordsFilterBtn',()=>applyRecordsFilters());document.getElementById('productionListFilters')&&document.getElementById('productionListFilters').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();applyRecordsFilters()}});bindActionButton('pushSupabaseBtn',()=>startManualSync(true));bindActionButton('nhapKhoBtn',()=>openNhapKhoModal());
 let nhapKhoHits=new Map(),nhapKhoChecked=false,nhapKhoBusy=false,nhapKhoPreviewItems=[];
 function closeNhapKhoModal(){const modal=$('nhapKhoModal');if(!modal||nhapKhoBusy)return;modal.classList.remove('open');modal.hidden=true;modal.setAttribute('aria-hidden','true');if($('nhapKhoSoCuon'))$('nhapKhoSoCuon').readOnly=false}
