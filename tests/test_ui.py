@@ -695,7 +695,8 @@ def test_reset_supabase_selected_rows_can_be_sent_again(tmp_path) -> None:
 
 @pytest.mark.parametrize("local_synced", [False, True])
 @pytest.mark.parametrize("different_event", [False, True])
-def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, local_synced, different_event) -> None:
+@pytest.mark.parametrize("read_source", ["supabase", "api"])
+def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, local_synced, different_event, read_source) -> None:
     import roll_qr_scale.test_ui as ui
 
     store = MeasurementStore(tmp_path / "retry.db", tmp_path / "captures")
@@ -729,6 +730,16 @@ def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, loca
         return {"ok": True, "id": 23, "event_id": payload["event_id"], "local_backup_committed": True}
 
     monkeypatch.setattr(ui, "fetch_supabase_table", read_cloud)
+    if read_source == "api":
+        monkeypatch.setattr(ui, "_supabase_read_key", lambda: "")
+
+        def read_api(url, token, *, qr_code, limit, offset):
+            # A partial QR match must not be mistaken for an exact match.
+            if offset == 0:
+                return [{"id": 90, "event_id": "unrelated", "qr_code": qr_code + "-extra"}], None
+            return ui.fetch_supabase_table(url, token, qr_code=qr_code, qr_exact=True, limit=1), None
+
+        monkeypatch.setattr(ui, "fetch_remote_measurement_page", read_api)
     worker = OutboxSyncWorker(store, "https://test/ingest", "token", send=send, include_images=False)
     controller = ManualSyncController(store, worker)
     filters = {"scope": "production", "date_from": "2026-09-26", "date_to": "2026-09-26", "force": True}

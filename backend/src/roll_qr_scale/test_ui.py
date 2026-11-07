@@ -2501,8 +2501,6 @@ class ManualSyncController:
     def _reconcile_measurement(self, event_id: str) -> tuple[str, str]:
         """Check the exact QR across cloud history before resending a ticket."""
         url, key = _supabase_project_url(), _supabase_read_key()
-        if not url or not key:
-            raise ValueError("Chưa cấu hình kết nối đọc Supabase để kiểm tra phiếu đã có")
         with self.worker._sync_lock:
             row = self.store.get(event_id)
             if row is None:
@@ -2514,7 +2512,24 @@ class ManualSyncController:
             qr_code = str(row.qr_code or "").strip()
             if not qr_code:
                 return "failed", "Phiếu chưa có mã QR để kiểm tra Supabase"
-            existing = fetch_supabase_table(url, key, qr_code=qr_code, qr_exact=True, limit=1)
+            if url and key:
+                existing = fetch_supabase_table(url, key, qr_code=qr_code, qr_exact=True, limit=1)
+            elif self.worker.api_url and self.worker.device_token:
+                existing = []
+                offset = 0
+                while True:
+                    page, total = fetch_remote_measurement_page(
+                        self.worker.api_url, self.worker.device_token,
+                        qr_code=qr_code, limit=200, offset=offset,
+                    )
+                    existing = [item for item in page if str(item.get("qr_code") or "").strip() == qr_code]
+                    if existing:
+                        break
+                    offset += len(page)
+                    if not page or (total is not None and offset >= total):
+                        break
+            else:
+                raise ValueError("Chưa cấu hình API đồng bộ hoặc kết nối đọc Supabase để kiểm tra phiếu đã có")
             if existing:
                 remote = existing[0]
                 if str(remote.get("qr_code") or "").strip() != qr_code:

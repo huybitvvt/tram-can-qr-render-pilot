@@ -3,6 +3,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_sub
 from pathlib import Path
 from importlib.metadata import distribution
 import sys
+import ssl
 
 
 project_root = Path(SPECPATH).parent
@@ -17,6 +18,11 @@ datas = [
     (str(project_root / "frontend" / "fonts"), "assets/frontend/fonts"),
 ]
 binaries = []
+# Codex's Python runtime loads this certificate policy beside ssl.py. Keep
+# that required data when freezing with this runtime, just as with certifi.
+runtime_certificate_policy = Path(ssl.__file__).with_name('codex-rejected-cas.pem')
+if runtime_certificate_policy.is_file():
+    datas.append((str(runtime_certificate_policy), '.'))
 hiddenimports = ["zxingcpp", "onnxruntime", "PIL.ImageTk", "roll_qr_scale.local_camera"]
 for package in ("zxingcpp",):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)

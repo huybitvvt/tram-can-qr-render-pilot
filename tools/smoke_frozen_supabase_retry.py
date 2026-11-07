@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -18,6 +19,7 @@ from roll_qr_scale.windows_app import APP_VERSION
 
 def main():
     project = Path(__file__).resolve().parents[1]
+    api_only = '--api-only' in sys.argv
     cloud_rows, sent, checked = {}, [], []
 
     class Cloud(BaseHTTPRequestHandler):
@@ -32,10 +34,12 @@ def main():
         def do_GET(self):
             query = parse_qs(urlsplit(self.path).query)
             qr_code = query.get('qr_code', [''])[0]
-            assert qr_code.startswith('eq.') and 'event_id' not in query, self.path
-            qr_code = qr_code[3:]
+            if not api_only:
+                assert qr_code.startswith('eq.') and 'event_id' not in query, self.path
+                qr_code = qr_code[3:]
             checked.append(qr_code)
-            self.reply([cloud_rows[qr_code]] if qr_code in cloud_rows else [])
+            items = [cloud_rows[qr_code]] if qr_code in cloud_rows else []
+            self.reply({'ok': True, 'items': items, 'total_count': len(items)} if api_only else items)
 
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
@@ -77,6 +81,8 @@ def main():
                        ROLL_SCALE_OPEN_BROWSER='0', ROLL_SCALE_HEADLESS='1', ROLL_SCALE_AUTO_SYNC='0',
                        ROLL_SCALE_API_URL=endpoint + '/ingest', ROLL_SCALE_DEVICE_TOKEN='test-token',
                        ROLL_SCALE_SUPABASE_URL=endpoint, ROLL_SCALE_SUPABASE_PUBLISHABLE_KEY='test-key')
+            if api_only:
+                env.pop('ROLL_SCALE_SUPABASE_PUBLISHABLE_KEY')
             process = subprocess.Popen([str(project / 'dist/TramCanQR/TramCanQR.exe')], env=env,
                                        cwd=sandbox, creationflags=subprocess.CREATE_NO_WINDOW)
 
