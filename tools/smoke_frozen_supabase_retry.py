@@ -30,21 +30,23 @@ def main():
             self.wfile.write(data)
 
         def do_GET(self):
-            event_id = parse_qs(urlsplit(self.path).query).get('event_id', [''])[0]
-            assert event_id.startswith('eq.'), self.path
-            event_id = event_id[3:]
-            checked.append(event_id)
-            self.reply([cloud_rows[event_id]] if event_id in cloud_rows else [])
+            query = parse_qs(urlsplit(self.path).query)
+            qr_code = query.get('qr_code', [''])[0]
+            assert qr_code.startswith('eq.') and 'event_id' not in query, self.path
+            qr_code = qr_code[3:]
+            checked.append(qr_code)
+            self.reply([cloud_rows[qr_code]] if qr_code in cloud_rows else [])
 
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             event_id = payload['event_id']
-            assert event_id in checked
+            qr_code = payload['qr_code']
+            assert qr_code in checked
             assert payload['skip_cloudinary'] is True
             assert 'image_base64' not in payload
             sent.append(event_id)
-            cloud_rows[event_id] = {'id': 102, 'event_id': event_id}
-            self.reply({'ok': True, **cloud_rows[event_id], 'local_backup_committed': True})
+            cloud_rows[qr_code] = {'id': 102, 'event_id': event_id, 'qr_code': qr_code}
+            self.reply({'ok': True, **cloud_rows[qr_code], 'local_backup_committed': True})
 
         def log_message(self, *args):
             pass
@@ -52,7 +54,7 @@ def main():
     remote = ThreadingHTTPServer(('127.0.0.1', 0), Cloud)
     threading.Thread(target=remote.serve_forever, daemon=True).start()
     try:
-        with tempfile.TemporaryDirectory(prefix='retry-rc89-', dir=project / '.test-tmp') as temporary:
+        with tempfile.TemporaryDirectory(prefix='retry-rc90-', dir=project / '.test-tmp') as temporary:
             sandbox = Path(temporary)
             station = sandbox / 'TramCanQR'
             store = MeasurementStore(station / 'data/measurements.db', station / 'data/captures')
@@ -63,7 +65,8 @@ def main():
             for row in (existing, missing):
                 store.mark_synced(row.event_id, 99)
             store.close()
-            cloud_rows[existing.event_id] = {'id': 101, 'event_id': existing.event_id}
+            cloud_rows[existing.qr_code] = {'id': 101, 'event_id': '00000000-0000-0000-0000-000000000001',
+                                            'qr_code': existing.qr_code}
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0))
                 port = sock.getsockname()[1]
@@ -95,6 +98,8 @@ def main():
                         assert time.monotonic() < deadline, 'Frozen application startup timed out'
                         time.sleep(.5)
                 assert status['weight_engine'] == 'rapidocr' and status['sync_enabled'], status
+                reset = request('/api/manual-sync/reset', {'event_ids': [existing.event_id, missing.event_id]})
+                assert reset['updated'] == 2 and reset['sync_status'] == 'pending', reset
                 filters = {'scope': 'production', 'date_from': '2026-09-26',
                            'date_to': '2026-09-26', 'force': True, 'skip_cloudinary': True}
                 for expected_synced, expected_skipped in ((1, 1), (0, 2)):
@@ -110,8 +115,8 @@ def main():
                     assert job['state'] == 'complete' and job['failed'] == 0, job
                     assert job['synced'] == expected_synced and job['skipped'] == expected_skipped, job
                 assert sent == [missing.event_id], sent
-                print(f'PASS {APP_VERSION}: frozen app checks cloud, sends only missing ticket, '
-                      'skips existing ticket, repeated retry sends nothing; no real cloud/customer data used')
+                print(f'PASS {APP_VERSION}: frozen app resets selected tickets, checks exact QR, sends only missing QR, '
+                      'skips QR with a different event_id, repeated retry sends nothing; no real cloud/customer data used')
             finally:
                 process.terminate()
                 process.wait(timeout=20)

@@ -2454,7 +2454,8 @@ class ManualSyncController:
             return f"đợt #{value.get('id')}"
         return f"{kind}:{value}"
 
-    def _run_plan(self, plan: list[tuple[str, object]]) -> None:
+    def _run_plan(self, plan: list[tuple[str, object]]) -> set[str]:
+        skipped_measurements: set[str] = set()
         for kind, value in plan:
             label = self._item_label(kind, value)
             with self._lock:
@@ -2464,6 +2465,8 @@ class ManualSyncController:
                 if kind == "measurement":
                     if (self._job.get("filters") or {}).get("force") == "1":
                         result, error = self._reconcile_measurement(str(value))
+                        if result == "skipped":
+                            skipped_measurements.add(str(value))
                         with self._lock:
                             self._job["done"] = int(self._job["done"]) + 1
                             self._job[result] = int(self._job.get(result, 0)) + 1
@@ -2493,8 +2496,10 @@ class ManualSyncController:
                     self._job["last_error"] = error[:500]
                 self._job["current"] = ""
 
+        return skipped_measurements
+
     def _reconcile_measurement(self, event_id: str) -> tuple[str, str]:
-        """Read cloud truth before resending, including locally 'synced' rows."""
+        """Check the exact QR across cloud history before resending a ticket."""
         url, key = _supabase_project_url(), _supabase_read_key()
         if not url or not key:
             raise ValueError("Chưa cấu hình kết nối đọc Supabase để kiểm tra phiếu đã có")
@@ -2506,16 +2511,22 @@ class ManualSyncController:
                 return "skipped", ""
             # An HTTP/auth/read failure propagates: never assume a failed read
             # means the record is missing and never change local state then.
-            existing = fetch_supabase_table(url, key, event_id=event_id, limit=1)
+            qr_code = str(row.qr_code or "").strip()
+            if not qr_code:
+                return "failed", "Phiếu chưa có mã QR để kiểm tra Supabase"
+            existing = fetch_supabase_table(url, key, qr_code=qr_code, qr_exact=True, limit=1)
             if existing:
-                if str(existing[0].get("event_id") or "") != event_id:
-                    raise ValueError("Supabase trả sai event_id khi kiểm tra phiếu")
                 remote = existing[0]
-                self.store.mark_synced(
-                    event_id, int(remote["id"]),
-                    remote.get("core_image_url") or remote.get("image_url") or row.remote_image_url,
-                    row.remote_image_public_id,
-                )
+                if str(remote.get("qr_code") or "").strip() != qr_code:
+                    raise ValueError("Supabase trả sai mã QR khi kiểm tra phiếu")
+                # A QR may already exist under a different event_id. Skip it,
+                # but only acknowledge this local event if it really exists.
+                if str(remote.get("event_id") or "") == event_id:
+                    self.store.mark_synced(
+                        event_id, int(remote["id"]),
+                        remote.get("core_image_url") or remote.get("image_url") or row.remote_image_url,
+                        row.remote_image_public_id,
+                    )
                 return "skipped", ""
             self.store.requeue_measurements([event_id])
             ok = self.worker._sync_measurement(self.store.get(event_id))
@@ -2526,10 +2537,12 @@ class ManualSyncController:
             active_filters = filters
             active_plan = plan
             while True:
-                self._run_plan(active_plan)
+                skipped = self._run_plan(active_plan)
                 retry_plan, _retry_counts = self._plan(
                     active_filters, include_local=False, waiting_only=True,
                 )
+                retry_plan = [(kind, value) for kind, value in retry_plan
+                              if kind != "measurement" or str(value) not in skipped]
                 if retry_plan:
                     with self._lock:
                         self._job["total"] = int(self._job["total"]) + len(retry_plan)
@@ -2586,10 +2599,12 @@ class ManualSyncController:
             self._job["message"] = "Đẩy kho · đồng bộ cân AI trước khi ghi nhap_kho"
         try:
             if plan:
-                self._run_plan(plan)
+                skipped = self._run_plan(plan)
                 retry_plan, _retry_counts = self._plan(
                     filters, include_local=False, waiting_only=True
                 )
+                retry_plan = [(kind, value) for kind, value in retry_plan
+                              if kind != "measurement" or str(value) not in skipped]
                 if retry_plan:
                     with self._lock:
                         self._job["total"] = int(self._job["total"]) + len(retry_plan)

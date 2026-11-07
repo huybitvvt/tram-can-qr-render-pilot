@@ -36,7 +36,7 @@ def main():
         relative = f'backend/src/roll_qr_scale/{name}.py'
         old = subprocess.check_output(['git','show',f'v0.2.0-rc80:{relative}'],cwd=root)
         assert (root/relative).read_bytes().replace(b'\r\n',b'\n')==old.replace(b'\r\n',b'\n'),name
-    # rc89 adds only an outbox requeue helper and an exact cloud event filter.
+    # rc89/rc90 add an outbox requeue helper and exact event/QR cloud filters.
     # Keep verifying the remaining rc80 persistence/API implementation verbatim
     # at the AST level, alongside the frozen-to-current-source check above.
     for name in ('storage', 'api_client'):
@@ -56,6 +56,15 @@ def main():
             assert len(added) == 1
             assert ast.dump(added[0], include_attributes=False) == ast.dump(ast.parse('if event_id:\n    params["event_id"] = f"eq.{event_id}"').body[0], include_attributes=False)
             func.body.remove(added[0])
+            index = next(i for i, arg in enumerate(func.args.kwonlyargs) if arg.arg == 'qr_exact')
+            func.args.kwonlyargs.pop(index)
+            func.args.kw_defaults.pop(index)
+            qr_branch = next(node for node in func.body if isinstance(node, ast.If)
+                             and ast.dump(node.test) == ast.dump(ast.parse('selected_qr and qr_exact', mode='eval').body))
+            assert ast.dump(qr_branch.body[0], include_attributes=False) == ast.dump(
+                ast.parse('params["qr_code"] = f"eq.{selected_qr}"').body[0], include_attributes=False)
+            assert len(qr_branch.orelse) == 1 and isinstance(qr_branch.orelse[0], ast.If)
+            func.body[func.body.index(qr_branch)] = qr_branch.orelse[0]
         assert ast.dump(current, include_attributes=False) == ast.dump(old, include_attributes=False), name
     warehouse_path = 'backend/src/roll_qr_scale/warehouse.py'
     old_warehouse = subprocess.check_output(['git','show',f'v0.2.0-rc80:{warehouse_path}'],cwd=root)
@@ -97,7 +106,7 @@ def main():
     assert digest(handoff/'TramCanQR-Setup.exe')==digest(handoff/f'TramCanQR-Setup-{APP_VERSION}.exe')
     assert (handoff/'CAP-NHAT-BAN-MOI.cmd').read_bytes()==(root/'packaging/CAP-NHAT-BAN-MOI.cmd').read_bytes()
     print(f'PASS {APP_VERSION}: frozen modules/frontend match source; trial model SHA matches; '
-          'rc80 persistence/API preserved except rc89 requeue helper and event filter; sync/schema unchanged; warehouse differs only by reviewed damaged routing and export time; '
+          'rc80 persistence/API preserved except reviewed requeue helper and exact event/QR filters; sync/schema unchanged; warehouse differs only by reviewed damaged routing and export time; '
           'counter model SHA matches; Gemini SDK absent; no private config/DB; installer hashes match')
 
 

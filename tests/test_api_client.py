@@ -231,6 +231,13 @@ def test_fetch_supabase_table_limits_columns_rows_and_filters(monkeypatch) -> No
     fetch_supabase_table("https://project.supabase.co", "public-key", event_id="event-1", limit=1)
     retry_query = urllib.parse.parse_qs(urllib.parse.urlsplit(captured["request"].full_url).query)
     assert retry_query["event_id"] == ["eq.event-1"]
+
+    fetch_supabase_table("https://project.supabase.co", "public-key", qr_code="SP_(01),*", qr_exact=True, limit=1)
+    qr_query = urllib.parse.parse_qs(urllib.parse.urlsplit(captured["request"].full_url).query)
+    assert qr_query["qr_code"] == ["eq.SP_(01),*"]
+    assert "event_id" not in qr_query
+    assert "metadata->>work_date" not in qr_query
+    assert "metadata->>machine" not in qr_query
     assert retry_query["limit"] == ["1"]
     assert "metadata->>work_date" not in retry_query
 

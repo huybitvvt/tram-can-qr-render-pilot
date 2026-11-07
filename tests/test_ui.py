@@ -694,7 +694,8 @@ def test_reset_supabase_selected_rows_can_be_sent_again(tmp_path) -> None:
 
 
 @pytest.mark.parametrize("local_synced", [False, True])
-def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, local_synced) -> None:
+@pytest.mark.parametrize("different_event", [False, True])
+def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, local_synced, different_event) -> None:
     import roll_qr_scale.test_ui as ui
 
     store = MeasurementStore(tmp_path / "retry.db", tmp_path / "captures")
@@ -710,16 +711,19 @@ def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, loca
     monkeypatch.setattr(ui, "_supabase_project_url", lambda: "https://test.supabase.co")
     monkeypatch.setattr(ui, "_supabase_read_key", lambda: "test-key")
 
-    def read_cloud(url, key, *, event_id, limit):
-        checked.append(event_id)
-        if event_id == unreadable.event_id:
+    def read_cloud(url, key, *, qr_code, qr_exact, limit):
+        assert qr_exact is True
+        assert limit == 1
+        checked.append(qr_code)
+        if qr_code == unreadable.qr_code:
             raise OSError("Cannot read Supabase")
-        if event_id == existing.event_id:
-            return [{"id": 22, "event_id": event_id}]
+        if qr_code == existing.qr_code:
+            return [{"id": 22, "event_id": "cloud-other-event" if different_event else existing.event_id,
+                     "qr_code": qr_code}]
         return []
 
     def send(url, payload, image_path, token):
-        assert payload["event_id"] in checked
+        assert payload["qr_code"] in checked
         assert payload["skip_cloudinary"] is True
         sent.append(payload["event_id"])
         return {"ok": True, "id": 23, "event_id": payload["event_id"], "local_backup_committed": True}
@@ -737,11 +741,17 @@ def test_retry_supabase_checks_remote_before_sending(tmp_path, monkeypatch, loca
         assert result["synced"] == 1
         assert result["failed"] >= 1
         assert sent == [missing.event_id]
-        assert store.get(existing.event_id).remote_id == 22
+        if different_event:
+            assert store.get(existing.event_id).remote_id == (99 if local_synced else None)
+            assert store.get(existing.event_id).sync_status == ("synced" if local_synced else "pending")
+        else:
+            assert store.get(existing.event_id).remote_id == 22
         assert store.get(missing.event_id).sync_status == "synced"
         assert store.get(unreadable.event_id).sync_status == ("synced" if local_synced else "pending")
         # A repeated click checks again; both cloud rows now exist.
-        monkeypatch.setattr(ui, "fetch_supabase_table", lambda url, key, *, event_id, limit: [{"id": 23, "event_id": event_id}])
+        monkeypatch.setattr(ui, "fetch_supabase_table", lambda url, key, *, qr_code, qr_exact, limit: [
+            {"id": 23, "event_id": "cloud-event", "qr_code": qr_code}
+        ])
         second = controller.run_now(filters)
         assert second["skipped"] == 3
         assert sent == [missing.event_id]

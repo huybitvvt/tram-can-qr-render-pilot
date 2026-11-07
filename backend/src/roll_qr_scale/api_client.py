@@ -304,6 +304,7 @@ def fetch_supabase_table(
     production_order: str = "",
     qr_code: str = "",
     event_id: str = "",
+    qr_exact: bool = False,
     timeout: float = 10.0,
 ) -> list[dict[str, object]]:
     params: dict[str, object] = {
@@ -338,7 +339,9 @@ def fetch_supabase_table(
     selected_qr = str(qr_code or "").strip()
     if event_id:
         params["event_id"] = f"eq.{event_id}"
-    if selected_qr:
+    if selected_qr and qr_exact:
+        params["qr_code"] = f"eq.{selected_qr}"
+    elif selected_qr:
         safe = selected_qr.replace("*", "").replace(",", "").replace(")", "")
         if safe:
             params["qr_code"] = f"ilike.*{safe}*"
