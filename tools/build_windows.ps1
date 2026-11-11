@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = "Stop"
+﻿param([string]$PythonPath)
+
+$ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 
@@ -10,7 +12,11 @@ $pythonCandidates = @(
     (Join-Path $projectRoot ".venv\Scripts\python.exe"),
     (Join-Path $projectRoot ".venv-pilot\Scripts\python.exe")
 )
-$python = $pythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if ($PythonPath) {
+    $python = (Resolve-Path -LiteralPath $PythonPath).Path
+} else {
+    $python = $pythonCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+}
 if (-not $python) {
     throw "Chưa có môi trường Python. Hãy chạy CAI-DAT-LAN-DAU.cmd trước."
 }

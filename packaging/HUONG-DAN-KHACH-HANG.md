@@ -1,10 +1,13 @@
-# Trạm Cân QR — rc88 cải thiện OCR số đầu 7
+# Trạm Cân QR — rc92 sửa lỗi cắt chữ số LED
 
-rc88 cắt sát vùng LED và thay bước tăng tương phản để giảm nhầm `7` thành `2`.
-Trên 31 mẫu từ video quay màn hình, số lần đọc sai `2.08` giảm từ 4 xuống 0;
-vẫn còn 4 mẫu không đọc được. Chưa xác nhận hết lỗi trên luồng camera xưởng.
-Đối chiếu số trên cân trước khi lưu. Các chức năng cân hàng hỏng và đếm cuộn
-thử của rc87 được giữ nguyên.
+rc92 sửa bước cắt vùng số có thể làm mất chữ số LED đỏ khi màu/độ sáng các
+chữ số khác nhau. Vẫn dùng PP-OCRv6 Small chạy offline, giữ ngưỡng xác nhận số
+ổn định và các chức năng rc91. Chưa xác nhận hết lỗi trên luồng camera xưởng;
+đối chiếu số trên cân trước khi lưu.
+
+Đóng ứng dụng, bấm **Cập nhật Trạm Cân QR**, rồi mở lại trang và nhấn
+**Ctrl+F5**. Hoặc tải bộ cài rc92 từ GitHub Release và cài đè. Sau cập nhật,
+phiên bản phải là **0.2.0-rc92**; dữ liệu, ảnh, cấu hình và mã trạm được giữ nguyên.
 
 ## Đếm cuộn ra máy — bản thử
 

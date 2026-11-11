@@ -64,10 +64,12 @@ def recognition_variants(crop: np.ndarray) -> list[tuple[str,np.ndarray]]:
     if crop.size == 0:
         return []
     blue,green,red = cv2.split(crop)
-    threshold,_ = cv2.threshold(green,0,255,cv2.THRESH_BINARY|cv2.THRESH_OTSU)
-    # Locate bright red pixels, including decimal points and minus signs.
+    threshold,_ = cv2.threshold(red,0,255,cv2.THRESH_BINARY|cv2.THRESH_OTSU)
+    # Locate red pixels, including decimal points and minus signs. Exposure
+    # and white balance can leave a lit red digit with little or no green.
+    # Thresholding green against brighter digits then crops away that digit.
     # Signed arithmetic prevents uint8 wraparound from admitting blue pixels.
-    lit = ((green >= max(1,threshold))
+    lit = ((red >= threshold)
            & (red.astype(np.int16)-green > 10)
            & (red.astype(np.int16)-blue > 15))
     ys,xs = np.nonzero(lit)

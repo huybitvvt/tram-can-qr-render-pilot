@@ -101,6 +101,10 @@ def main():
                 ('rc85', rc85_updater, '0.2.0-rc85'),
                 ('rc86', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc86'),
                 ('rc87', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc87'),
+                ('rc88', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc88'),
+                ('rc89', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc89'),
+                ('rc90', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc90'),
+                ('rc91', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc91'),
                 ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd", "0.2.0-rc79")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"
