@@ -179,6 +179,15 @@ def main():
                 raise
             assert page.evaluate('current().localLive.result.weight')==args.expect
             page.screenshot(path=str(args.out/'live.png'),full_page=True)
+            expected_diagnostic_image = page.evaluate('current().localLive.image')
+            with page.expect_download() as downloaded:
+                page.locator('#localDiagnostic').click()
+            downloaded.value.save_as(args.out/'ocr-diagnostic.json')
+            diagnostic = json.loads((args.out/'ocr-diagnostic.json').read_text(encoding='utf-8'))
+            assert diagnostic['schema'] == 'tramcan-ocr-diagnostic-v1'
+            assert diagnostic['image'] == expected_diagnostic_image
+            assert diagnostic['result']['weight'] == args.expect
+            assert 'live_token' not in diagnostic['result']
             # Preview does not create production records or photo drafts.
             with sqlite3.connect(root/'data'/'measurements.db') as db:
                 assert db.execute('SELECT COUNT(*) FROM measurements').fetchone()==(1,)
@@ -318,6 +327,7 @@ def main():
         assert hashlib.sha256(previous_photo.read_bytes()).hexdigest()==previous_hash
         summary={'ok':True,'real_model':True,'browser':'Edge','live_weight':args.expect,
             'space_reused_without_ocr':True,'manual_roi':True,'auto_led':True,'decimal_switch':True,
+            'diagnostic_download_matches_frame':True,
             'existing_data_config_photo_draft_preserved':True,'preview_no_writes':True,'browser_errors':errors}
         summary['new_record_saved_alongside_rc80_data']=True
         summary['station_identity']={'gateway':gateway_id,'station':station_id,'camera':camera_id}

@@ -23,7 +23,7 @@ def main():
     archive = executable.open_embedded_archive('PYZ.pyz')
     for prefix, names in [('roll_qr_scale', ['test_ui','storage','station_session','sync','api_client',
         'warehouse','damaged_goods','roll_counter','local_live','local_camera','local_camera_manager']),
-        ('tramcan_rapidocr', ['engine','decision','parsing','regions'])]:
+        ('tramcan_rapidocr', ['engine','decision','parsing','regions','leading_led'])]:
         for name in names:
             source = root/'backend'/'src'/prefix/(name+'.py')
             actual = archive.extract(prefix+'.'+name)
@@ -91,6 +91,9 @@ def main():
     for key in ('det-small','rec-small'):
         model = package/'_internal/assets/models/rapidocr'/info[key]['file']
         assert digest(model)==info[key]['sha256'],model
+    glyph_manifest = json.loads((root/'backend/src/tramcan_rapidocr/led_glyph.json').read_text())
+    assert json.loads((package/'_internal/tramcan_rapidocr/led_glyph.json').read_text()) == glyph_manifest
+    assert digest(package/'_internal/tramcan_rapidocr'/glyph_manifest['file']) == glyph_manifest['sha256']
     counter_manifest = json.loads((root/'backend/src/roll_qr_scale/counter_model.json').read_text())
     assert digest(package/'_internal/assets/models/roll-counter'/counter_manifest['file']) == counter_manifest['sha256']
     assert json.loads((package/'_internal/roll_qr_scale/counter_model.json').read_text()) == counter_manifest

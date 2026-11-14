@@ -1,13 +1,19 @@
-# Trạm Cân QR — rc92 sửa lỗi cắt chữ số LED
+# Trạm Cân QR — rc93 xử lý 7 đọc thành 1
 
-rc92 sửa bước cắt vùng số có thể làm mất chữ số LED đỏ khi màu/độ sáng các
-chữ số khác nhau. Vẫn dùng PP-OCRv6 Small chạy offline, giữ ngưỡng xác nhận số
-ổn định và các chức năng rc91. Chưa xác nhận hết lỗi trên luồng camera xưởng;
-đối chiếu số trên cân trước khi lưu.
+rc93 bổ sung bộ phân loại chữ số LED nhẹ, chạy offline cùng PP-OCRv6 Small.
+Khi hai lượt OCR nhầm chữ số đầu 7 thành 1, ứng dụng kiểm tra nét ngang trên,
+đủ ô chữ số và model LED trước khi lấy kết quả. Ảnh còn mơ hồ bị từ chối.
+Chưa có luồng camera gốc để nghiệm thu tại xưởng; đối chiếu cân trước khi lưu.
 
-Đóng ứng dụng, bấm **Cập nhật Trạm Cân QR**, rồi mở lại trang và nhấn
-**Ctrl+F5**. Hoặc tải bộ cài rc92 từ GitHub Release và cài đè. Sau cập nhật,
-phiên bản phải là **0.2.0-rc92**; dữ liệu, ảnh, cấu hình và mã trạm được giữ nguyên.
+Mở camera là ứng dụng tự đọc **live liên tục**. Khi hiện **ỔN ĐỊNH**, nhấn
+**Space** để lấy đúng số và ảnh đã đọc vào ô cân đang chọn. Không cần bấm nút
+để bắt đầu nhận diện. **Chụp ảnh / Giữ ảnh** là chế độ thủ công khi cần.
+
+Đóng ứng dụng, bấm **Cập nhật Trạm Cân QR** hoặc tải bộ cài từ GitHub Release
+và cài đè. Mở lại ứng dụng và nhấn **Ctrl+F5** trên trang đang mở. Phiên bản
+phải là **0.2.0-rc93**; dữ liệu, ảnh, cấu hình và mã trạm được giữ nguyên.
+Nếu nhận sai hoặc không ra số, bấm **Xuất ảnh + OCR** rồi gửi tệp JSON cho
+người hỗ trợ. Tệp chứa đúng ảnh camera và kết quả, không tự ghi phiếu cân.
 
 ## Đếm cuộn ra máy — bản thử
 

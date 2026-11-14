@@ -13,6 +13,7 @@ import numpy as np
 from .decision import Observation,Reading,decide
 from .regions import recognition_variants,red_display_regions
 from .parsing import parse_weight
+from .leading_led import LeadingLEDVerifier
 
 
 def sha256(path: Path) -> str:
@@ -71,7 +72,7 @@ def prepare_models(root: Path, size: str, threads: int = 2) -> dict:
 
 
 class ScaleReader:
-    def __init__(self, root: Path, size: str = 'small', *, threads: int = 2, min_confidence: float = .85, decimal_policy: str = 'explicit'):
+    def __init__(self, root: Path, size: str = 'small', *, threads: int = 2, min_confidence: float = .85, decimal_policy: str = 'explicit', leading_guard: bool = True):
         if not 0 <= min_confidence <= 1 or threads<1:
             raise ValueError('Invalid confidence or CPU thread count')
         manifest = root/f'manifest-{size}.json'
@@ -93,6 +94,7 @@ class ScaleReader:
         if decimal_policy not in {'explicit','fixed-2'}:
             raise ValueError('Unknown decimal policy')
         self.fixed_digits = decimal_policy=='fixed-2'
+        self.leading_guard = LeadingLEDVerifier(threads=threads) if leading_guard else None
 
     def _recognize(self, crop: np.ndarray, region: tuple | None) -> list[Observation]:
         observations = []
@@ -102,19 +104,37 @@ class ScaleReader:
                 observations.append(Observation(str(text),float(score),name,region))
         return observations
 
+    def _read_region(self, crop: np.ndarray, region: tuple | None) -> Reading:
+        reading = decide(self._recognize(crop,region),min_confidence=self.min_confidence,
+                         fixed_digits=self.fixed_digits)
+        if self.leading_guard is not None:
+            reading = self.leading_guard.verify(crop,reading,min_confidence=self.min_confidence,
+                                                 fixed_digits=self.fixed_digits,region=region)
+        return reading
+
     def read_crop(self, crop: np.ndarray) -> Reading:
         started = time.perf_counter()
-        reading = decide(self._recognize(crop,None),min_confidence=self.min_confidence,fixed_digits=self.fixed_digits)
+        reading = self._read_region(crop,None)
         reading.elapsed_ms = (time.perf_counter()-started)*1000
         return reading
 
     def read(self, frame: np.ndarray) -> Reading:
         started = time.perf_counter()
         regions = red_display_regions(frame)
-        observations = []
+        readings = []
         for region in regions:
-            observations.extend(self._recognize(region.crop(frame),astuple(region)))
-        reading = decide(observations,min_confidence=self.min_confidence,fixed_digits=self.fixed_digits)
+            readings.append(self._read_region(region.crop(frame),astuple(region)))
+        observations = [item for result in readings for item in result.observations]
+        if any(result.reason == 'ambiguous-leading-led' for result in readings):
+            reading = Reading(None,'ambiguous-leading-led',observations)
+        else:
+            effective = [item for result in readings for item in (
+                result.observations[-1:] if result.reason == 'verified-leading-led'
+                else result.observations)]
+            reading = decide(effective,min_confidence=self.min_confidence,fixed_digits=self.fixed_digits)
+            reading.observations = observations
+            if reading.value is not None and any(result.reason == 'verified-leading-led' for result in readings):
+                reading.reason = 'verified-leading-led'
         if not regions:
             reading.reason = 'display-region-not-found'
         reading.elapsed_ms = (time.perf_counter()-started)*1000

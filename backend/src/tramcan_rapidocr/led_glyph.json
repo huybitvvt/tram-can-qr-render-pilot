@@ -1,0 +1,33 @@
+{
+  "version": "led-glyph-v1",
+  "file": "led_glyph.onnx",
+  "sha256": "61e7d8535a2179eea573131dd8f0565f047f7a5edf54e2b5ac2b1b47dcbebbc4",
+  "bytes": 830634,
+  "input": [
+    1,
+    1,
+    48,
+    32
+  ],
+  "labels": [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "invalid-pattern"
+  ],
+  "training": "Original balanced synthetic seven-segment masks; no factory/video images used for training",
+  "seed": 20261114,
+  "epochs": 12,
+  "samples_per_epoch": 11000,
+  "scope": "Leading 1/7 verification, with lit top stroke and two OCR views agreeing on remaining digits",
+  "training_code": "tools/train_led_glyph.py",
+  "training_code_sha256": "d48fca77edbb9e38d41212aa2fb839cf9a6c57e72f53eb64c5a7b4cedc2bd2d8",
+  "validation_note": "Video crops were used as development regressions, not training inputs; no claim of factory-wide accuracy."
+}

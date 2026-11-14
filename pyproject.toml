@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "roll-qr-scale"
-version = "0.2.0rc92"
+version = "0.2.0rc93"
 description = "Capture a roll QR code and bind it to a scale reading."
 requires-python = ">=3.11"
 dependencies = [
@@ -49,4 +49,4 @@ addopts = "-q"
 
 [tool.setuptools.package-data]
 roll_qr_scale = ["counter_model.json"]
-tramcan_rapidocr = ["model_sources.json"]
+tramcan_rapidocr = ["model_sources.json", "led_glyph.json", "led_glyph.onnx"]

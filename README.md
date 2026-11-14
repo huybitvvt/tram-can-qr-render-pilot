@@ -1,14 +1,15 @@
-# Trạm Cân QR — OCR local rc92
+# Trạm Cân QR — OCR local rc93
 
-Bản Windows **0.2.0-rc92** sửa lỗi cắt mất chữ số LED đỏ khi độ sáng/màu các
-chữ số khác nhau, giữ các chức năng rc91. Nhận diện cân dùng **RapidOCR + PP-OCRv6 Small**,
-chạy offline trên CPU. Không gọi Gemini, Codex hay Antigravity để đọc cân
-trong bộ cài Windows này.
+Bản Windows **0.2.0-rc93** xử lý trường hợp chữ số đầu **7 bị đọc thành 1**
+bằng **RapidOCR + PP-OCRv6 Small**, model LED nhẹ và kiểm tra nét ảnh.
+Giữ các chức năng rc92; nhận diện live liên tục, chạy offline trên CPU.
+Phạm vi kiểm chứng dựa trên video quay màn hình; vẫn cần đối chiếu cân thật
+khi đưa vào xưởng. Không gọi Gemini, Codex hay Antigravity để đọc cân.
 
 - [Tải bộ cài TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
 - [Tải file cập nhật CAP-NHAT-BAN-MOI.cmd](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 - [Hướng dẫn máy khách](packaging/HUONG-DAN-KHACH-HANG.md)
-- [Ghi chú rc92 và giới hạn kiểm chứng](docs/release-notes-0.2.0-rc92.md)
+- [Ghi chú rc93 và giới hạn kiểm chứng](docs/release-notes-0.2.0-rc93.md)
 
 Camera đọc liên tục và hiện số; **Space lấy ngay số ổn định vào ô cân được chọn**,
 giữ ảnh đúng khung hình đã đọc. Không chờ chụp rồi gọi OCR lại.
@@ -16,6 +17,7 @@ Số cũ, camera đã dừng, vùng LED/camera thay đổi hoặc số chưa ổ
 
 Giữ chọn camera, DirectShow/Media Foundation/trình duyệt, Mở/Dừng, chọn vùng LED
 bằng chuột, tự tìm LED đỏ, cấu hình hai số thập phân, xem chuỗi OCR và mở ảnh thử.
+Nút **Xuất ảnh + OCR** tải đúng ảnh đã đọc và kết quả để gửi khi báo lỗi.
 Ảnh thử chỉ đọc, không tự ghi phiếu. Live preview không tự lưu ảnh hay số cân.
 Nhấn Space/nút lấy số mới bắt đầu lưu ảnh bằng chứng theo luồng phiếu cũ.
 
@@ -29,9 +31,10 @@ Lần đầu rc82 sao lưu DB hiện tại bằng SQLite backup (gồm dữ li�
 và metadata phiên đang chờ vào `backups/before-rapidocr-rc82-*`. Không khôi phục
 DB cũ lên dữ liệu mới. Bộ cài giữ AppId, tên EXE, đường dẫn cài và kênh cập nhật cũ.
 
-Model và ngưỡng đọc giữ như bản trial1 đã thử tại xưởng; vẫn phải đối chiếu số cân
-trước khi lưu. Ba lần đọc cùng số liên tiếp chỉ xác nhận tính ổn định theo thời gian,
-không bảo đảm model không nhầm chữ số. Chọn vùng LED đúng giúp giảm sai vùng.
+Model OCR và ngưỡng live giữ như rc92; rc93 thêm verifier cho chữ số đầu 1/7.
+Vẫn phải đối chiếu số cân trước khi lưu. Ba lần đọc cùng số liên tiếp chỉ xác
+nhận tính ổn định theo thời gian, không bảo đảm model không nhầm chữ số.
+Chọn vùng LED đúng giúp giảm sai vùng.
 
 Build Windows: Python 3.12 x64 và Inno Setup 6. Tải model đúng SHA-256 bằng tool chuẩn bị trước khi build:
 

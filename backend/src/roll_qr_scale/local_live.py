@@ -6,6 +6,7 @@ enters the existing durable photo/measurement workflow.
 from collections import deque
 from dataclasses import dataclass
 import hashlib
+import os
 from pathlib import Path
 import threading
 import time
@@ -89,6 +90,8 @@ class LocalLiveReader:
                 'confidence': max((o.confidence for o in reading.observations), default=0),
                 'recognition_source': 'rapidocr-local', 'recognition_provider': 'rapidocr',
                 'recognition_profile': 'small', 'roi': roi_text,
+                'app_version': os.environ.get('ROLL_SCALE_APP_VERSION', 'source'),
+                'led_verifier': 'led-glyph-v1',
                 'roi_method': 'manual-led' if selected else 'red-led',
                 'regions': regions, 'elapsed_ms': reading.elapsed_ms,
                 'observations': reading.as_dict()['observations'], 'reason': reading.reason,

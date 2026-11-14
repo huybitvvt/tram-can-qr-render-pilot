@@ -32,6 +32,21 @@ async function localTakeSnapshot(){
 function localShowSnapshot(session,snapshot){session.preview.onload=()=>{if(session._localSnapshot===snapshot)showPreview(session)};session.preview.src=snapshot.image;if(session.preview.complete&&session.preview.naturalWidth)showPreview(session)}
 function localResumeLive(){const session=current();if(!session||session._analyzeLock||blocksCameraChange(session))return;localInvalidate(session);if(session.stream)showVideo(session);status(captureStatus,'Đã tiếp tục live. Space lấy số khi ổn định; Chụp ảnh / Giữ ảnh để lấy thủ công.','ok')}
 function localCapturePayload(session,capture){return {roi:capture?capture.roi:session.ledRoi?session.ledRoi.join(','):'auto',fixed_two:capture?capture.fixedTwo:localOcrState.fixedTwo,live_token:capture?capture.result.live_token:'',recognition_provider:'rapidocr',recognition_profile:'small'}}
+function localDiagnosticPayload(session){
+ const live=session?.localLive;
+ if(!live?.result||!live.image||live.key!==localKey(session))throw new Error('Chưa có ảnh và kết quả OCR khớp cấu hình hiện tại.');
+ const result=live.result;
+ return {schema:'tramcan-ocr-diagnostic-v1',exported_at:new Date().toISOString(),app_version:result.app_version||'unknown',station_id:session.stationId,camera_id:session.cameraId,mode:live.stillImage?'test-image':live.manualCapture?'snapshot':'live',frame_age_ms:Math.max(0,Math.round(performance.now()-live.startedAt)),image:live.image,request_roi:live.roi||(session.ledRoi?session.ledRoi.join(','):'auto'),fixed_two:live.fixedTwo??localOcrState.fixedTwo,result:{weight:result.weight??null,weight_found:Boolean(result.weight_found),stable:Boolean(result.stable),reason:result.reason,roi:result.roi,regions:result.regions,elapsed_ms:result.elapsed_ms,observations:result.observations,recognition_provider:result.recognition_provider,recognition_profile:result.recognition_profile,led_verifier:result.led_verifier}};
+}
+function localExportDiagnostic(){
+ let url;
+ try{
+  const payload=localDiagnosticPayload(current()),blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  url=URL.createObjectURL(blob);const link=document.createElement('a');link.href=url;link.download='TramCanQR-OCR-'+payload.exported_at.replace(/[:.]/g,'-')+'.json';document.body.append(link);link.click();link.remove();
+  status(captureStatus,'Đã tạo tệp chẩn đoán chứa đúng ảnh vừa đọc và kết quả OCR. Gửi tệp này khi báo lỗi nhận diện.','ok');
+ }catch(error){status(captureStatus,error.message,'warn')}
+ finally{if(url)setTimeout(()=>URL.revokeObjectURL(url),1000)}
+}
 async function localCaptureSlot(session,capture,kind,index,context){
  const round=session.rounds[index],product=kind==='product',prefix=product?'product':'core';
  const retries=round.localCaptures||(round.localCaptures={});
@@ -94,6 +109,7 @@ function localRender(session=current()){
  $('localSnapshot').disabled=Boolean(busy||panelMode||held?.pending||!session.stream||session.video.readyState<2||session.video.paused);
  $('localSnapshot').setAttribute('aria-busy',String(Boolean(held?.pending)));
  $('localResumeLive').hidden=!held;$('localResumeLive').disabled=Boolean(busy);
+ $('localDiagnostic').disabled=Boolean(!live?.image||!live.result||live.key!==localKey(session));
  $('localWeight').textContent=fresh&&live.result.weight_found?Number(live.result.weight).toFixed(2)+' kg':'— kg';
  $('localWeightStatus').textContent=held?(held.pending?'ĐÃ GIỮ ẢNH · đang đọc số…':held.error?'ĐÃ GIỮ ẢNH · đọc lỗi, hãy chụp lại':held.used?'Ảnh này đã lấy số · Chụp lại cho ô tiếp theo hoặc Tiếp tục live':performance.now()-held.startedAt>(held.result?.snapshot_ttl_ms||0)?'Ảnh đã hết hạn 10 phút · hãy chụp lại':held.result?.weight_found?'ĐÃ GIỮ ẢNH · kiểm tra ảnh rồi Space lấy số thủ công':'ĐÃ GIỮ ẢNH · chưa đọc đủ số, chỉnh vùng hoặc chụp lại'):fresh&&live.stillImage?'Kết quả ảnh thử · chưa ghi phiếu':!session.stream?'Mở camera để đọc liên tục':!fresh?'Đang chờ kết quả mới…':live.result.stable?'ỔN ĐỊNH · Space lấy số vào ô đang chọn':live.result.weight_found?'Đang kiểm tra ổn định…':'Chưa đọc đủ số · chỉnh vùng/góc camera';
  $('localWeightStatus').style.color=fresh&&live.result.stable?'#166534':'#92400e';
@@ -108,6 +124,7 @@ function localSetup(){
  const host=document.createElement('section');host.id='localOcrControls';host.className='local-ocr';host.setAttribute('aria-label','Camera và nhận diện cân local');
  host.innerHTML='<div class="local-ocr-row"><label>Camera <select id="localCameraIndex" aria-label="Số thứ tự camera USB"></select></label><select id="localCameraBackend" aria-label="Driver camera"><option>DirectShow</option><option>Media Foundation</option><option>Trình duyệt</option></select><button type="button" id="localOpenCamera">Mở camera</button><button type="button" id="localStopCamera">Dừng</button><button type="button" id="localSnapshot" class="primary" disabled>Chụp ảnh / Giữ ảnh</button><button type="button" id="localResumeLive" hidden>Tiếp tục live</button></div><div class="local-ocr-row"><button type="button" id="localSelectLed">Chọn vùng số cân</button><button type="button" id="localAutoLed">Tự tìm LED đỏ</button></div><label><input type="checkbox" id="localFixedTwo" checked> Cân luôn có 2 số thập phân</label><div id="localRegionLabel" class="local-led-label"></div><div id="localWeight" class="local-live-value">— kg</div><div id="localWeightStatus" class="local-live-note" role="status">Mở camera để đọc liên tục</div><div id="localCrop" class="local-crop" aria-label="Vùng ảnh vừa đọc"></div><div class="local-ocr-row"><button type="button" id="localDetails">Xem chuỗi OCR</button><button type="button" id="localFile">Mở ảnh thử…</button></div><div class="local-live-note">PP-OCRv6 Small · CPU · Space lấy số ổn định. Cân dao động: Chụp ảnh / Giữ ảnh, kiểm tra ảnh rồi lấy số thủ công.</div>';
  $('productionToolbar').after(host);
+ const diagnostic=document.createElement('button');diagnostic.type='button';diagnostic.id='localDiagnostic';diagnostic.textContent='Xuất ảnh + OCR';diagnostic.disabled=true;diagnostic.title='Tải tệp chẩn đoán của đúng ảnh vừa đọc để gửi khi báo lỗi';$('localDetails').after(diagnostic);diagnostic.onclick=localExportDiagnostic;
  for(let index=0;index<10;index++)$('localCameraIndex').add(new Option(String(index),String(index)));
  $('localOpenCamera').onclick=()=>openDefaultCamera(current());
  $('localSnapshot').onclick=()=>localTakeSnapshot();$('localResumeLive').onclick=()=>localResumeLive();
