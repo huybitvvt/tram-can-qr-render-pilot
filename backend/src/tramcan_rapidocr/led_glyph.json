@@ -1,7 +1,7 @@
 {
-  "version": "led-glyph-v1",
+  "version": "led-glyph-v2",
   "file": "led_glyph.onnx",
-  "sha256": "61e7d8535a2179eea573131dd8f0565f047f7a5edf54e2b5ac2b1b47dcbebbc4",
+  "sha256": "4e46936cdd17df01c95ca96bb6631bec54ef951966a845f738b61eaf0784aaa6",
   "bytes": 830634,
   "input": [
     1,
@@ -22,12 +22,12 @@
     "9",
     "invalid-pattern"
   ],
-  "training": "Original balanced synthetic seven-segment masks; no factory/video images used for training",
-  "seed": 20261114,
-  "epochs": 12,
-  "samples_per_epoch": 11000,
-  "scope": "Leading 1/7 verification, with lit top stroke and two OCR views agreeing on remaining digits",
+  "training": "Original balanced synthetic seven-segment masks with symmetric bottom-right decimal dot and bloom augmentation; no factory/video images used for training",
+  "seed": 20261126,
+  "epochs": 15,
+  "samples_per_epoch": 16500,
+  "scope": "Leading 1/2/7 and decimal-adjacent 2/7 verification, requiring seven-segment 7 geometry (top bar, right stem, no 2 e/g strokes) and two OCR views agreeing on remaining digits",
   "training_code": "tools/train_led_glyph.py",
-  "training_code_sha256": "d48fca77edbb9e38d41212aa2fb839cf9a6c57e72f53eb64c5a7b4cedc2bd2d8",
-  "validation_note": "Video crops were used as development regressions, not training inputs; no claim of factory-wide accuracy."
+  "training_code_sha256": "615e6ec690884108451444ac8336d4e2160e99fa67537371dec69b4460ca0284",
+  "validation_note": "Factory photos and video crops were used as independent evaluations/regressions, not training inputs; no claim of factory-wide accuracy."
 }

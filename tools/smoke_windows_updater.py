@@ -106,6 +106,7 @@ def main():
                 ('rc90', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc90'),
                 ('rc91', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc91'),
                 ('rc92', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc92'),
+                ('rc93', project / 'packaging/CAP-NHAT-BAN-MOI.cmd', '0.2.0-rc93'),
                 ("current", project / "packaging/CAP-NHAT-BAN-MOI.cmd", "0.2.0-rc79")):
             for bad_hash in (False, True):
                 root = base / f"{label}-{bad_hash}"

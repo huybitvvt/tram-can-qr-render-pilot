@@ -1,15 +1,16 @@
-# Trạm Cân QR — OCR local rc93
+# Trạm Cân QR — OCR local rc94
 
-Bản Windows **0.2.0-rc93** xử lý trường hợp chữ số đầu **7 bị đọc thành 1**
-bằng **RapidOCR + PP-OCRv6 Small**, model LED nhẹ và kiểm tra nét ảnh.
-Giữ các chức năng rc92; nhận diện live liên tục, chạy offline trên CPU.
-Phạm vi kiểm chứng dựa trên video quay màn hình; vẫn cần đối chiếu cân thật
-khi đưa vào xưởng. Không gọi Gemini, Codex hay Antigravity để đọc cân.
+Bản Windows **0.2.0-rc94** nâng cấp bộ hậu kiểm chữ số LED lên `led-glyph-v2`,
+xử lý cả trường hợp chữ số **7 bị đọc thành 2** (do chấm thập phân `.` dính chân
+số `7` khi lóa đỏ, kể cả dạng `7.xx` và `17.xx`) lẫn chữ số đầu **7 bị đọc thành 1**
+bằng **RapidOCR + PP-OCRv6 Small**, model LED nhẹ và khóa hình học 7 đoạn.
+Giữ các chức năng rc93; nhận diện live liên tục, chạy offline trên CPU.
+Vẫn cần đối chiếu cân thật khi đưa vào xưởng. Không gọi Gemini, Codex hay Antigravity để đọc cân.
 
 - [Tải bộ cài TramCanQR-Setup.exe](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/TramCanQR-Setup.exe)
 - [Tải file cập nhật CAP-NHAT-BAN-MOI.cmd](https://github.com/huybitvvt/tram-can-qr-render-pilot/releases/latest/download/CAP-NHAT-BAN-MOI.cmd)
 - [Hướng dẫn máy khách](packaging/HUONG-DAN-KHACH-HANG.md)
-- [Ghi chú rc93 và giới hạn kiểm chứng](docs/release-notes-0.2.0-rc93.md)
+- [Ghi chú rc94 và giới hạn kiểm chứng](docs/release-notes-0.2.0-rc94.md)
 
 Camera đọc liên tục và hiện số; **Space lấy ngay số ổn định vào ô cân được chọn**,
 giữ ảnh đúng khung hình đã đọc. Không chờ chụp rồi gọi OCR lại.
@@ -31,7 +32,8 @@ Lần đầu rc82 sao lưu DB hiện tại bằng SQLite backup (gồm dữ li�
 và metadata phiên đang chờ vào `backups/before-rapidocr-rc82-*`. Không khôi phục
 DB cũ lên dữ liệu mới. Bộ cài giữ AppId, tên EXE, đường dẫn cài và kênh cập nhật cũ.
 
-Model OCR và ngưỡng live giữ như rc92; rc93 thêm verifier cho chữ số đầu 1/7.
+Model OCR và ngưỡng live giữ như rc93; rc94 nâng cấp verifier LED lên `led-glyph-v2`
+cho chữ số đầu `1/2/7` và chữ số hàng đơn vị sát dấu thập phân `2/7` (`17.xx`/`12.xx`).
 Vẫn phải đối chiếu số cân trước khi lưu. Ba lần đọc cùng số liên tiếp chỉ xác
 nhận tính ổn định theo thời gian, không bảo đảm model không nhầm chữ số.
 Chọn vùng LED đúng giúp giảm sai vùng.

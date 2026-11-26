@@ -1,9 +1,12 @@
-# Trạm Cân QR — rc93 xử lý 7 đọc thành 1
+# Trạm Cân QR — rc94 xử lý 7 đọc thành 2 và 7 đọc thành 1
 
-rc93 bổ sung bộ phân loại chữ số LED nhẹ, chạy offline cùng PP-OCRv6 Small.
-Khi hai lượt OCR nhầm chữ số đầu 7 thành 1, ứng dụng kiểm tra nét ngang trên,
-đủ ô chữ số và model LED trước khi lấy kết quả. Ảnh còn mơ hồ bị từ chối.
-Chưa có luồng camera gốc để nghiệm thu tại xưởng; đối chiếu cân trước khi lưu.
+rc94 nâng cấp bộ phân loại chữ số LED nhẹ lên `led-glyph-v2`, chạy offline trên
+CPU cùng PP-OCRv6 Small. Khi OCR đọc nhầm chữ số 7 (có dấu chấm thập phân dính
+halo đỏ) thành 2 hoặc thành 1 ở vị trí đầu (`7.xx`) hoặc hàng đơn vị sát dấu chấm
+(`17.xx`), ứng dụng kiểm tra song song hình học 7 đoạn (nét ngang trên, trống
+dưới-trái, trống giữa-trái, có chân dưới-phải), đủ ô chữ số và đồng thuận nhiều
+ngưỡng của model LED trước khi nhận kết quả. Ảnh còn mơ hồ bị từ chối an toàn.
+Luôn đối chiếu số cân thật trước khi lưu.
 
 Mở camera là ứng dụng tự đọc **live liên tục**. Khi hiện **ỔN ĐỊNH**, nhấn
 **Space** để lấy đúng số và ảnh đã đọc vào ô cân đang chọn. Không cần bấm nút
@@ -11,7 +14,7 @@ Mở camera là ứng dụng tự đọc **live liên tục**. Khi hiện **ỔN
 
 Đóng ứng dụng, bấm **Cập nhật Trạm Cân QR** hoặc tải bộ cài từ GitHub Release
 và cài đè. Mở lại ứng dụng và nhấn **Ctrl+F5** trên trang đang mở. Phiên bản
-phải là **0.2.0-rc93**; dữ liệu, ảnh, cấu hình và mã trạm được giữ nguyên.
+phải là **0.2.0-rc94**; dữ liệu, ảnh, cấu hình và mã trạm được giữ nguyên.
 Nếu nhận sai hoặc không ra số, bấm **Xuất ảnh + OCR** rồi gửi tệp JSON cho
 người hỗ trợ. Tệp chứa đúng ảnh camera và kết quả, không tự ghi phiếu cân.
 
